@@ -1,0 +1,13 @@
+{
+    "app_name": "R-Browser",
+    "homepage": "https://google.com",
+    "default_search_engine": "https://www.google.com/search?q=",
+    "window_width": 1920,
+    "window_height": 1080,
+    "dark_mode": false,
+    "save_history": true,
+    "save_cookies": true,
+    "private_mode": false,
+    "download_folder": "./downloads",
+    "show_dev_tools": false
+}
