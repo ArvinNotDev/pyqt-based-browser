@@ -11,26 +11,22 @@ class NavigationBar(QToolBar):
         self.setMovable(False)
         self.setIconSize(QSize(24, 24))
 
-        # === Toolbar buttons using emojis ===
         self.back_btn = QAction("←", self)
         self.forward_btn = QAction("→", self)
         self.reload_btn = QAction("⟳", self)
         self.home_btn = QAction("🏠", self)
         self.settings_btn = QAction("⚙️", self)
 
-        # Add buttons to toolbar
         for btn in [self.back_btn, self.forward_btn, self.reload_btn, self.home_btn, self.settings_btn]:
             self.addAction(btn)
 
         self.addSeparator()
 
-        # === URL bar ===
         self.url_bar = QLineEdit()
         self.url_bar.setPlaceholderText("Enter URL or search...")
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(self.url_bar)
 
-        # === Connections ===
         self.url_bar.returnPressed.connect(self._on_url_entered)
         self.home_btn.triggered.connect(self.home_clicked.emit)
 
