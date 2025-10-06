@@ -1,11 +1,12 @@
 from PySide6.QtWidgets import QMainWindow
 from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from PySide6.QtCore import QUrl
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
 from .themes import light_theme, dark_theme
-
+import os
 
 class BrowserWindow(QMainWindow):
     def __init__(self):
@@ -13,12 +14,21 @@ class BrowserWindow(QMainWindow):
         self.settings = Settings()
         self.settings.load(self.settings.profile.machine_id)
 
-        self.setWindowTitle("R-Browser")
-        self.resize(self.settings.window_width, self.settings.window_height)
+        os.makedirs("browser_cache", exist_ok=True)
+        os.makedirs("browser_storage", exist_ok=True)
+
+        self.profile = QWebEngineProfile(self.settings.profile.machine_id, self)
+        self.profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
+        self.profile.setCachePath("browser_cache")
+        self.profile.setPersistentStoragePath("browser_storage")
 
         self.browser = QWebEngineView()
+        page = QWebEnginePage(self.profile, self.browser)
+        self.browser.setPage(page)
         self.setCentralWidget(self.browser)
 
+        self.setWindowTitle("R-Browser")
+        self.resize(self.settings.window_width, self.settings.window_height)
         self.navbar = NavigationBar()
         self.addToolBar(self.navbar)
 
@@ -33,9 +43,19 @@ class BrowserWindow(QMainWindow):
 
         self.navigate(self.settings.homepage)
 
-    def navigate(self, url):
-        if not url.startswith(("http://", "https://")):
-            url = "https://" + url
+    def navigate(self, text):
+        text = text.strip()
+        if not text:
+            return
+
+        if " " in text or not "." in text:
+            url = self.settings.default_search_engine + text.replace(" ", "+")
+        else:
+            if not text.startswith(("http://", "https://")):
+                url = "https://" + text
+            else:
+                url = text
+
         self.browser.setUrl(QUrl(url))
 
     def open_settings(self):

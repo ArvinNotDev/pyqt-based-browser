@@ -4,7 +4,7 @@
         "default_search_engine": "https://www.google.com/search?q=",
         "window_width": 1280,
         "window_height": 720,
-        "dark_mode": true,
+        "dark_mode": false,
         "save_history": true,
         "save_cookies": true,
         "private_mode": false,
