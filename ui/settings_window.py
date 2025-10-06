@@ -54,7 +54,7 @@ class SettingsWindow(QDialog):
         self.settings.save_history = self.save_history_checkbox.isChecked()
         self.settings.save_cookies = self.save_cookies_checkbox.isChecked()
 
-        self.settings.save()
+        self.settings.save(self.settings.profile.machine_id)
         self.accept()
 
         if self.parent():

@@ -11,7 +11,7 @@ class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.settings = Settings()
-        self.settings.load()
+        self.settings.load(self.settings.profile.machine_id)
 
         self.setWindowTitle("R-Browser")
         self.resize(self.settings.window_width, self.settings.window_height)
