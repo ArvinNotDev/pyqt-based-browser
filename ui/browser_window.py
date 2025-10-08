@@ -14,17 +14,31 @@ class BrowserWindow(QMainWindow):
         self.settings = Settings()
         self.settings.load(self.settings.profile.machine_id)
 
-        os.makedirs("browser_cache", exist_ok=True)
-        os.makedirs("browser_storage", exist_ok=True)
+        storage_path = os.path.join(os.getcwd(), "profile_data")
+        os.makedirs(storage_path, exist_ok=True)
+
 
         self.profile = QWebEngineProfile(self.settings.profile.machine_id, self)
         self.profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
-        self.profile.setCachePath("browser_cache")
-        self.profile.setPersistentStoragePath("browser_storage")
+        self.profile.setCachePath(os.path.join(storage_path, "cache"))
+        self.profile.setPersistentStoragePath(os.path.join(storage_path, "storage"))
+        self.profile.setDownloadPath(os.path.join(storage_path, "downloads"))
 
+        # === Set default browser-like behavior ===
+        settings = self.profile.settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.PluginsEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.FullScreenSupportEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.AutoLoadImages, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.FocusOnNavigationEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.PlaybackRequiresUserGesture, False)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
+
+        self.page = QWebEnginePage(self.profile, self)
         self.browser = QWebEngineView()
-        page = QWebEnginePage(self.profile, self.browser)
-        self.browser.setPage(page)
+        self.browser.setPage(self.page)
 
         # --- Navigation bar ---
         self.navbar = NavigationBar()
@@ -98,7 +112,5 @@ class BrowserWindow(QMainWindow):
     def apply_theme(self):
         if self.settings.dark_mode:
             self.setStyleSheet(dark_theme)
-            self.profile.settings().setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
         else:
             self.setStyleSheet(light_theme)
-            self.profile.settings().setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
