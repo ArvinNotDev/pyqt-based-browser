@@ -1,6 +1,6 @@
-from PySide6.QtWidgets import QMainWindow
+from PySide6.QtWidgets import QMainWindow, QProgressBar, QVBoxLayout, QWidget
+from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings, QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEnginePage
 from PySide6.QtCore import QUrl
 from .settings import Settings
 from .navigation_bar import NavigationBar
@@ -25,15 +25,34 @@ class BrowserWindow(QMainWindow):
         self.browser = QWebEngineView()
         page = QWebEnginePage(self.profile, self.browser)
         self.browser.setPage(page)
-        self.setCentralWidget(self.browser)
 
+        # --- Navigation bar ---
+        self.navbar = NavigationBar()
+
+        # --- Progress bar under navbar ---
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximumHeight(5)  # thin bar
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("QProgressBar {border: 0px;} QProgressBar::chunk {background-color: #29a3ef;}")
+
+        # --- Layout for toolbar + progress bar ---
+        container = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.navbar)
+        layout.addWidget(self.progress_bar)
+        container.setLayout(layout)
+        self.setMenuWidget(container)  # top widget
+
+        self.setCentralWidget(self.browser)
         self.setWindowTitle("R-Browser")
         self.resize(self.settings.window_width, self.settings.window_height)
-        self.navbar = NavigationBar()
-        self.addToolBar(self.navbar)
 
         self.apply_theme()
 
+        # --- Connect navbar ---
         self.navbar.url_submitted.connect(self.navigate)
         self.navbar.home_clicked.connect(lambda: self.navigate(self.settings.homepage))
         self.navbar.back_btn.triggered.connect(self.browser.back)
@@ -41,22 +60,34 @@ class BrowserWindow(QMainWindow):
         self.navbar.reload_btn.triggered.connect(self.browser.reload)
         self.navbar.settings_btn.triggered.connect(self.open_settings)
 
+        # --- Connect loading signals to progress bar ---
+        self.browser.loadStarted.connect(self._on_load_started)
+        self.browser.loadProgress.connect(self._on_load_progress)
+        self.browser.loadFinished.connect(self._on_load_finished)
+
         self.navigate(self.settings.homepage)
 
-    def navigate(self, text):
-        text = text.strip()
-        if not text:
+    def _on_load_started(self):
+        self.progress_bar.setValue(0)
+        self.progress_bar.show()
+
+    def _on_load_progress(self, progress: int):
+        self.progress_bar.setValue(progress)
+
+    def _on_load_finished(self, ok: bool):
+        self.progress_bar.setValue(100)
+        self.progress_bar.hide()
+
+    def navigate(self, url):
+        url = url.strip()
+        if not url:
             return
 
-        if " " in text or not "." in text:
-            url = self.settings.default_search_engine + text.replace(" ", "+")
-        else:
-            if not text.startswith(("http://", "https://")):
-                url = "https://" + text
-            else:
-                url = text
+        if not url.startswith(("http://", "https://")):
+            url = "https://" + url
 
         self.browser.setUrl(QUrl(url))
+
 
     def open_settings(self):
         dialog = SettingsWindow(self.settings, self)
@@ -65,8 +96,9 @@ class BrowserWindow(QMainWindow):
             self.navigate(self.settings.homepage)
 
     def apply_theme(self):
-        """Apply full stylesheet from themes.py"""
         if self.settings.dark_mode:
             self.setStyleSheet(dark_theme)
+            self.profile.settings().setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, True)
         else:
             self.setStyleSheet(light_theme)
+            self.profile.settings().setAttribute(QWebEngineSettings.WebAttribute.ForceDarkMode, False)
