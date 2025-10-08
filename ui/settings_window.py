@@ -5,13 +5,14 @@ from PySide6.QtWidgets import (
 from .settings import Settings
 
 class SettingsWindow(QDialog):
-    def __init__(self, settings: Settings, parent=None):
+    def __init__(self, settings: Settings, selected_profile: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(1280, 720)
+        self.resize(600, 400)
 
         self.settings = settings
-
+        self.selected_profile = selected_profile
+        
         main_layout = QVBoxLayout()
         form_layout = QFormLayout()
 
@@ -37,7 +38,6 @@ class SettingsWindow(QDialog):
 
         self.save_btn = QPushButton("Save")
         self.cancel_btn = QPushButton("Cancel")
-
         self.save_btn.clicked.connect(self.save_settings)
         self.cancel_btn.clicked.connect(self.close)
 
@@ -47,15 +47,15 @@ class SettingsWindow(QDialog):
         self.setLayout(main_layout)
 
     def save_settings(self):
-        """Apply changes and save to JSON"""
+        """Apply changes and save settings for current profile"""
         self.settings.homepage = self.homepage_input.text().strip()
         self.settings.default_search_engine = self.search_input.text().strip()
         self.settings.dark_mode = self.dark_mode_checkbox.isChecked()
         self.settings.save_history = self.save_history_checkbox.isChecked()
         self.settings.save_cookies = self.save_cookies_checkbox.isChecked()
 
-        self.settings.save(self.settings.profile.machine_id)
-        self.accept()
+        self.settings.save(self.selected_profile)
 
+        self.accept()
         if self.parent():
             self.parent().apply_theme()
