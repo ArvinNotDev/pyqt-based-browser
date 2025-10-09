@@ -20,9 +20,9 @@ class BrowserWindow(QMainWindow):
         self.storage_path = os.path.join(os.getcwd(), "profile_data")
         os.makedirs(self.storage_path, exist_ok=True)
 
-        self.change_profile(self.selected_profile)
-
         self.navbar = NavigationBar(self.settings.profiles_list)
+
+        self.change_profile(self.selected_profile)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumHeight(5)
@@ -88,7 +88,8 @@ class BrowserWindow(QMainWindow):
         self.page = QWebEnginePage(self.profile, self)
         self.browser = QWebEngineView()
         self.browser.setPage(self.page)
-
+        self.navbar.clear_url_bar()
+        
     def _on_load_started(self):
         self.progress_bar.setValue(0)
         self.progress_bar.show()

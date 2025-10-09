@@ -74,3 +74,6 @@ class NavigationBar(QToolBar):
         url = self.url_bar.text().strip()
         if url:
             self.url_submitted.emit(url)
+    
+    def clear_url_bar(self):
+        self.url_bar.clear()
