@@ -12,6 +12,7 @@ import os
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+
         self.settings = Settings()
         self.selected_profile = "Guest"
         self.settings.load_profile_settings()
@@ -21,7 +22,10 @@ class BrowserWindow(QMainWindow):
         os.makedirs(self.storage_path, exist_ok=True)
 
         self.navbar = NavigationBar(self.settings.profiles_list)
+        self.navbar.profile_selected.connect(self.on_profile_selected)
 
+        self.browser = QWebEngineView()
+        self.page = None
         self.change_profile(self.selected_profile)
 
         self.progress_bar = QProgressBar()
@@ -53,7 +57,6 @@ class BrowserWindow(QMainWindow):
         self.navbar.forward_btn.triggered.connect(self.browser.forward)
         self.navbar.reload_btn.triggered.connect(self.browser.reload)
         self.navbar.settings_btn.triggered.connect(self.open_settings)
-        self.navbar.profile_selected.connect(self.on_profile_selected)
 
         self.browser.loadStarted.connect(self._on_load_started)
         self.browser.loadProgress.connect(self._on_load_progress)
@@ -62,7 +65,6 @@ class BrowserWindow(QMainWindow):
         self.navigate(self.settings.homepage)
 
     def change_profile(self, profile_name: str):
-        """Create or switch to a new QWebEngineProfile."""
         self.selected_profile = profile_name
 
         profile_dir = os.path.join(self.storage_path, profile_name)
@@ -86,10 +88,22 @@ class BrowserWindow(QMainWindow):
         s.setAttribute(QWebEngineSettings.WebAttribute.ScrollAnimatorEnabled, True)
 
         self.page = QWebEnginePage(self.profile, self)
-        self.browser = QWebEngineView()
         self.browser.setPage(self.page)
+
+        self.navbar.change_profile_orders(self.selected_profile)
         self.navbar.clear_url_bar()
-        
+
+    def on_profile_selected(self, profile_name: str):
+        self.settings.save(self.selected_profile)
+
+        self.selected_profile = profile_name
+        self.settings.load(profile_name)
+
+        self.change_profile(profile_name)
+
+        self.apply_theme()
+        self.navigate(self.settings.homepage)
+
     def _on_load_started(self):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
@@ -119,21 +133,3 @@ class BrowserWindow(QMainWindow):
             self.setStyleSheet(dark_theme)
         else:
             self.setStyleSheet(light_theme)
-
-    def on_profile_selected(self, profile_name):
-        self.settings.save(self.selected_profile)
-
-        self.selected_profile = profile_name
-
-        self.settings.load(profile_name)
-
-        self.change_profile(profile_name)
-
-        self.setCentralWidget(self.browser)
-
-        self.browser.loadStarted.connect(self._on_load_started)
-        self.browser.loadProgress.connect(self._on_load_progress)
-        self.browser.loadFinished.connect(self._on_load_finished)
-
-        self.apply_theme()
-        self.navigate(self.settings.homepage)

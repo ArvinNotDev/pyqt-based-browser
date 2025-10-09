@@ -51,10 +51,11 @@ class NavigationBar(QToolBar):
         if action_widget:
             self.profile_menu.exec(action_widget.mapToGlobal(action_widget.rect().bottomLeft()))
 
-    def _populate_profile_menu(self):
+    def _populate_profile_menu(self, selected_profile=None):
         self.profile_menu.clear()
         for profile in self.profiles:
-            act = QAction(profile, self)
+            display_name = f"*{profile}" if profile == selected_profile else profile
+            act = QAction(display_name, self)
             act.triggered.connect(lambda checked, p=profile: self.profile_selected.emit(p))
             self.profile_menu.addAction(act)
 
@@ -62,6 +63,7 @@ class NavigationBar(QToolBar):
         add_profile = QAction("➕ Add New Profile", self)
         add_profile.triggered.connect(self._add_new_profile)
         self.profile_menu.addAction(add_profile)
+
 
     def _add_new_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
@@ -77,3 +79,12 @@ class NavigationBar(QToolBar):
     
     def clear_url_bar(self):
         self.url_bar.clear()
+
+    def change_profile_orders(self, selected_profile: str):
+        if selected_profile not in self.profiles:
+            return
+
+        new_profiles_order = [selected_profile] + [p for p in self.profiles if p != selected_profile]
+        self.profiles = new_profiles_order
+        
+        self._populate_profile_menu(selected_profile)
