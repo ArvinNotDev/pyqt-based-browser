@@ -166,14 +166,30 @@ class HistoryWindow(QDialog):
 
         for link in list(self.history.history.keys()):
             visits = self.history.history[link]
-            self.history.history[link] = [
-                v for v in visits if text not in v["date"] and text not in v["time"]
-            ]
-            if not self.history.history[link]:
+
+            if isinstance(visits, dict):
+                visits = [visits]
+            elif isinstance(visits, str):
+                continue
+            elif not isinstance(visits, list):
+                continue
+
+            cleaned = []
+            for v in visits:
+                if not isinstance(v, dict):
+                    continue
+                if text in v.get("date", "") or text in v.get("time", ""):
+                    continue
+                cleaned.append(v)
+
+            if cleaned:
+                self.history.history[link] = cleaned
+            else:
                 del self.history.history[link]
 
         self.history.save()
         self.load_history()
+
 
     def clear_all(self):
         """Delete all history entries."""

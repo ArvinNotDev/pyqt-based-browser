@@ -49,7 +49,15 @@ class History:
         if os.path.exists(self.file_path):
             try:
                 with open(self.file_path, "r", encoding="utf-8") as f:
-                    self.history = json.load(f)
+                    data = json.load(f)
+
+                for link, visits in data.items():
+                    if isinstance(visits, dict):
+                        data[link] = [visits]
+                    elif isinstance(visits, str):
+                        data.pop(link, None)
+                self.history = data
+
             except json.JSONDecodeError:
                 self.history = {}
         else:
