@@ -13,6 +13,9 @@ QLineEdit {
     border: 1px solid #ccc;
     padding: 6px 10px;
 }
+QLineEdit::placeholder {
+    color: #6b6b6b;
+}
 QPushButton {
     background-color: #f2f2f2;
     color: black;
@@ -35,6 +38,9 @@ QLineEdit {
     border-radius: 8px;
     border: 1px solid #555;
     padding: 6px 10px;
+}
+QLineEdit::placeholder {
+    color: #9a9a9a;
 }
 QPushButton {
     background-color: #2c2c2c;
