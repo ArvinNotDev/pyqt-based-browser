@@ -33,6 +33,7 @@ class BrowserWindow(QMainWindow):
 
         self.navbar = NavigationBar(self.settings.profiles_list, settings=self.settings)
         self.navbar.profile_selected.connect(self.on_profile_selected)
+        self.navbar.new_tab_requested.connect(lambda: self.new_tab(self.settings.homepage))
 
         self.change_profile(self.selected_profile)
 
@@ -72,7 +73,6 @@ class BrowserWindow(QMainWindow):
 
     def new_tab(self, url):
         """Open a new tab with the current profile applied."""
-        print("new tab from browser_window")
         if isinstance(url, QUrl):
             url_q = url
         else:
