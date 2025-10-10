@@ -5,9 +5,10 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 from .settings import Settings
 from .history_window import HistoryWindow
+from managers.history_manager import History
 
 class SettingsWindow(QDialog):
-    def __init__(self, settings: Settings, selected_profile: str, parent=None):
+    def __init__(self, settings: Settings, selected_profile: str, history: History, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.resize(600, 450)
@@ -15,6 +16,7 @@ class SettingsWindow(QDialog):
         self.settings = settings
         self.selected_profile = selected_profile
 
+        self.history = history
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
@@ -83,7 +85,7 @@ class SettingsWindow(QDialog):
         self.setStyleSheet("QLineEdit {padding: 6px; border-radius: 5px; border: 1px solid #ccc;}")
 
     def open_history(self):
-        dialog = HistoryWindow(self.selected_profile, self)
+        dialog = HistoryWindow(self.selected_profile, History(self.selected_profile), self)
         if dialog.exec():
             pass
 

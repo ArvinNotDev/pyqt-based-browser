@@ -7,6 +7,7 @@ from PySide6.QtCore import QUrl, QTimer
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
+from managers.history_manager import History
 from .themes import light_theme, dark_theme
 import os
 
@@ -17,6 +18,7 @@ class BrowserWindow(QMainWindow):
 
         self.settings = Settings()
         self.selected_profile = "Guest"
+        self.history = History(self.selected_profile)
         self.settings.load_profile_settings()
         if self.settings.profiles_list:
             if self.selected_profile not in self.settings.profiles_list:
@@ -133,6 +135,7 @@ class BrowserWindow(QMainWindow):
     def change_profile(self, profile_name: str):
         """Create or switch to a QWebEngineProfile and apply it to all open tabs."""
         self.selected_profile = profile_name
+        self.history = History(self.selected_profile)
 
         profile_dir = os.path.join(self.storage_path, profile_name)
         os.makedirs(profile_dir, exist_ok=True)
@@ -231,6 +234,7 @@ class BrowserWindow(QMainWindow):
 
         view = self.current_view()
         if view:
+            self.history.add(url)
             view.setUrl(QUrl(url))
             self.update_url_bar(QUrl(url))
 
