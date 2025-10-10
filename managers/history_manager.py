@@ -12,24 +12,33 @@ class History:
         self.load()
 
     def add(self, link: str):
+        """Add a new visit record for a link."""
         current_time = localtime()
-        self.history[link] = {
+        entry = {
             "date": f"{current_time.tm_year}/{current_time.tm_mon:02d}/{current_time.tm_mday:02d}",
             "time": f"{current_time.tm_hour:02d}:{current_time.tm_min:02d}:{current_time.tm_sec:02d}",
         }
+
+        if link not in self.history:
+            self.history[link] = []
+
+        self.history[link].append(entry)
         self.save()
 
     def delete(self, link=None, date=None, time=None):
+        """Delete by link or filter visits by date/time."""
         if link:
             self.history.pop(link, None)
-        elif date:
-            self.history = {
-                k: v for k, v in self.history.items() if v.get("date") != date
-            }
-        elif time:
-            self.history = {
-                k: v for k, v in self.history.items() if v.get("time") != time
-            }
+        elif date or time:
+            for link_key, visits in list(self.history.items()):
+                filtered = [
+                    v for v in visits
+                    if (date and v.get("date") != date) or (time and v.get("time") != time)
+                ]
+                if filtered:
+                    self.history[link_key] = filtered
+                else:
+                    self.history.pop(link_key, None)
         self.save()
 
     def save(self):
@@ -47,5 +56,6 @@ class History:
             self.history = {}
 
     def clear(self):
+        """Clear all history records."""
         self.history.clear()
         self.save()

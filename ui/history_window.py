@@ -32,7 +32,24 @@ class HistoryWindow(QDialog):
             self.list_widget.addItem("No history found.")
             return
 
-        for link, info in self.history.history.items():
-            date = info.get("date", "Unknown date")
-            time = info.get("time", "Unknown time")
-            self.list_widget.addItem(f"{date} {time}  -  {link}")
+        for link, visits in self.history.history.items():
+            self.list_widget.addItem(f"🔗 {link}")
+
+            if isinstance(visits, dict):
+                date = visits.get("date", "Unknown date")
+                time = visits.get("time", "Unknown time")
+                self.list_widget.addItem(f"   • {date} {time}")
+
+            elif isinstance(visits, list):
+                for visit in visits:
+                    if isinstance(visit, dict):
+                        date = visit.get("date", "Unknown date")
+                        time = visit.get("time", "Unknown time")
+                        self.list_widget.addItem(f"   • {date} {time}")
+                    else:
+                        self.list_widget.addItem(f"   • {visit}")
+
+            else:
+                self.list_widget.addItem(f"   • {visits}")
+
+            self.list_widget.addItem("")
