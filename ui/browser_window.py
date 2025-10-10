@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWebEngineCore import QWebEngineProfile, QWebEngineSettings, QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtCore import QUrl
+from PySide6.QtCore import QUrl, QTimer
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
@@ -85,9 +85,10 @@ class BrowserWindow(QMainWindow):
         page = QWebEnginePage(self.profile, view)
         view.setPage(page)
 
-        view.loadStarted.connect(self._on_load_started)
-        view.loadProgress.connect(self._on_load_progress)
-        view.loadFinished.connect(self._on_load_finished)
+        view.loadStarted.connect(lambda v=view: self._on_load_started(v))
+        view.loadProgress.connect(lambda p, v=view: self._on_load_progress(p, v))
+        view.loadFinished.connect(lambda ok, v=view: self._on_load_finished(ok, v))
+
 
         view.titleChanged.connect(lambda title, v=view: self.tabs.setTabText(self.tabs.indexOf(v), title[:30]))
 
@@ -178,16 +179,45 @@ class BrowserWindow(QMainWindow):
         self.apply_theme()
         self.navigate(self.settings.homepage)
 
-    def _on_load_started(self):
-        self.progress_bar.setValue(0)
+    def _on_load_started(self, view):
+        if view is not self.current_view():
+            return
+        self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
+        try:
+            self.statusBar().showMessage("Loading...", 0)
+        except Exception:
+            pass
 
-    def _on_load_progress(self, progress: int):
+    def _on_load_progress(self, progress: int, view):
+        if view is not self.current_view():
+            return
+        if self.progress_bar.minimum() == 0 and self.progress_bar.maximum() == 0:
+            self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(progress)
+        if not self.progress_bar.isVisible():
+            self.progress_bar.show()
+        try:
+            self.statusBar().showMessage(f"Loading... {progress}%")
+        except Exception:
+            pass
 
-    def _on_load_finished(self, ok: bool):
+    def _on_load_finished(self, ok: bool, view):
+        if view is not self.current_view():
+            return
+        self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(100)
-        self.progress_bar.hide()
+        QTimer.singleShot(300, self.progress_bar.hide)
+        if ok:
+            try:
+                self.statusBar().showMessage("Loaded", 1500)
+            except Exception:
+                pass
+        else:
+            try:
+                self.statusBar().showMessage("Load failed", 3000)
+            except Exception:
+                pass
 
     def navigate(self, url: str):
         url = url.strip()
