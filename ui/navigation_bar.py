@@ -20,7 +20,7 @@ class NavigationBar(QToolBar):
         super().__init__("Navigation", parent)
         self.setMovable(False)
         self.setIconSize(QSize(20, 20))
-        self.setFixedHeight(60)
+        self.setFixedHeight(40)
         self.tabs_list = []
         self.current_tab_index = 0
         self.settings = settings if settings is not None else Settings()
@@ -70,7 +70,8 @@ class NavigationBar(QToolBar):
         }
         """)
         tab_layout.addWidget(self.tab_bar)
-        self.new_tab_btn = QPushButton("+")
+        self.new_tab_btn = QPushButton()
+        self.new_tab_btn.setIcon(QIcon(f"{icon_path}new_tab.png"))
         self.new_tab_btn.setFixedSize(30, 30)
         self.new_tab_btn.setObjectName("newTabButton")
         self.new_tab_btn.setStyleSheet("""
@@ -97,6 +98,7 @@ class NavigationBar(QToolBar):
         self.url_bar.setFont(QFont("Segoe UI", 11))
         self.url_bar.setMinimumHeight(36)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.url_bar.setObjectName("search_bar")
         self.addWidget(self.url_bar)
         self.url_bar.returnPressed.connect(self._on_url_entered)
         spacer = QWidget()

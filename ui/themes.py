@@ -16,6 +16,18 @@ QLineEdit {
 QLineEdit::placeholder {
     color: #6b6b6b;
 }
+
+QLineEdit#search_bar {
+    background-color: white;
+    color: black;
+    border-radius: 20px;
+    border: 1px solid #ccc;
+    padding: 6px 10px;
+}
+QLineEdit::placeholder#search_bar {
+    color: #6b6b6b;
+}
+
 QPushButton {
     background-color: #f2f2f2;
     color: black;
@@ -48,4 +60,16 @@ QPushButton {
     border-radius: 5px;
     padding: 5px;
 }
+
+QLineEdit#search_bar {
+    background-color: #2c2c2c;
+    color: white;
+    border-radius: 18px;
+    border: 1px solid #555;
+    padding: 6px 10px;
+}
+QLineEdit::placeholder#search_bar {
+    color: #9a9a9a;
+}
+
 """
