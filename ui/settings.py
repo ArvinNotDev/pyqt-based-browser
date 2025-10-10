@@ -1,7 +1,7 @@
 from dataclasses import dataclass, asdict, field
 import json
 import os
-from .profile_manager import Profile
+from managers.profile_manager import Profile
 import hashlib
 
 @dataclass
