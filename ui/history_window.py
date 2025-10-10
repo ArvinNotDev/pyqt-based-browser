@@ -3,7 +3,6 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 import os
-import sqlite3
 from datetime import datetime, timedelta
 
 class HistoryWindow(QDialog):

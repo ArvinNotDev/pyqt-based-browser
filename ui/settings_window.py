@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QPushButton
 )
 from .settings import Settings
+from .history_window import HistoryWindow
 
 class SettingsWindow(QDialog):
     def __init__(self, settings: Settings, selected_profile: str, parent=None):
@@ -36,15 +37,23 @@ class SettingsWindow(QDialog):
 
         main_layout.addLayout(form_layout)
 
+        self.history_btn = QPushButton("History")
         self.save_btn = QPushButton("Save")
         self.cancel_btn = QPushButton("Cancel")
+        self.history_btn.clicked.connect(self.open_history)
         self.save_btn.clicked.connect(self.save_settings)
         self.cancel_btn.clicked.connect(self.close)
-
+        main_layout.addWidget(self.history_btn)
         main_layout.addWidget(self.save_btn)
         main_layout.addWidget(self.cancel_btn)
 
         self.setLayout(main_layout)
+
+    def open_history(self):
+        """opening history page"""
+        dialog = HistoryWindow(self.selected_profile, self)
+        if dialog.exec():
+            pass
 
     def save_settings(self):
         """Apply changes and save settings for current profile"""
