@@ -1,11 +1,17 @@
-from PySide6.QtGui import QAction, QIcon, QFont
+from PySide6.QtGui import QAction, QIcon, QFont, QPixmap
 from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtWidgets import (
     QToolBar, QLineEdit, QSizePolicy, QMenu, QInputDialog, QWidgetAction,
-    QPushButton, QWidget, QHBoxLayout, QTabBar
+    QPushButton, QWidget, QHBoxLayout, QTabBar, QLabel, QVBoxLayout, QDialog, QFileDialog
 )
 from .settings import Settings
 from .themes import light_theme, dark_theme
+
+import os
+from .profile_dialog import CustomizeProfile
+
+        
+
 
 class NavigationBar(QToolBar):
     url_submitted = Signal(str)
@@ -20,7 +26,7 @@ class NavigationBar(QToolBar):
         super().__init__("Navigation", parent)
         self.setMovable(False)
         self.setIconSize(QSize(20, 20))
-        self.setFixedHeight(60)
+        self.setFixedHeight(40)
         self.tabs_list = []
         self.current_tab_index = 0
         self.settings = settings if settings is not None else Settings()
@@ -70,7 +76,8 @@ class NavigationBar(QToolBar):
         }
         """)
         tab_layout.addWidget(self.tab_bar)
-        self.new_tab_btn = QPushButton("+")
+        self.new_tab_btn = QPushButton()
+        self.new_tab_btn.setIcon(QIcon(f"{icon_path}new_tab.png"))
         self.new_tab_btn.setFixedSize(30, 30)
         self.new_tab_btn.setObjectName("newTabButton")
         self.new_tab_btn.setStyleSheet("""
@@ -97,6 +104,7 @@ class NavigationBar(QToolBar):
         self.url_bar.setFont(QFont("Segoe UI", 11))
         self.url_bar.setMinimumHeight(36)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.url_bar.setObjectName("search_bar")
         self.addWidget(self.url_bar)
         self.url_bar.returnPressed.connect(self._on_url_entered)
         spacer = QWidget()
@@ -143,17 +151,36 @@ class NavigationBar(QToolBar):
             self.profile_menu.exec(action_widget.mapToGlobal(action_widget.rect().bottomLeft()))
 
     def _populate_profile_menu(self, selected_profile=None):
+        print(selected_profile)
         self.profile_menu.clear()
+        self.profile = selected_profile
+        path = f"profile_data/{self.profile}/profile/image.png"
+        print(path)
+        if os.path.exists(path):
+            self.profile_btn.setIcon(QIcon(path))
+        else:
+            self.profile_btn.setIcon(QIcon("assets/icons/profile.png"))
+        
         for profile in self.profiles:
             display_name = f"*{profile}" if profile == selected_profile else profile
             act = QAction(display_name, self)
             act.triggered.connect(lambda checked, p=profile: self.profile_selected.emit(p))
             self.profile_menu.addAction(act)
         self.profile_menu.addSeparator()
+        customize_profile = QAction("✏️ Customize Profile", self)
+        customize_profile.triggered.connect(self._customize_profile)
+        self.profile_menu.addAction(customize_profile)
+        
+        self.profile_menu.addSeparator()
         add_profile = QAction("➕ Add New Profile", self)
         add_profile.triggered.connect(self._add_new_profile)
         self.profile_menu.addAction(add_profile)
+        
+    def _customize_profile(self):
+        if self.profile is not None:
+            CustomizeProfile(self.profile, self).show()
 
+    
     def _add_new_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
         if ok and name.strip():
