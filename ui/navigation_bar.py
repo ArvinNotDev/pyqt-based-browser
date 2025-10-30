@@ -236,7 +236,7 @@ class NavigationBar(QToolBar):
     def search_history(self, text: str):
         if not hasattr(self, "history") or not self.history:
             return []
-        return ["🕖"+h for h in self.history.keys() if text.lower() in h.lower()]
+        return [h for h in self.history.keys() if text.lower() in h.lower()]
 
     def apply_theme(self):
         theme = dark_theme if getattr(self.settings, "dark_mode", False) else light_theme
