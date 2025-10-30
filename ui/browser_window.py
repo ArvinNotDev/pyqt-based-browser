@@ -14,16 +14,23 @@ import os
 
 class BrowserWindow(QMainWindow):
     def __init__(self):
-        super().__init__()
-
         self.settings = Settings()
+        self.settings.load_profile_settings()
         self.selected_profile = "Guest"
         self.history = History(self.selected_profile)
-        self.settings.load_profile_settings()
         if self.settings.profiles_list:
             if self.selected_profile not in self.settings.profiles_list:
                 self.selected_profile = self.settings.profiles_list[0]
         self.settings.load(self.selected_profile)
+
+        if self.settings.hardware_acceleration:
+            self.settings.disable_hardware_acceleration()
+        else:
+            os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
+            os.environ.pop("QTWEBENGINE_DISABLE_SANDBOX", None)
+            os.environ["QT_OPENGL"] = "desktop"
+
+        super().__init__()
 
         self.storage_path = os.path.join(os.getcwd(), "profile_data")
         os.makedirs(self.storage_path, exist_ok=True)
@@ -70,8 +77,8 @@ class BrowserWindow(QMainWindow):
         self.navbar.forward_btn.triggered.connect(lambda: self._do_on_current(lambda v: v.forward()))
         self.navbar.reload_btn.triggered.connect(lambda: self._do_on_current(lambda v: v.reload()))
         self.navbar.settings_btn.triggered.connect(self.open_settings)
-
         self.navigate(self.settings.homepage)
+        
 
     def new_tab(self, url):
         """Open a new tab with the current profile applied."""

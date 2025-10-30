@@ -1,4 +1,3 @@
-# profile_editor_with_clipboard.py
 from PySide6.QtWidgets import (
     QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFileDialog, QSlider, QSizePolicy, QMessageBox, QSpinBox,
@@ -10,7 +9,6 @@ from PySide6.QtGui import (
 )
 from PySide6.QtCore import Qt, QPoint, QRect, Signal
 import os
-import sys
 
 class ProfilePreview(QWidget):
     zoom_changed = Signal(float)

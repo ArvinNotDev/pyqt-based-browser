@@ -16,6 +16,7 @@ class Settings:
     private_mode: bool = False
     download_folder: str = "./downloads"
     show_dev_tools: bool = False
+    hardware_acceleration: bool = True
 
     profile: Profile = field(default_factory=Profile)
     file_path: str = "settings.json"
@@ -99,3 +100,9 @@ class Settings:
             self.profiles_list = ["Guest"]
         else:
             self.profiles_list = data[hashed_machine_id].get("profiles", ["Guest"])
+
+    @classmethod
+    def disable_hardware_acceleration(cls):
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu --disable-software-rasterizer"
+        os.environ["QT_OPENGL"] = "software"
+        os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
