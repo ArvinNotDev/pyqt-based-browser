@@ -169,6 +169,7 @@ class NavigationBar(QToolBar):
         self.url_bar.setFont(QFont("Segoe UI", 11))
         self.url_bar.setMinimumHeight(36)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.url_bar.installEventFilter(self)
         self.addWidget(self.url_bar)
 
         self.url_bar.returnPressed.connect(self._on_url_entered)
@@ -467,3 +468,17 @@ class NavigationBar(QToolBar):
         new_profiles_order = [selected_profile] + [p for p in self.profiles if p != selected_profile]
         self.profiles = new_profiles_order
         self._populate_profile_menu(selected_profile)
+
+
+    def eventFilter(self, obj, event):
+        if obj is self.url_bar:
+
+            if event.type() == QEvent.MouseButtonRelease:
+                QTimer.singleShot(0, self.url_bar.selectAll)
+                return False
+
+            if event.type() == QEvent.FocusIn:
+                QTimer.singleShot(0, self.url_bar.selectAll)
+                return False
+
+        return super().eventFilter(obj, event)
