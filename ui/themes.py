@@ -1,155 +1,268 @@
 light_theme = """
-QMainWindow {
+/* =======================
+   Base
+======================= */
+QMainWindow, QWidget {
     background-color: #ffffff;
+    color: #202124;
+    font-family: "Segoe UI", system-ui;
+    font-size: 13px;
 }
 
-QToolBar {
-    background-color: #f2f2f2;
-    border: none;
+/* =======================
+   Navigation / Toolbar
+======================= */
+QWidget#NavigationBar {
+    background-color: #f5f5f5;
 }
 
+/* =======================
+   LineEdit (URL bar)
+======================= */
 QLineEdit {
     background-color: #ffffff;
     color: #202124;
-    border-radius: 8px;
-    border: 1px solid #ccc;
-    padding: 6px 10px;
+    border: 1px solid #d0d0d0;
+    border-radius: 18px;
+    padding: 4px 8px;
+    min-height: 28px;
+}
+
+QLineEdit:focus {
+    border-color: #1a73e8;
 }
 
 QLineEdit::placeholder {
-    color: #6b6b6b;
+    color: #7a7a7a;
 }
 
-QLineEdit#search_bar {
+/* =======================
+   Buttons (general)
+======================= */
+QPushButton {
+    background-color: #f1f3f4;
+    color: #202124;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 28px;
+}
+
+QPushButton:hover {
+    background-color: #e8eaed;
+}
+
+QPushButton:pressed {
+    background-color: #dadce0;
+}
+
+/* icon buttons (nav, arrows, plus) */
+QPushButton[icon="true"] {
+    background: transparent;
+    padding: 4px;
+    min-width: 26px;
+    min-height: 26px;
+}
+
+QPushButton[icon="true"]:hover {
+    background-color: rgba(0,0,0,0.06);
+    border-radius: 6px;
+}
+
+/* =======================
+   Custom Tab Button
+======================= */
+QFrame {
+    background: transparent;
+}
+
+QFrame[active="false"] {
+    background-color: #f1f3f4;
+}
+
+QLabel {
+    color: #202124;
+    font-size: 12px;
+}
+
+/* close button inside tab */
+QPushButton {
+    background: transparent;
+}
+
+QPushButton:hover {
+    background-color: rgba(0,0,0,0.04);
+}
+
+/* =======================
+   Progress Bar
+======================= */
+QProgressBar {
+    background: transparent;
+    border: none;
+    height: 4px;
+}
+
+QProgressBar::chunk {
+    background-color: #1a73e8;
+}
+
+/* =======================
+   ScrollArea (tabs)
+======================= */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* =======================
+   Tooltip (tab preview)
+======================= */
+QToolTip {
     background-color: #ffffff;
     color: #202124;
-    border-radius: 20px;
-    border: 1px solid #ccc;
-    padding: 6px 12px;
+    border: 1px solid #cfcfcf;
+    padding: 6px;
+    border-radius: 6px;
 }
 
-QLineEdit::placeholder#search_bar {
-    color: #6b6b6b;
-}
-
-QPushButton {
-    background-color: #f2f2f2;
-    color: #202124;
-    border-radius: 5px;
-    padding: 5px 10px;
-}
-QPushButton:hover {
-    background-color: #e0e0e0;
-}
-
-QTabBar::tab {
-    background: #f1f3f4;
-    color: #5f6368;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 500;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    margin-right: 4px;
-}
-
-QTabBar::tab:selected {
-    background: #ffffff;
-    color: #202124;
-}
-
-QTabBar::tab:hover {
-    background: #e8eaed;
-}
-
-QTabBar::close-button {
-    image: url(assets/icons/close_light.svg);
-    subcontrol-position: right;
-    subcontrol-origin: padding;
-    width: 14px;
-    height: 14px;
-    margin-right: 4px;
-}
-QTabBar::close-button:hover {
-    background-color: rgba(232,17,35,0.18);
-    border-radius: 7px;
+/* =======================
+   Web View
+======================= */
+QWebEngineView {
+    background-color: #ffffff;
 }
 """
 
+
 dark_theme = """
-QMainWindow {
+/* =======================
+   Base
+======================= */
+QMainWindow, QWidget {
     background-color: #121212;
+    color: #e8eaed;
+    font-family: "Segoe UI", system-ui;
+    font-size: 13px;
 }
 
-QToolBar {
+/* =======================
+   Navigation / Toolbar
+======================= */
+QWidget#NavigationBar {
     background-color: #1f1f1f;
-    border: none;
 }
 
+/* =======================
+   LineEdit (URL bar)
+======================= */
 QLineEdit {
-    background-color: #2c2c2c;
-    color: #ffffff;
-    border-radius: 8px;
-    border: 1px solid #555;
-    padding: 6px 10px;
+    background-color: #2b2b2b;
+    color: #e8eaed;
+    border: 1px solid #444;
+    border-radius: 18px;
+    padding: 4px 8px;
+    min-height: 28px;
+}
+
+QLineEdit:focus {
+    border-color: #8ab4f8;
 }
 
 QLineEdit::placeholder {
-    color: #9a9a9a;
+    color: #9aa0a6;
 }
 
-QLineEdit#search_bar {
-    background-color: #2c2c2c;
-    color: #ffffff;
-    border-radius: 18px;
-    border: 1px solid #555;
-    padding: 6px 12px;
-}
-
-QLineEdit::placeholder#search_bar {
-    color: #9a9a9a;
-}
-
+/* =======================
+   Buttons
+======================= */
 QPushButton {
-    background-color: #2c2c2c;
-    color: #ffffff;
-    border-radius: 5px;
-    padding: 5px 10px;
+    background-color: #2b2b2b;
+    color: #e8eaed;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 28px;
 }
+
 QPushButton:hover {
-    background-color: #3a3a3a;
+    background-color: #353535;
 }
 
-QTabBar::tab {
-    background: #2a2a2a;
-    color: #9ea0a6;
-    padding: 10px 18px;
-    font-size: 13px;
-    font-weight: 500;
-    border-top-left-radius: 8px;
-    border-top-right-radius: 8px;
-    margin-right: 4px;
+QPushButton:pressed {
+    background-color: #3f3f3f;
 }
 
-QTabBar::tab:selected {
-    background: #1f1f1f;
-    color: #ffffff;
+/* icon buttons */
+QPushButton[icon="true"] {
+    background: transparent;
+    padding: 4px;
+    min-width: 26px;
+    min-height: 26px;
 }
 
-QTabBar::tab:hover {
-    background: #353535;
+QPushButton[icon="true"]:hover {
+    background-color: rgba(255,255,255,0.06);
+    border-radius: 6px;
 }
 
-QTabBar::close-button {
-    image: url(assets/icons/close_dark.svg);
-    subcontrol-position: right;
-    subcontrol-origin: padding;
-    width: 14px;
-    height: 14;
-    margin-right: 4px;
+/* =======================
+   Custom Tab Button
+======================= */
+QFrame {
+    background: transparent;
 }
-QTabBar::close-button:hover {
-    background-color: rgba(232,17,35,0.18);
-    border-radius: 7px;
+
+QLabel {
+    color: #e8eaed;
+    font-size: 12px;
+}
+
+/* close button */
+QPushButton {
+    background: transparent;
+}
+
+QPushButton:hover {
+    background-color: rgba(255,255,255,0.05);
+}
+
+/* =======================
+   Progress Bar
+======================= */
+QProgressBar {
+    background: transparent;
+    border: none;
+    height: 4px;
+}
+
+QProgressBar::chunk {
+    background-color: #8ab4f8;
+}
+
+/* =======================
+   ScrollArea
+======================= */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* =======================
+   Tooltip (tab preview)
+======================= */
+QToolTip {
+    background-color: #1f1f1f;
+    color: #e8eaed;
+    border: 1px solid #333;
+    padding: 6px;
+    border-radius: 6px;
+}
+
+/* =======================
+   Web View
+======================= */
+QWebEngineView {
+    background-color: #0f0f0f;
 }
 """
