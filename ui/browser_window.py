@@ -9,18 +9,19 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QGraphicsOpacityEffect
+    QScrollArea, QGraphicsOpacityEffect, QDockWidget
 )
-from PySide6.QtGui import QPixmap, QMovie
+from PySide6.QtGui import QPixmap, QMovie, QAction
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
-
+from proxy.ui import Window
 TAB_WIDTH = 160
 TAB_HEIGHT = 34
 TAB_SPACING = 4
@@ -321,6 +322,11 @@ class DelayedCleanupRunnable(QRunnable):
 class BrowserWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.proxy_panel = Window(self, None)
+        self.proxy_panel.proxyWidget.proxy.start()
+        import os
+        os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = f"--proxy-server=127.0.0.1:{self.proxy_panel.proxyWidget.proxy_port}"
+
 
         self.settings = Settings()
         self.settings.load_profile_settings()
@@ -405,6 +411,33 @@ class BrowserWindow(QMainWindow):
 
         QTimer.singleShot(0, lambda: self.new_tab(self.settings.homepage))
         self._last_progress_ts = 0
+        
+        self.dock = QDockWidget("Proxy Window", self)
+        self.dock.setMinimumWidth(300)
+        self.dock.setMaximumWidth(400)
+        self.dock.setWidget(self.proxy_panel)
+        self.dock.setFloating(False)
+        self.dock.setFeatures(QDockWidget.DockWidgetClosable)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+
+        # override close behavior dock
+        self.dock.closeEvent = self._on_dock_close
+        btn = QAction("Proxy", self.navbar)
+        self.navbar.addAction(btn)
+        btn.triggered.connect(self.show_proxy)
+        
+
+    def _on_dock_close(self, event):
+        self.dock.hide()
+        event.ignore()  
+
+    def show_proxy(self):
+        if not self.dock.isHidden():
+            self.dock.hide()
+            return
+        self.dock.show()
+        self.dock.raise_() 
+        self.dock.activateWindow() 
 
     def _apply_profile_settings(self, profile: QWebEngineProfile):
         profile.setPersistentCookiesPolicy(QWebEngineProfile.ForcePersistentCookies)
@@ -476,6 +509,8 @@ class BrowserWindow(QMainWindow):
 
         page = QWebEnginePage(self.profile, view)
         view.setPage(page)
+        page.fullScreenRequested.connect(self.handle_fullscreen)
+        
 
         # connect signals (use lambdas to capture view)
         view.titleChanged.connect(lambda t, v=view: self._on_title_changed(t, v))
@@ -826,6 +861,8 @@ class BrowserWindow(QMainWindow):
         profile_dir = os.path.join(self.storage_path, profile_name)
         os.makedirs(profile_dir, exist_ok=True)
         self.profile = QWebEngineProfile(profile_name, self)
+        self.proxy_panel.proxyWidget._stop_services()
+        self.proxy_panel.profile = self.profile
         self._apply_profile_settings(self.profile)
 
         for v in self.views:
@@ -892,3 +929,35 @@ class BrowserWindow(QMainWindow):
                 self.navbar.apply_theme()
         except Exception:
             pass
+    
+    def closeEvent(self, event):
+        # dock widget hide instead of close
+        if self.dock.isVisible():
+            self.dock.hide()   
+        self.proxy_panel.close()
+        self.proxy_panel.proxyWidget._stop_services()
+        self.proxy_panel.proxyWidget.stop_timer.emit()
+        for i in self.tabbar.tabs:
+            i._hover_timer.stop()
+        self.proxy_panel.proxyWidget.proxy.stop()
+        self.dock.close()
+        event.accept() 
+
+    def reload_engine(self):
+        pass
+    
+
+    def handle_fullscreen(self, request: QWebEngineFullScreenRequest):
+        if request.toggleOn():
+            # hide navigation / tab bar
+            self.navbar.hide()
+            self.tabbar.hide()
+            self.progress_bar.hide()
+            self.showFullScreen()
+        else:
+            self.showNormal()
+            # restore UI
+            self.navbar.show()
+            self.tabbar.show()
+            self.progress_bar.show()
+        request.accept()
