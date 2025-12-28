@@ -210,3 +210,16 @@ __marimo__/
 profile_data/
 pyside_profile_cache/
 settings.json
+
+
+tor_log.txt
+proxy/config.json
+proxy/blocked_hosts.json
+proxy/temp_torrc.txt
+proxy/proxy/exclude_hosts.json
+proxy/bundles/tor-expert-bundle-windows-x86_64-13.5.23
+proxy/bundles/tor-expert-bundle-linux-x86_64-15.0
+proxy/bundles/*-sha256sums.txt
+proxy/bundles/tor-expert-bundle-windows-x86_64-13.5.24.tar.gz
+proxy/bundles/tor-expert-bundle-windows-x86_64-15.0a4.tar.gz
+proxy/bundles/tor-expert-bundle-windows-x86_64-15.0a4/

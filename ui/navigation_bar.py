@@ -1,13 +1,61 @@
 from PySide6.QtGui import QAction, QIcon, QFont
-from PySide6.QtCore import QSize, Signal, Qt, QPoint
+from PySide6.QtCore import QSize, Signal, Qt, QPoint, QObject, QEvent, QRect, QTimer
 from PySide6.QtWidgets import (
     QToolBar, QLineEdit, QSizePolicy, QListWidget, QListWidgetItem, QFrame,
-    QInputDialog, QWidgetAction, QPushButton, QWidget, QHBoxLayout, QTabBar, QMenu, QVBoxLayout
+    QInputDialog, QWidgetAction, QPushButton, QWidget, QHBoxLayout, QTabBar,
+    QMenu, QVBoxLayout, QApplication
 )
 from .settings import Settings
 from .themes import light_theme, dark_theme
 from .profile_dialog import CustomizeProfile
-import os, json
+import os
+import json
+
+
+class _SuggestionPopupFilter(QObject):
+    def __init__(self, navbar):
+        super().__init__(navbar)
+        self.navbar = navbar
+
+    def eventFilter(self, obj, event):
+        # If no popup, nothing to do
+        if not getattr(self.navbar, "suggestion_popup", None):
+            return False
+
+        # Click outside popup or url_bar closes popup
+        if event.type() == QEvent.MouseButtonPress:
+            pos = event.globalPos()
+            popup = self.navbar.suggestion_popup
+            if popup and popup.isVisible():
+                popup_geo = popup.frameGeometry()
+                if popup_geo.contains(pos):
+                    return False
+                # check url_bar rect global
+                url_rect = self.navbar.url_bar.rect()
+                url_top_left = self.navbar.url_bar.mapToGlobal(url_rect.topLeft())
+                url_geo = QRect(url_top_left, url_rect.size())
+                if url_geo.contains(pos):
+                    return False
+                # click is outside both popup and url_bar -> close
+                self.navbar._close_suggestion_popup()
+                return False
+
+        # Key handling: Up/Down to move selection, Esc to close, Shift+Enter to apply without searching
+        if event.type() == QEvent.KeyPress:
+            key = event.key()
+            mods = event.modifiers()
+            if key == Qt.Key_Escape:
+                self.navbar._close_suggestion_popup()
+                return True
+            if key in (Qt.Key_Up, Qt.Key_Down):
+                self.navbar._move_suggestion_selection(key)
+                return True
+            if key in (Qt.Key_Return, Qt.Key_Enter) and (mods & Qt.ShiftModifier):
+                # apply to url bar but do not emit search
+                self.navbar._apply_suggestion(no_search=True)
+                return True
+
+        return False
 
 
 class NavigationBar(QToolBar):
@@ -25,15 +73,18 @@ class NavigationBar(QToolBar):
         self.setMovable(False)
         self.setIconSize(QSize(20, 20))
         self.setFixedHeight(40)
+
         self.tabs_list = []
         self.current_tab_index = 0
         self.settings = settings if settings is not None else Settings()
         self.profiles = list(profiles_list) if profiles_list else ["Guest"]
         self.profile = self.profiles[0] if self.profiles else "Guest"
         self.history = {}
-        self.suggestion_popup = None
 
-        # === Buttons ===
+        self.suggestion_popup = None
+        self.suggestion_list = None
+        self._popup_filter = None
+
         icon_path = "assets/icons/"
         self.back_btn = QAction(QIcon(f"{icon_path}back.png"), "Back", self)
         self.forward_btn = QAction(QIcon(f"{icon_path}forward.png"), "Forward", self)
@@ -42,8 +93,8 @@ class NavigationBar(QToolBar):
         self.settings_btn = QAction(QIcon(f"{icon_path}settings.png"), "Settings", self)
         for btn in (self.back_btn, self.forward_btn, self.reload_btn, self.home_btn, self.settings_btn):
             self.addAction(btn)
+            btn.triggered.connect(self._close_suggestion_popup_safe)
 
-        # === Connect buttons ===
         self.home_btn.triggered.connect(lambda: self.home_clicked.emit())
         self.addSeparator()
 
@@ -105,6 +156,7 @@ class NavigationBar(QToolBar):
             }
         """)
         self.new_tab_btn.clicked.connect(lambda: self.new_tab_requested.emit())
+        self.new_tab_btn.clicked.connect(self._close_suggestion_popup_safe)
         tab_layout.addWidget(self.new_tab_btn)
 
         tab_action = QWidgetAction(self)
@@ -117,10 +169,12 @@ class NavigationBar(QToolBar):
         self.url_bar.setFont(QFont("Segoe UI", 11))
         self.url_bar.setMinimumHeight(36)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.url_bar.installEventFilter(self)
         self.addWidget(self.url_bar)
 
         self.url_bar.returnPressed.connect(self._on_url_entered)
         self.url_bar.textEdited.connect(lambda text: self._on_url_typed(text))
+        self.url_bar.editingFinished.connect(self._close_suggestion_popup_safe)
 
         # === Spacer ===
         spacer = QWidget()
@@ -143,16 +197,46 @@ class NavigationBar(QToolBar):
         self.get_history()
         self.apply_theme()
 
+        # install global event filter for popup handling
+        self._install_popup_event_filter()
+
     # ==================================================
     # === Suggestion Popup ===
     # ==================================================
-    def show_url_suggestions(self, suggestions: list[str]):
-        if self.suggestion_popup:
-            self.suggestion_popup.deleteLater()
-            self.suggestion_popup = None
+    def _install_popup_event_filter(self):
+        if self._popup_filter is None:
+            app = QApplication.instance()
+            if app:
+                self._popup_filter = _SuggestionPopupFilter(self)
+                app.installEventFilter(self._popup_filter)
 
-        if not suggestions:
-            return
+    def _remove_popup_event_filter(self):
+        if self._popup_filter is not None:
+            app = QApplication.instance()
+            if app:
+                try:
+                    app.removeEventFilter(self._popup_filter)
+                except Exception:
+                    pass
+            self._popup_filter = None
+
+    def show_url_suggestions(self, suggestions: list[str]):
+        # backward-compatible alias (kept for compatibility)
+        self._on_url_typed("")  # ensure previous popup closed
+        if suggestions:
+            self._show_suggestion_popup(suggestions)
+
+    def _on_url_typed(self, text):
+        # refresh suggestions
+        if self.suggestion_popup:
+            self._close_suggestion_popup()
+        suggestions = self.search_history(text)
+        if suggestions:
+            self._show_suggestion_popup(suggestions)
+
+    def _show_suggestion_popup(self, suggestions: list[str]):
+        if self.suggestion_popup:
+            self._close_suggestion_popup()
 
         popup = QFrame(self)
         popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
@@ -172,7 +256,7 @@ class NavigationBar(QToolBar):
             QListWidget::item {
                 padding: 6px 10px;
             }
-            QListWidget::item:hover {
+            QListWidget::item:selected {
                 background-color: #444;
             }
         """)
@@ -182,10 +266,12 @@ class NavigationBar(QToolBar):
         for s in suggestions:
             QListWidgetItem(s, list_widget)
 
+        list_widget.setCurrentRow(0)
+
         def on_item_clicked(item):
             self.url_bar.setText(item.text())
             self.url_submitted.emit(item.text())
-            popup.close()
+            self._close_suggestion_popup()
 
         list_widget.itemClicked.connect(on_item_clicked)
 
@@ -193,22 +279,59 @@ class NavigationBar(QToolBar):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(list_widget)
 
-        popup.resize(self.url_bar.width(), min(200, list_widget.sizeHintForRow(0) * len(suggestions) + 8))
+        popup.resize(self.url_bar.width(), min(200, list_widget.sizeHintForRow(0) * list_widget.count() + 8))
         pos = self.url_bar.mapToGlobal(self.url_bar.rect().bottomLeft())
         popup.move(pos)
         popup.show()
         popup.raise_()
 
         self.suggestion_popup = popup
+        self.suggestion_list = list_widget
+        # ensure url bar keeps focus
         self.url_bar.setFocus(Qt.OtherFocusReason)
 
-    def _on_url_typed(self, text):
-        if self.suggestion_popup:
-            self.suggestion_popup.close()
-            self.suggestion_popup = None
+    def _move_suggestion_selection(self, key):
+        if not self.suggestion_list:
+            return
+        row = self.suggestion_list.currentRow()
+        if key == Qt.Key_Down:
+            row += 1
+        elif key == Qt.Key_Up:
+            row -= 1
+        row = max(0, min(row, self.suggestion_list.count() - 1))
+        self.suggestion_list.setCurrentRow(row)
+        # reflect into url_bar but do not trigger returnPressed
+        current_item = self.suggestion_list.currentItem()
+        if current_item:
+            self.url_bar.setText(current_item.text())
 
-        suggestions = self.search_history(text)
-        self.show_url_suggestions(suggestions)
+    def _apply_suggestion(self, no_search=False):
+        if not self.suggestion_list:
+            return
+        item = self.suggestion_list.currentItem()
+        if not item:
+            return
+        text = item.text()
+        self.url_bar.setText(text)
+        if not no_search:
+            self.url_submitted.emit(text)
+        self._close_suggestion_popup()
+
+    def _close_suggestion_popup(self):
+        if self.suggestion_popup:
+            try:
+                self.suggestion_popup.close()
+                self.suggestion_popup.deleteLater()
+            except Exception:
+                pass
+        self.suggestion_popup = None
+        self.suggestion_list = None
+
+    def _close_suggestion_popup_safe(self, *args, **kwargs):
+        try:
+            self._close_suggestion_popup()
+        except Exception:
+            pass
 
     # ==================================================
     # === Profiles, History, Tabs, and Themes ===
@@ -241,9 +364,15 @@ class NavigationBar(QToolBar):
     def apply_theme(self):
         theme = dark_theme if getattr(self.settings, "dark_mode", False) else light_theme
         self.setStyleSheet(theme)
-        self.url_bar.setStyleSheet("")
-        self.new_tab_btn.setStyleSheet(self.new_tab_btn.styleSheet())
-        self.tab_bar.setStyleSheet(self.tab_bar.styleSheet())
+        # keep style strings intact for widgets that rely on them
+        try:
+            self.url_bar.setStyleSheet("")
+            self.new_tab_btn.setStyleSheet(self.new_tab_btn.styleSheet())
+            self.tab_bar.setStyleSheet(self.tab_bar.styleSheet())
+        except Exception:
+            pass
+        # reset/close popup on theme change
+        self._close_suggestion_popup_safe()
 
     def set_dark_mode(self, dark: bool):
         try:
@@ -253,6 +382,8 @@ class NavigationBar(QToolBar):
         self.apply_theme()
 
     def update_tabs(self, tabs: list, current_index: int = 0):
+        # page-like reset -> close popup
+        self._close_suggestion_popup_safe()
         self.tab_bar.clear()
         self.tabs_list = list(tabs)
         self.current_tab_index = int(current_index) if tabs else 0
@@ -296,6 +427,7 @@ class NavigationBar(QToolBar):
     def _customize_profile(self):
         if self.profile is not None:
             CustomizeProfile(self.profile, self).show()
+            self._close_suggestion_popup_safe()
 
     def _add_new_profile(self):
         name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
@@ -309,12 +441,21 @@ class NavigationBar(QToolBar):
                 except Exception:
                     pass
             self._populate_profile_menu()
+            self._close_suggestion_popup_safe()
 
     # ==================================================
     # === URL Bar ===
     # ==================================================
     def _on_url_entered(self):
+        # If popup open and a suggestion selected -> apply and search
+        if self.suggestion_list and self.suggestion_popup:
+            # If shift held, apply without search (handled in filter). Here do normal Enter -> search
+            self._apply_suggestion(no_search=False)
+            return
+
         url = self.url_bar.text().strip()
+        # close popup in any case
+        self._close_suggestion_popup_safe()
         if url:
             self.url_submitted.emit(url)
 
@@ -327,3 +468,17 @@ class NavigationBar(QToolBar):
         new_profiles_order = [selected_profile] + [p for p in self.profiles if p != selected_profile]
         self.profiles = new_profiles_order
         self._populate_profile_menu(selected_profile)
+
+
+    def eventFilter(self, obj, event):
+        if obj is self.url_bar:
+
+            if event.type() == QEvent.MouseButtonRelease:
+                QTimer.singleShot(0, self.url_bar.selectAll)
+                return False
+
+            if event.type() == QEvent.FocusIn:
+                QTimer.singleShot(0, self.url_bar.selectAll)
+                return False
+
+        return super().eventFilter(obj, event)
