@@ -101,8 +101,8 @@ def check_hash(filename, base_url=TOR_BUNDLE_BASE_URL, go_online=False):
             
         else:
             with open(resource_path(os.path.join(BUNDLE_DIR,f"{version}-{CHECKSUM_FILE}")), "r") as f:
-                
                 text = f.read()
+        file_hash = sha256_file(bundle_path(filename))
         for i in text.splitlines():
             hash, name = i.strip().split(None, 1)
             if name.strip() == filename:
@@ -135,7 +135,7 @@ def get_version_by_bundle(filename, with_slash=False):
 def check_bundle_compatibility(filename):
     name = os.path.splitext(os.path.basename(filename))[0]
 
-    if ((ARCHITECTURE == 64 and "x86_64" in name) or (ARCHITECTURE == 32 and "i868" in name)) and OS_NAME.lower() in name and name.startswith("tor-expert-bundle-"):
+    if ((ARCHITECTURE == 64 and "x86_64" in name) or (ARCHITECTURE == 32 and "i686" in name)) and OS_NAME.lower() in name and name.startswith("tor-expert-bundle-"):
         return True
     return False
 

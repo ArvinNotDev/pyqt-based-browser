@@ -6,7 +6,7 @@ import platform
 
 IS_WINDOWS = get_os_name() == Os.Windows
 IS_LINUX = get_os_name() == Os.Linux
-IS_OTHER = IS_WINDOWS or IS_WINDOWS
+IS_OTHER = not IS_WINDOWS and not IS_LINUX
 OS_NAME = get_os_name()
 ARCHITECTURE = int(platform.architecture()[0][0:2])
 BUNDLE_DIR = "bundles/"
@@ -21,7 +21,8 @@ class Config:
     
     def __getitem__(self, name):
         if name in self.default_data:
-            return self.data.get(name, None) or self.default_data[name]
+            value = self.data.get(name, None)
+            return value if value is not None else self.default_data[name]
         return None
     
     def __setitem__(self, name, value):

@@ -99,8 +99,7 @@ class Window(QMainWindow):
         
     def show_tray(self):
         self.hide()
-        # # shold use show becuase tray will delete after system locked in this case windows
-        # self.tray_icon.show()
+        self.tray_icon.show()
         
     
     def show_window(self, reason):

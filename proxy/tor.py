@@ -172,8 +172,8 @@ class TorRunner:
                 self.thread.join()
             self.thread = None
 
-            if os.path.exists("temp_torrc.txt"):
-                os.remove("temp_torrc.txt")
+            if os.path.exists(resource_path("temp_torrc.txt")):
+                os.remove(resource_path("temp_torrc.txt"))
         except Exception as e:
             logger.error(f"Error while stopping: {e}")
             try:

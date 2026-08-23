@@ -916,7 +916,7 @@ class BrowserWindow(QMainWindow):
             pass
 
     def open_settings(self):
-        dialog = SettingsWindow(self.settings, self.selected_profile, self)
+        dialog = SettingsWindow(self.settings, self.selected_profile, self.history, self)
         if dialog.exec():
             self.settings.load(self.selected_profile)
             self.apply_theme()

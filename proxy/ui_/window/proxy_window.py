@@ -180,9 +180,11 @@ class ProxyWindow(QWidget):
         
     def set_btn_status_style(self, stmt):
         if stmt == "disconnected":
+            color = "#e74c3c"
+        elif stmt == "connected":
             color = "#2ecc71"
         else:
-            color = "#e74c3c"
+            color = "#f39c12"
         
         self.btn_status.setStyleSheet("""
             QLabel {

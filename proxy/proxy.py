@@ -172,7 +172,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
         host = parsed.hostname
         port = parsed.port or 80
 
+        for i in blocked_hosts:
+            if i.startswith("*") and host.endswith(i[1:]):
+                self.send_error(403, "Forbidden: Blocked")
+                logger.debug(f"BLOCKED {host}:{port}")
+                return
+        if host in blocked_hosts or any([host.endswith("." + i) for i in blocked_hosts]):
+            self.send_error(403, "Forbidden: Blocked")
+            logger.debug(f"BLOCKED {host}:{port}")
+            return
+
         proxy = PROXY_INTO_TOR
+
+        for i in exclude_hosts:
+            if i.startswith("*") and host.endswith(i[1:]):
+                proxy = False
+        if host in exclude_hosts or any([host.endswith("." + i) for i in exclude_hosts]):
+            proxy = False
+            logger.debug(f"EXCLUDE {host}:{port}")
 
         try:
             remote = socks.socksocket()
