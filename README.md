@@ -1,332 +1,85 @@
-<div align="center">
+# PyQt Based Browser
 
-# Privacy-Focused Desktop Browser
+A Python desktop browser built with PySide6 and Qt WebEngine. The source includes tabbed browsing, navigation and search, profile settings and history, plus a local proxy UI with Tor bundle management and host block/exclusion rules. Tor routing requires a usable Tor bundle and a successful connection; it has not been validated here against the live Tor network.
 
-**A privacy-oriented desktop web browser with integrated Tor proxy support.**
+## Support
 
-A modern desktop browser built with **Python, PySide6, and Qt WebEngine**, providing tabbed browsing, configurable proxy routing, Tor integration, browser profiles, host filtering, and network monitoring.
+- Windows x64 is the primary release target.
+- Ubuntu Linux x64 is included in CI and can run from source with the system libraries listed below. Other distributions may need equivalent Qt WebEngine and barcode-reader libraries.
+- macOS is not currently covered by CI and is not a supported platform claim.
+- Python 3.10 through 3.13 is the declared range.
 
-<br>
+## Install from source
 
-[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square\&logo=python\&logoColor=white)](https://www.python.org/)
-[![PySide6](https://img.shields.io/badge/PySide6-6.10-41CD52?style=flat-square\&logo=qt\&logoColor=white)](https://doc.qt.io/qtforpython/)
-[![License](https://img.shields.io/badge/License-MIT-2f80ed?style=flat-square)](LICENSE)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey?style=flat-square)](#installation)
+Run the browser from the repository root. The application currently stores some state relative to the source tree or working directory, including `proxy/config.json`, `settings.json`, `profile_data/`, and proxy rule files. Use a writable checkout.
 
-<br>
-
-<img src="assets/icons/home.png" alt="Browser Screenshot" width="900">
-
-</div>
-
----
-
-## Overview
-
-This project is a desktop web browser designed with privacy and network configurability in mind.
-
-It uses **Qt WebEngine** for browsing and provides an integrated local HTTP proxy capable of routing browser traffic through a local **Tor SOCKS5 proxy**.
-
-The application also provides browser profiles, host blocking and exclusion rules, Tor bridge configuration, identity switching, network monitoring, and persistent settings.
-
----
-
-## Features
-
-### Privacy & Networking
-
-* **Tor Routing** — Route browser traffic through the Tor network.
-* **Local HTTP Proxy** — Handle browser HTTP and CONNECT requests locally before forwarding them through Tor.
-* **Host Blocking** — Block specific domains or wildcard patterns such as `*.example.com`.
-* **Host Exclusion** — Bypass Tor routing for selected domains.
-* **Identity Switching** — Request a new Tor circuit directly from the browser.
-* **Configurable Proxy Ports** — Configure HTTP, SOCKS, control, and DNS ports.
-
-### Browser
-
-* **Tabbed Browsing** — Multi-tab interface with tab previews and navigation controls.
-* **Browser Profiles** — Maintain separate histories, cookies, and settings.
-* **Profile Customization** — Upload, crop, rotate, zoom, and save profile images.
-* **URL Bar Suggestions** — Search suggestions using browser history.
-* **Navigation Controls** — Back, forward, reload, and home.
-* **Persistent Browser Settings** — Store browser preferences between sessions.
-
-### Tor Integration
-
-* **Tor Process Management**
-* **Tor Bootstrap Monitoring**
-* **Tor Identity Changes**
-* **Tor Bundle Management**
-* **Tor Bridge Configuration**
-* **SOCKS5 Integration**
-
-Supported bridge transports include:
-
-```text
-obfs4
-webtunnel
-meek
-snowflake
-scramblesuit
-fte
-```
-
-### Monitoring
-
-* **Connection Status**
-* **Tor Bootstrap Progress**
-* **Real-time Bandwidth Usage**
-* **Public IP Lookup**
-* **Proxy Activity Logs**
-
-### User Interface
-
-* **Dark and Light Themes**
-* **Configurable Settings**
-* **Profile Management**
-* **Dockable Proxy Panel**
-* **Animated Browser Controls**
-
----
-
-## Architecture
-
-The application is divided into three main components:
-
-| Component   | Responsibility                                                                     |
-| ----------- | ---------------------------------------------------------------------------------- |
-| `ui/`       | Browser interface, tabs, navigation, profiles, settings, and history               |
-| `proxy/`    | HTTP proxy, Tor integration, routing, bundle management, and network configuration |
-| `managers/` | History persistence and profile management                                         |
-
-### Network Architecture
-
-```text
-┌──────────────────────────────┐
-│        Qt WebEngine          │
-│         Web Browser          │
-└──────────────┬───────────────┘
-               │
-               │ HTTP / CONNECT
-               ▼
-┌──────────────────────────────┐
-│       Local HTTP Proxy       │
-│    ThreadingHTTPServer       │
-└──────────────┬───────────────┘
-               │
-               │ SOCKS5
-               ▼
-┌──────────────────────────────┐
-│          Tor Client          │
-│       Local SOCKS Proxy      │
-└──────────────┬───────────────┘
-               │
-               ▼
-┌──────────────────────────────┐
-│          Tor Network         │
-└──────────────────────────────┘
-```
-
-The browser is configured to use the local HTTP proxy through Chromium's proxy configuration. The local proxy then forwards supported requests through the Tor SOCKS5 interface.
-
----
-
-## Project Structure
-
-```text
-.
-├── main.py
-├── requirements.txt
-│
-├── assets/
-│   └── icons/
-│
-├── managers/
-│   ├── history_manager.py
-│   └── profile_manager.py
-│
-├── proxy/
-│   ├── config.py
-│   ├── proxy.py
-│   ├── set_proxy.py
-│   ├── tor.py
-│   ├── updater.py
-│   ├── utils.py
-│   ├── whatismyip.py
-│   │
-│   ├── bundles/
-│   │
-│   └── ui_/
-│       ├── window/
-│       ├── btn/
-│       ├── worker/
-│       └── emojis/
-│
-└── ui/
-    ├── browser_window.py
-    ├── navigation_bar.py
-    ├── history_window.py
-    ├── profile_dialog.py
-    ├── settings.py
-    ├── settings_window.py
-    └── themes.py
-```
-
----
-
-## Installation
-
-### Requirements
-
-* Python **3.10 or newer**
-* `pip`
-* Windows, Linux, or macOS
-
-### Clone the repository
-
-```bash
-git clone https://github.com/ArvinNotDev/pyqt-based-browser.git
-cd pyqt-based-browser
-```
-
-### Create a virtual environment
-
-#### Windows
+### Windows PowerShell
 
 ```powershell
-python -m venv venv
-venv\Scripts\activate
-```
-
-#### Linux / macOS
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-### Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-Additional Tor-related dependencies:
-
-```bash
-pip install pysocks beautifulsoup4 requests stem
-```
-
-### Run
-
-```bash
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 python main.py
 ```
 
-The application can download a compatible Tor bundle when a Tor connection is initiated for the first time.
+If PowerShell blocks activation, use `.venv\Scripts\python.exe` in place of `python` for the installation and run commands.
 
----
+### Ubuntu Linux
 
-## Usage
+Qt WebEngine and QR decoding need system libraries in addition to the Python wheels:
 
-### Connect to Tor
-
-1. Open the proxy panel.
-2. Select **Connect**.
-3. Wait for the Tor bootstrap process to complete.
-4. Once connected, browser traffic is routed through the configured proxy.
-5. Use **Change Identity** to request a new Tor circuit.
-
-### Browser Profiles
-
-Profiles provide independent browser environments for different browsing contexts.
-
-To create a profile:
-
-1. Open the profile menu.
-2. Select **Add New Profile**.
-3. Configure the profile.
-4. Optionally customize its profile image.
-
-Each profile can maintain its own browsing history, cookies, and browser settings.
-
-### Host Blocking
-
-Domains can be blocked completely using host rules.
-
-Examples:
-
-```text
-example.com
-*.example.com
-ads.example.org
+```bash
+sudo apt-get update
+sudo apt-get install -y libgl1 libxcb-cursor0 libxkbcommon-x11-0 libzbar0
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+python main.py
 ```
 
-### Host Exclusion
-
-Specific domains can be excluded from Tor routing when direct access is required.
-
----
-
-## Keyboard Shortcuts
-
-| Shortcut         | Action                              |
-| ---------------- | ----------------------------------- |
-| `Ctrl + Alt + P` | Toggle window visibility on Windows |
-| `Ctrl + O`       | Open image in profile editor        |
-| `Ctrl + V`       | Paste image in profile editor       |
-| `Ctrl + S`       | Save profile image                  |
-
----
-
-## Configuration
-
-The application supports persistent configuration for:
-
-* Homepage
-* Search engine
-* Browsing history
-* Cookies
-* HTTP proxy port
-* SOCKS port
-* Tor control port
-* DNS configuration
-* Tor bridges
-* Host blocking rules
-* Host exclusion rules
-* Theme
-* Profile-specific settings
-
----
+Other Linux distributions need the equivalent OpenGL, XCB, xkbcommon, and `zbar` runtime packages. Camera access is needed for QR scanning.
 
 ## Dependencies
 
-| Package                                                    | Purpose                                 |
-| ---------------------------------------------------------- | --------------------------------------- |
-| [PySide6](https://pypi.org/project/PySide6/)               | Qt bindings and GUI framework           |
-| [PySocks](https://pypi.org/project/PySocks/)               | SOCKS proxy support                     |
-| [BeautifulSoup4](https://pypi.org/project/beautifulsoup4/) | HTML parsing                            |
-| [Requests](https://pypi.org/project/requests/)             | HTTP requests, downloads, and IP lookup |
-| [Stem](https://pypi.org/project/stem/)                     | Tor controller interface                |
+`requirements.txt` contains pinned direct runtime dependencies identified from application imports. It keeps a single `PySide6` pin; the matching Addons, Essentials, and shiboken packages are installed through that package's dependencies. `requirements-dev.txt` includes the runtime set plus pytest and Ruff.
 
----
+The Tor UI can use the Windows and Linux x64 archives tracked under `proxy/bundles/`, or download a compatible archive from the Tor Project through its bundle updater. The updater attempts to cache the published SHA-256 sums when it refreshes the available versions. The current offline bundle check accepts an archive when no matching checksum file is cached, so that path does not guarantee archive integrity. Do not treat the bundled Tor archives as independently verified by the application.
 
-## Acknowledgements
+## Test and check
 
-The Tor proxy functionality builds upon work from **[Nima Salamat](https://github.com/nima-salamat)** and the [`tor-proxy`](https://github.com/nima-salamat/tor-proxy) project.
+```bash
+python -m pip install -r requirements-dev.txt
+python -m compileall -q main.py managers proxy ui tests
+python -m ruff check tests
+python -m pytest -ra
+```
 
----
+The tests use temporary directories and mocks for persistence and proxy/Tor process interactions. They do not connect to Tor or the public network. Tests for bookmark/download managers and the URL utility are skipped while those modules are absent from this branch; once their source files are added, the tests import them normally and expose API or dependency errors. Two existing defects are recorded as strict expected failures: malformed settings reads and invalid proxy port validation.
+
+GitHub Actions runs these checks on Windows and Ubuntu for Python 3.10–3.13. The workflow does not claim macOS validation or run live Tor integration tests.
+
+## Source release
+
+The release workflow publishes a ZIP made from a version tag and a SHA-256 sidecar. To make one locally from a checked-out tag:
+
+```powershell
+./scripts/package-source.ps1 -Tag v1.2.3
+```
+
+The source archive includes the tracked Tor bundle archives and is expected to be installed with Python and `requirements.txt`. There is no standalone executable installer yet. A PyInstaller build was evaluated and deferred: current code mixes resources under `proxy/`, paths under the process working directory, and mutable configuration under the bundle resource root. Those paths need a single writable application-data/resource layout, followed by a clean-machine Qt WebEngine and Tor bundle smoke test, before a frozen executable can be claimed as reproducible.
+
+See [the packaging and release notes](docs/PACKAGING.md) and [release checklist](docs/RELEASE_CHECKLIST.md) before publishing a version.
+
+## Troubleshooting
+
+- **Qt WebEngine does not start on Linux:** install the distribution's Qt WebEngine dependencies, including OpenGL, XCB, and xkbcommon runtime libraries. Run from a graphical session for interactive browsing.
+- **QR scanner import or camera errors:** install the OS `zbar` library and check camera permissions. QR scanning is optional to normal browsing.
+- **Tor does not connect:** check that a compatible bundle exists, the configured local ports are available, and the network permits Tor. Bridge connectivity needs valid bridge lines and the matching transport support in the selected bundle.
+- **State cannot be written:** run the source checkout from a writable directory. The current application does not consistently use the operating system's per-user application-data directory.
+- **Global shortcut behavior differs on Linux:** the `keyboard` dependency may require desktop/session permissions that vary by distribution.
 
 ## License
 
-This project is licensed under the **MIT License**.
-
-See [`LICENSE`](LICENSE) for the full license text.
-
----
-
-<div align="center">
-
-**Built with Python · PySide6 · Qt WebEngine · Tor**
-
-</div>
+MIT. See [LICENSE](LICENSE).
