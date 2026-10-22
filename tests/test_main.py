@@ -60,6 +60,8 @@ class StartupConfigurationTests(unittest.TestCase):
                         self.assertIn("--disable-gpu", flags)
                         self.assertIn("--enable-features=TestFeature", flags)
                         self.assertEqual(os.environ["QT_OPENGL"], "software")
+            finally:
+                os.chdir(original_cwd)
 
     def test_bookmark_dialog_routes_opened_url_to_browser_navigation(self):
         from ui import browser_window
@@ -103,8 +105,6 @@ class StartupConfigurationTests(unittest.TestCase):
         self.assertTrue(dialogs[0].executed)
         self.assertEqual(navigation, ["https://saved.example/"])
         self.assertEqual(refreshes, [True])
-            finally:
-                os.chdir(original_cwd)
 
 
 if __name__ == "__main__":
