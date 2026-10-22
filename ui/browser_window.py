@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu
+    QLineEdit, QMenu, QSizeGrip
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -21,6 +21,7 @@ from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
+from .title_bar import CustomTitleBar
 from .history_window import HistoryWindow
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
@@ -368,6 +369,7 @@ class BrowserPage(QWebEnginePage):
 class BrowserWindow(QMainWindow):
     def __init__(self, proxy_port: Optional[int] = None):
         super().__init__()
+        self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.proxy_panel = Window(self, None)
         proxy_widget = self.proxy_panel.proxyWidget
         if proxy_port is not None:
@@ -454,6 +456,8 @@ class BrowserWindow(QMainWindow):
         layout = QVBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
+        self.title_bar = CustomTitleBar(self)
+        layout.addWidget(self.title_bar)
         layout.addWidget(self.navbar)
         if self.bookmarks_bar is not None:
             layout.addWidget(self.bookmarks_bar)
@@ -464,7 +468,11 @@ class BrowserWindow(QMainWindow):
 
         self.resize(self.settings.window_width, self.settings.window_height)
         self.setWindowTitle("R-Browser")
+        self.title_bar.title.setText(self.windowTitle())
         self.apply_theme()
+        self._resize_grip = QSizeGrip(self)
+        self._resize_grip.setObjectName("windowResizeGrip")
+        self.statusBar().addPermanentWidget(self._resize_grip)
 
         try:
             self.navbar.url_submitted.connect(self.navigate)
@@ -510,6 +518,11 @@ class BrowserWindow(QMainWindow):
         self.dock.setVisible(not self.dock.isVisible())
         if self.dock.isVisible():
             self.dock.raise_()
+
+    def changeEvent(self, event):
+        super().changeEvent(event)
+        if event.type() == QEvent.WindowStateChange and hasattr(self, "title_bar"):
+            self.title_bar.sync_maximize_button()
 
     def _update_proxy_menu_action(self, visible: bool) -> None:
         self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
@@ -1046,6 +1059,10 @@ class BrowserWindow(QMainWindow):
         if view not in self.views:
             return
         self.tabbar.set_title(self.views.index(view), title)
+        if view is self.current_view():
+            window_title = f"{title} — R-Browser" if title else "R-Browser"
+            self.setWindowTitle(window_title)
+            self.title_bar.title.setText(window_title)
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():

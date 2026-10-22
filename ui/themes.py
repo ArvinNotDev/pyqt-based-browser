@@ -9,6 +9,31 @@ QMainWindow, QDialog, QWidget {
 }
 QLabel { background-color: transparent; }
 
+QWidget#customTitleBar {
+    background-color: #eef1f5;
+    border-bottom: 1px solid #dce1e8;
+}
+QLabel#titleBarLogo {
+    color: #ffffff;
+    background-color: #3979d6;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QLabel#titleBarTitle { color: #25303d; font-size: 12px; font-weight: 600; }
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton {
+    color: #46505c;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    font-size: 16px;
+}
+QToolButton#windowMinimizeButton:hover, QToolButton#windowMaximizeButton:hover {
+    background-color: #dfe5ed;
+}
+QToolButton#windowCloseButton:hover { color: #ffffff; background-color: #d34c4c; }
+
 QToolBar#NavigationBar {
     background-color: #f7f8fa;
     border: none;
@@ -222,6 +247,31 @@ QMainWindow, QDialog, QWidget {
     font-size: 13px;
 }
 QLabel { background-color: transparent; }
+
+QWidget#customTitleBar {
+    background-color: #171a1f;
+    border-bottom: 1px solid #30353d;
+}
+QLabel#titleBarLogo {
+    color: #ffffff;
+    background-color: #3979d6;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QLabel#titleBarTitle { color: #e4e8ee; font-size: 12px; font-weight: 600; }
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton {
+    color: #c7ced8;
+    background: transparent;
+    border: none;
+    border-radius: 7px;
+    font-size: 16px;
+}
+QToolButton#windowMinimizeButton:hover, QToolButton#windowMaximizeButton:hover {
+    background-color: #30353d;
+}
+QToolButton#windowCloseButton:hover { color: #ffffff; background-color: #c53f49; }
 
 QToolBar#NavigationBar {
     background-color: #1b1e23;
