@@ -25,6 +25,7 @@ class DownloadManager(QObject):
     """
 
     downloads_changed = Signal()
+    download_started = Signal(str, object)
 
     _TERMINAL_STATES = {"completed", "cancelled", "failed"}
     _reservation_lock = Lock()
@@ -209,12 +210,16 @@ class DownloadManager(QObject):
                 "received_bytes": max(0, int(self._request_value(request, "receivedBytes", 0) or 0)),
                 "total_bytes": int(total_bytes if total_bytes is not None else -1),
                 "state": "requested",
+                "paused": False,
                 "error": "",
             }
+            source_page = self._request_value(request, "page", None)
             self._downloads.append(record)
             self._reserved_by_download[download_id] = allocated_path_key
             self._requests[download_id] = request
-            for signal_name in ("receivedBytesChanged", "totalBytesChanged", "stateChanged"):
+            for signal_name in (
+                "receivedBytesChanged", "totalBytesChanged", "stateChanged", "isPausedChanged"
+            ):
                 signal = getattr(request, signal_name, None)
                 if signal is not None and hasattr(signal, "connect"):
                     slot = lambda *args, current_id=download_id: self._refresh(current_id)
@@ -225,6 +230,7 @@ class DownloadManager(QObject):
             self.downloads_changed.emit()
             request.accept()
             self._refresh(download_id)
+            self.download_started.emit(download_id, source_page)
         except Exception as exc:
             try:
                 request.cancel()
@@ -261,6 +267,7 @@ class DownloadManager(QObject):
             record["received_bytes"],
             record["total_bytes"],
             record["state"],
+            record.get("paused", False),
             record["error"],
         )
         received = self._request_value(request, "receivedBytes", record["received_bytes"])
@@ -274,6 +281,7 @@ class DownloadManager(QObject):
         except (TypeError, ValueError):
             pass
         record["state"] = self._state_name(request)
+        record["paused"] = bool(self._request_value(request, "isPaused", False))
         if record["state"] == "failed":
             record["error"] = str(self._request_value(request, "interruptReasonString", "") or "Download interrupted")
         elif record["state"] in {"downloading", "completed", "cancelled"}:
@@ -282,6 +290,7 @@ class DownloadManager(QObject):
             record["received_bytes"],
             record["total_bytes"],
             record["state"],
+            record.get("paused", False),
             record["error"],
         )
         if record["state"] in self._TERMINAL_STATES:
@@ -346,6 +355,32 @@ class DownloadManager(QObject):
             self.downloads_changed.emit()
         return record["state"] == "cancelled"
 
+    def pause(self, download_id: str) -> bool:
+        request = self._requests.get(download_id)
+        record = next((item for item in self._downloads if item["id"] == download_id), None)
+        if request is None or record is None or record["state"] in self._TERMINAL_STATES:
+            return False
+        try:
+            request.pause()
+            record["paused"] = True
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+        self.downloads_changed.emit()
+        return True
+
+    def resume(self, download_id: str) -> bool:
+        request = self._requests.get(download_id)
+        record = next((item for item in self._downloads if item["id"] == download_id), None)
+        if request is None or record is None or record["state"] in self._TERMINAL_STATES:
+            return False
+        try:
+            request.resume()
+            record["paused"] = False
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+        self.downloads_changed.emit()
+        return True
+
     def open_file(self, download_id: str) -> bool:
         record = next((item for item in self._downloads if item["id"] == download_id), None)
         if record is None or record["state"] != "completed" or not record["path"]:
@@ -354,6 +389,47 @@ class DownloadManager(QObject):
         if not os.path.isfile(path):
             return False
         return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(path)))
+
+    def open_folder(self, download_id: str) -> bool:
+        record = next((item for item in self._downloads if item["id"] == download_id), None)
+        if record is None or not record["path"]:
+            return False
+        folder = os.path.dirname(os.path.abspath(record["path"]))
+        if not os.path.isdir(folder):
+            return False
+        return bool(QDesktopServices.openUrl(QUrl.fromLocalFile(folder)))
+
+    def remove_download(self, download_id: str) -> bool:
+        record = next((item for item in self._downloads if item["id"] == download_id), None)
+        if record is None or record["state"] not in self._TERMINAL_STATES:
+            return False
+        self._downloads = [item for item in self._downloads if item["id"] != download_id]
+        self._requests.pop(download_id, None)
+        self._disconnect_request_signals(download_id)
+        path_key = self._reserved_by_download.pop(download_id, None)
+        if path_key is not None:
+            self._release_path_reservation(path_key)
+        self.downloads_changed.emit()
+        return True
+
+    def delete_download_file(self, download_id: str) -> bool:
+        """Delete a completed download only when its resolved path stays in the download folder."""
+        record = next((item for item in self._downloads if item["id"] == download_id), None)
+        if record is None or record["state"] != "completed" or not record["path"]:
+            return False
+        root = os.path.realpath(self.download_dir)
+        target = os.path.realpath(record["path"])
+        try:
+            normalized_root = os.path.normcase(root)
+            normalized_target = os.path.normcase(target)
+            if os.path.commonpath((normalized_root, normalized_target)) != normalized_root:
+                return False
+            if not os.path.isfile(target):
+                return False
+            os.remove(record["path"])
+        except (OSError, ValueError):
+            return False
+        return self.remove_download(download_id)
 
     def clear_finished(self) -> None:
         before = len(self._downloads)
