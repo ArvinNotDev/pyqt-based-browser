@@ -14,10 +14,11 @@ def test_tor_runner_start_and_stop_manage_thread_and_process(monkeypatch):
     created_threads = []
 
     class FakeThread:
-        def __init__(self, target, args, daemon):
+        def __init__(self, target, args, daemon, name=None):
             self.target = target
             self.args = args
             self.daemon = daemon
+            self.name = name
             self.started = False
 
         def start(self):
@@ -29,8 +30,8 @@ def test_tor_runner_start_and_stop_manage_thread_and_process(monkeypatch):
         def join(self, timeout):
             self.join_timeout = timeout
 
-    def make_thread(target, args, daemon):
-        thread = FakeThread(target, args, daemon)
+    def make_thread(target, args, daemon, name=None):
+        thread = FakeThread(target, args, daemon, name)
         created_threads.append(thread)
         return thread
 
@@ -93,9 +94,9 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
 
     config = runner.generate_torcc()
 
-    assert "SocksPort 9050" in config
-    assert "ControlPort 9051" in config
-    assert "DNSPort 9053" in config
+    assert "SocksPort 127.0.0.1:9050" in config
+    assert "ControlPort 127.0.0.1:9051" in config
+    assert "DNSPort 127.0.0.1:9053" in config
     assert "UseBridges 1" in config
     plugin_command = runner._torrc_quote(runner.lyrebird_path)
     assert f"ClientTransportPlugin obfs4 exec {plugin_command}" in config
