@@ -16,6 +16,12 @@ read or later write requires it.
   recognized values remain available to the `Guest` profile.
 - Invalid or missing fields use current defaults. A missing profile resets to
   defaults instead of inheriting the values from a previously loaded profile.
+- A malformed settings document is copied to a unique `.corrupt-*.bak` file
+  before recovery rewrites it. Complete top-level records around damaged
+  members are retained when they can be decoded; if none can be recovered,
+  the repaired document starts empty and the original remains in the backup.
+- Loading a healthy settings document does not rewrite it. The next save after
+  recovery writes a normal settings document and keeps the backup unchanged.
 
 ## History
 

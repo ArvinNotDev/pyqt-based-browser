@@ -54,14 +54,94 @@ class Settings:
         if not os.path.exists(path):
             return {}, False
         try:
-            with open(path, "r", encoding="utf-8") as stream:
-                data = json.load(stream)
+            with open(path, "r", encoding="utf-8-sig") as stream:
+                raw = stream.read()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                data = Settings._recover_top_level_entries(raw)
+                logger.warning("Could not fully read settings from %s: %s", path, exc)
+                return data, True
             if not isinstance(data, dict):
                 raise ValueError("Settings JSON root must be an object")
             return data, False
-        except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as exc:
+        except (OSError, UnicodeError, ValueError) as exc:
             logger.warning("Could not read settings from %s: %s", path, exc)
             return {}, True
+
+    @staticmethod
+    def _recover_top_level_entries(raw: str) -> dict[str, Any]:
+        """Recover complete members preceding an error in a JSON object.
+
+        JSON cannot recover arbitrary damaged values, but it can often retain
+        other complete profile records around a malformed top-level entry.
+        The original document is backed up before this recovered object is
+        written by a caller.
+        """
+        start = len(raw) - len(raw.lstrip())
+        if start >= len(raw) or raw[start] != "{":
+            return {}
+
+        cursor = start + 1
+        recovered: dict[str, Any] = {}
+        while cursor < len(raw):
+            while cursor < len(raw) and raw[cursor].isspace():
+                cursor += 1
+            if cursor >= len(raw) or raw[cursor] == "}":
+                break
+            if raw[cursor] == ",":
+                cursor += 1
+                continue
+            member_start = cursor
+            curly_depth = 0
+            bracket_depth = 0
+            in_string = False
+            escaped = False
+            delimiter = ""
+            while cursor < len(raw):
+                char = raw[cursor]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        in_string = False
+                elif char == '"':
+                    in_string = True
+                elif char == "{":
+                    curly_depth += 1
+                elif char == "}":
+                    if curly_depth == 0 and bracket_depth == 0:
+                        delimiter = "}"
+                        break
+                    curly_depth = max(0, curly_depth - 1)
+                elif char == "[":
+                    bracket_depth += 1
+                elif char == "]":
+                    bracket_depth = max(0, bracket_depth - 1)
+                elif char == "," and curly_depth == 0 and bracket_depth == 0:
+                    delimiter = ","
+                    break
+                cursor += 1
+
+            member = raw[member_start:cursor].strip()
+            if member:
+                try:
+                    parsed_member = json.loads("{" + member + "}")
+                except (json.JSONDecodeError, ValueError):
+                    pass
+                else:
+                    if isinstance(parsed_member, dict):
+                        recovered.update(parsed_member)
+
+            if delimiter == "}":
+                break
+            if delimiter == ",":
+                cursor += 1
+                continue
+            break
+        return recovered
 
     @staticmethod
     def _prepare_for_write(path: str, data: dict[str, Any], corrupt: bool) -> None:
@@ -146,7 +226,11 @@ class Settings:
         # previous profile's values.
         for key, default in defaults.items():
             setattr(self, key, default)
-        data, _corrupt = self._read_document(self.file_path)
+        data, corrupt = self._read_document(self.file_path)
+        if corrupt:
+            # Keep the damaged source intact before atomically replacing it
+            # with recovered entries (or an empty object when none survived).
+            self._prepare_for_write(self.file_path, data, True)
         values = data.get(profile_name)
         if not isinstance(values, dict) and profile_name == "Guest":
             values = self._legacy_profile_settings(data)
@@ -185,7 +269,9 @@ class Settings:
 
     def load_profile_settings(self) -> None:
         """Load profile names, including the previous machine-hash schema."""
-        data, _corrupt = self._read_document(self.file_path)
+        data, corrupt = self._read_document(self.file_path)
+        if corrupt:
+            self._prepare_for_write(self.file_path, data, True)
         metadata = data.get(_META_KEY)
         profiles = metadata.get("profiles") if isinstance(metadata, dict) else None
         if not isinstance(profiles, list):
