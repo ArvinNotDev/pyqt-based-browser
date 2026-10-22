@@ -1,17 +1,88 @@
-# PyQt Based Browser
+# ARMA Browser
 
-A Python desktop browser built with PySide6 and Qt WebEngine. The source includes tabbed browsing, navigation and search, profile settings and history, plus a local proxy UI with Tor bundle management and host block/exclusion rules. Tor routing requires a usable Tor bundle and a successful connection; it has not been validated here against the live Tor network.
+ARMA Browser is a tabbed desktop browser built with Python, PySide6, and Qt WebEngine. It brings everyday browsing controls, profile-based settings, bookmarks, history, a download center, and an optional local proxy/Tor interface into one desktop app.
 
-## Support
+This README documents the features present in the source today, how to run them, and the limits to keep in mind. ARMA Browser is an actively developed source project; it is not yet distributed as a signed installer or a verified portable executable.
 
-- Windows x64 is the primary release target.
-- Ubuntu Linux x64 is included in CI and can run from source with the system libraries listed below. Other distributions may need equivalent Qt WebEngine and barcode-reader libraries.
-- macOS is not currently covered by CI and is not a supported platform claim.
-- Python 3.10 through 3.13 is the declared range.
+## What ARMA Browser includes
+
+### Browsing and tabs
+
+- Navigate with Back, Forward, Reload, Home, and the combined address and search bar.
+- Enter a URL or search phrase in the address bar. Suggestions can use the current profile's browsing history.
+- Open multiple pages in tabs, create a tab with the **+** control in the tab strip, and switch tabs with the mouse or keyboard.
+- Hover over an inactive tab to preview it. Resize tab widths to fit the window, then use the tab-strip scroll controls when the window has more tabs than can fit.
+- Right-click a tab to open, reload, duplicate, copy its address, close it, close other tabs, close tabs to its right, or reopen a recently closed tab.
+- Closing the final tab exits the browser when the Downloads panel is closed. ARMA Browser does not restore the previous set of tabs at startup.
+
+### Bookmarks and history
+
+- Add or remove the current page from bookmarks with the bookmark control or **Ctrl+D**.
+- Open and manage bookmarks from the browser menu or bookmarks bar. Bookmark context menus include opening in the current or a new tab, copying the address, editing, and removing the bookmark.
+- Browse and search history for the selected profile. The history window can remove a selected address or visit, clear history by date and time, or clear all history.
+- History and bookmarks are stored by profile under `profile_data/` in the current working directory.
+
+### Downloads
+
+- Selecting **Downloads** from the browser menu opens an animated drawer on the left side of the browser. Starting a download also opens the drawer and shows a brief in-app notification.
+- Download cards show the filename, source URL, progress, and current status. The action menu includes **Copy URL**, **Open file**, **Show in folder**, **Pause/Resume**, **Cancel**, **Remove from list**, and **Delete downloaded file** where each action applies.
+- **Clear finished** removes completed, cancelled, and failed entries from the list. Removing an entry does not delete its file. Deleting a completed download asks for confirmation and removes the downloaded file from the configured download folder.
+- A download record exists in memory for the current browser session; the file itself remains in the selected download folder. Private browsing also saves downloaded files there, so downloaded files are not automatically private or deleted when the browser closes.
+- Once a download request is accepted, the tab that started it closes. The Downloads drawer remains available to track and manage the transfer.
+- Closing the browser while downloads are active or paused asks whether to cancel them and close. Choosing **Cancel** keeps the browser open.
+
+### Profiles, privacy, and settings
+
+Settings are scoped to the selected profile. The Settings window includes:
+
+- Homepage, default search URL, and download location.
+- Light or dark appearance.
+- History saving, cookie persistence, and private browsing controls.
+- Website compatibility mode, which adjusts the browser user-agent string.
+- The option to show the proxy panel when the browser starts.
+- Hardware acceleration preference, which requires a restart to change the running Chromium process.
+- A built-in keyboard shortcut reference.
+
+Private browsing uses a separate in-memory Qt WebEngine profile and does not keep browsing history or cookies between sessions. It does not restore tabs after restart. Downloads are still written to the configured folder, and any downloaded files remain there.
+
+### Proxy and Tor tools
+
+The browser includes a proxy panel for local proxy and Tor configuration, along with host blocking and route-exclusion rules. The app configures Chromium to use its loopback proxy before WebEngine starts. Tor routing depends on a usable Tor expert bundle, available local ports, and network access; bridge routes also need valid bridge lines and compatible transport support. A successful UI setup does not guarantee that a particular network or website will be reachable.
+
+The browser menu can switch the proxy panel, connect the current site directly when Tor routing is active, and toggle Gaming mode. Gaming mode temporarily disables ARMA Browser's registered browser keyboard shortcuts; turn it off from the same menu to restore them.
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+T` | Open a new tab |
+| `Ctrl+W` | Close the current tab |
+| `Ctrl+Shift+T` | Reopen a recently closed tab |
+| `Ctrl+Tab` or `Ctrl+PageDown` | Select the next tab |
+| `Ctrl+Shift+Tab` or `Ctrl+PageUp` | Select the previous tab |
+| `Ctrl+1` through `Ctrl+8` | Select a tab by position |
+| `Ctrl+9` | Select the last tab |
+| `Ctrl+L` or `Alt+D` | Focus the address bar |
+| `Ctrl+R` or `F5` | Reload the current page |
+| `Alt+Left` / `Alt+Right` | Go back / forward |
+| `Alt+Home` | Open the homepage |
+| `Ctrl+D` | Bookmark the current page |
+| `Ctrl+H` | Open history |
+| `Ctrl+J` | Open Downloads |
+| `Ctrl+,` | Open Settings |
+
+Gaming mode pauses the shortcuts above until it is switched off. Web pages can continue to use their own keyboard input while Gaming mode is active.
+
+## Support and prerequisites
+
+- **Windows x64** is the primary release target.
+- **Ubuntu Linux x64** is included in CI and can run from source with the system packages below. Other Linux distributions may need equivalent libraries.
+- **macOS** is not covered by CI and is not currently a supported platform claim.
+- Python **3.10–3.13** is the declared range.
 
 ## Install from source
 
-Run the browser from the repository root. The application currently stores some state relative to the source tree or working directory, including `proxy/config.json`, `settings.json`, `profile_data/`, and proxy rule files. Use a writable checkout.
+Run commands from the repository root. Some settings, profile data, and proxy files use paths relative to the working directory, so use a writable checkout.
 
 ### Windows PowerShell
 
@@ -23,11 +94,11 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-If PowerShell blocks activation, use `.venv\Scripts\python.exe` in place of `python` for the installation and run commands.
+If PowerShell blocks environment activation, use `.venv\Scripts\python.exe` in place of `python`.
 
 ### Ubuntu Linux
 
-Qt WebEngine and QR decoding need system libraries in addition to the Python wheels:
+Qt WebEngine and QR decoding require system libraries in addition to the Python packages:
 
 ```bash
 sudo apt-get update
@@ -39,15 +110,13 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Other Linux distributions need the equivalent OpenGL, XCB, xkbcommon, and `zbar` runtime packages. Camera access is needed for QR scanning.
+Run from a graphical desktop session. QR scanning is optional and also requires camera access.
 
-## Dependencies
+## Dependencies and development checks
 
-`requirements.txt` contains pinned direct runtime dependencies identified from application imports. It keeps a single `PySide6` pin; the matching Addons, Essentials, and shiboken packages are installed through that package's dependencies. `requirements-dev.txt` includes the runtime set plus pytest and Ruff.
+`requirements.txt` pins the direct runtime dependencies. The PySide6 package supplies its matching Addons, Essentials, and shiboken packages. `requirements-dev.txt` adds pytest and Ruff for contributors.
 
-The Tor UI can use the Windows and Linux x64 archives tracked under `proxy/bundles/`, or download a compatible archive from the Tor Project through its bundle updater. The updater attempts to cache the published SHA-256 sums when it refreshes the available versions. The current offline bundle check accepts an archive when no matching checksum file is cached, so that path does not guarantee archive integrity. Do not treat the bundled Tor archives as independently verified by the application.
-
-## Test and check
+The project CI compiles the application and runs its unit suite on Windows and Ubuntu for Python 3.10–3.13. The suite uses temporary directories and mocks for persistence and proxy/Tor process interactions; it does not make live Tor or public-network connections. CI does not claim macOS support.
 
 ```bash
 python -m pip install -r requirements-dev.txt
@@ -56,29 +125,27 @@ python -m ruff check tests
 python -m pytest -ra
 ```
 
-The tests use temporary directories and mocks for persistence and proxy/Tor process interactions. They do not connect to Tor or the public network. Tests for bookmark/download managers and the URL utility are skipped while those modules are absent from this branch; once their source files are added, the tests import them normally and expose API or dependency errors. Two existing defects are recorded as strict expected failures: malformed settings reads and invalid proxy port validation.
+## Source releases
 
-GitHub Actions runs these checks on Windows and Ubuntu for Python 3.10–3.13. The workflow does not claim macOS validation or run live Tor integration tests.
-
-## Source release
-
-The release workflow publishes a ZIP made from a version tag and a SHA-256 sidecar. To make one locally from a checked-out tag:
+The release workflow creates a versioned source ZIP and a SHA-256 sidecar from a Git tag. To build the same archive locally from a tag:
 
 ```powershell
 ./scripts/package-source.ps1 -Tag v1.2.3
 ```
 
-The source archive includes the tracked Tor bundle archives and is expected to be installed with Python and `requirements.txt`. There is no standalone executable installer yet. A PyInstaller build was evaluated and deferred: current code mixes resources under `proxy/`, paths under the process working directory, and mutable configuration under the bundle resource root. Those paths need a single writable application-data/resource layout, followed by a clean-machine Qt WebEngine and Tor bundle smoke test, before a frozen executable can be claimed as reproducible.
+The archive includes the tracked Windows and Linux x64 Tor bundles. There is no signed installer or standalone executable yet. A frozen build needs a consistent user-data/resource layout and a clean-machine Qt WebEngine and Tor smoke check before it can be described as reproducible.
 
-See [the packaging and release notes](docs/PACKAGING.md) and [release checklist](docs/RELEASE_CHECKLIST.md) before publishing a version.
+See [packaging and release notes](docs/PACKAGING.md) and the [release checklist](docs/RELEASE_CHECKLIST.md) before publishing a version.
 
-## Troubleshooting
+## Current scope and troubleshooting
 
-- **Qt WebEngine does not start on Linux:** install the distribution's Qt WebEngine dependencies, including OpenGL, XCB, and xkbcommon runtime libraries. Run from a graphical session for interactive browsing.
-- **QR scanner import or camera errors:** install the OS `zbar` library and check camera permissions. QR scanning is optional to normal browsing.
-- **Tor does not connect:** check that a compatible bundle exists, the configured local ports are available, and the network permits Tor. Bridge connectivity needs valid bridge lines and the matching transport support in the selected bundle.
-- **State cannot be written:** run the source checkout from a writable directory. The current application does not consistently use the operating system's per-user application-data directory.
-- **Global shortcut behavior differs on Linux:** the `keyboard` dependency may require desktop/session permissions that vary by distribution.
+- **Ad blocking and browser extensions:** ARMA Browser does not include an ad-blocking extension or an extension store. Website compatibility mode only changes the user-agent string; it does not disable a site's ad-block detection or change proxy behavior.
+- **A website blocks access or a download:** the site may require an extension, login, cookie, or network route that is unavailable in the current session. Check the proxy panel and the site's own requirements. ARMA Browser does not promise to bypass a site's access checks.
+- **Qt WebEngine fails to start on Linux:** install the distribution's Qt WebEngine dependencies, including OpenGL, XCB, and xkbcommon libraries, and launch from a graphical session.
+- **QR scanner or camera errors:** install the OS `zbar` library and check camera permissions. QR scanning is optional for browsing.
+- **Tor does not connect:** check that a compatible bundle is installed, local ports are available, and the network allows Tor traffic. Bridge connections need valid bridge lines and matching transport support.
+- **Settings or profile data cannot be saved:** run the checkout from a writable location. This project does not yet move all mutable files to the operating system's standard per-user application-data directory.
+- **Shortcut behavior differs by desktop:** some environments reserve keys globally or limit keyboard input. Gaming mode only controls shortcuts registered by ARMA Browser.
 
 ## License
 
