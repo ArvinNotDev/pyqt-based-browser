@@ -31,10 +31,10 @@ profile-switching code must apply runtime policies.
   before Qt WebEngine initializes on later launches. A settings value cannot
   change an already initialized engine.
 
-The separately reviewed browser-core branch currently applies the history,
-cookie, private-profile, and download-folder policies above. Its startup path
-does not load the per-profile hardware-acceleration preference before Qt
-WebEngine initialization, so that integration remains outstanding. The data
+The browser-core integration applies the history, cookie, private-profile,
+download-folder, and hardware-acceleration policies above. Startup loads the
+selected profile's acceleration preference before Qt WebEngine initializes;
+changing that setting in the running application requires a restart. The data
 layer does not claim cookie or private-mode behavior on its own.
 
 ## Stable manager APIs
