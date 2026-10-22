@@ -27,5 +27,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $archive = "pyqt-based-browser-$env:GITHUB_REF_NAME-source.zip"
+          $archive = "arma-browser-$env:GITHUB_REF_NAME-source.zip"
           gh release create $env:GITHUB_REF_NAME $archive "$archive.sha256" --generate-notes

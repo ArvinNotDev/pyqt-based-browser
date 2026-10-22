@@ -15,14 +15,14 @@ class CustomTitleBar(QWidget):
         layout.setContentsMargins(14, 0, 8, 0)
         layout.setSpacing(9)
 
-        self.logo = QLabel("R", self)
+        self.logo = QLabel("A", self)
         self.logo.setObjectName("titleBarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
         self.logo.setFixedSize(25, 25)
         self.logo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.logo)
 
-        self.title = QLabel("R-Browser", self)
+        self.title = QLabel("ARMA Browser", self)
         self.title.setObjectName("titleBarTitle")
         self.title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.title)

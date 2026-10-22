@@ -58,6 +58,8 @@ if __name__ == "__main__":
     from ui.browser_window import BrowserWindow
 
     app = QApplication(sys.argv)
+    app.setApplicationName("ARMA Browser")
+    app.setApplicationDisplayName("ARMA Browser")
     window = BrowserWindow(proxy_port=proxy_port)
     window.showMaximized()
     sys.exit(app.exec())

@@ -11,8 +11,8 @@ if ($LASTEXITCODE -ne 0) {
     throw "Tag '$Tag' does not resolve to a commit."
 }
 
-$archive = "pyqt-based-browser-$Tag-source.zip"
-$prefix = "pyqt-based-browser-$Tag/"
+$archive = "arma-browser-$Tag-source.zip"
+$prefix = "arma-browser-$Tag/"
 git archive --format=zip "--prefix=$prefix" --output=$archive $Tag
 if ($LASTEXITCODE -ne 0) {
     throw "Could not create source archive for '$Tag'."
