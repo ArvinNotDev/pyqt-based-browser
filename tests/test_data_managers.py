@@ -410,8 +410,13 @@ class DataManagerTests(unittest.TestCase):
         request = FakeDownloadRequest(name="after-change.txt")
         profile.downloadRequested.emit(request)
 
-        self.assertEqual(manager.download_dir, os.path.abspath(new_directory))
-        self.assertEqual(os.path.dirname(manager.get_downloads()[0]["path"]), os.path.abspath(new_directory))
+        self.assertTrue(os.path.samefile(manager.download_dir, new_directory))
+        self.assertTrue(
+            os.path.samefile(
+                os.path.dirname(manager.get_downloads()[0]["path"]),
+                new_directory,
+            )
+        )
 
         explicit_directory = Path(self.temp_dir.name) / "explicit-downloads"
         separate = DownloadManager("Other", str(explicit_directory))

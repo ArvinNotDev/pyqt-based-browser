@@ -1,0 +1,31 @@
+name: Publish source release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  source-archive:
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Build tagged source archive
+        shell: pwsh
+        run: ./scripts/package-source.ps1 -Tag $env:GITHUB_REF_NAME
+
+      - name: Publish archive and checksum
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $archive = "pyqt-based-browser-$env:GITHUB_REF_NAME-source.zip"
+          gh release create $env:GITHUB_REF_NAME $archive "$archive.sha256" --generate-notes
