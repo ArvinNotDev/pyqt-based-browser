@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QListWidget, QPushButton,
+    QDialog, QVBoxLayout, QListWidget, QListWidgetItem, QPushButton,
     QHBoxLayout, QLineEdit, QMessageBox, QLabel, QInputDialog
 )
 from PySide6.QtCore import Qt
@@ -60,25 +60,26 @@ class HistoryWindow(QDialog):
             return
 
         for link, visits in self.history.history.items():
-            self.list_widget.addItem(f"🔗 {link}")
-
-            if isinstance(visits, list):
-                for visit in visits:
-                    date = visit.get("date", "Unknown date")
-                    time = visit.get("time", "Unknown time")
-                    self.list_widget.addItem(f"   • {date} {time}")
-            elif isinstance(visits, dict):
-                date = visits.get("date", "Unknown date")
-                time = visits.get("time", "Unknown time")
-                self.list_widget.addItem(f"   • {date} {time}")
-            else:
-                self.list_widget.addItem(f"   • {visits}")
-
+            self._add_link_item(link)
+            for index, visit in enumerate(visits):
+                self._add_visit_item(link, visit, index)
             self.list_widget.addItem("")
+
+    def _add_link_item(self, link):
+        item = QListWidgetItem(f"🔗 {link}")
+        item.setData(Qt.UserRole, {"kind": "link", "link": link})
+        self.list_widget.addItem(item)
+
+    def _add_visit_item(self, link, visit, index):
+        date = str(visit.get("date", "Unknown date"))
+        time = str(visit.get("time", "Unknown time"))
+        item = QListWidgetItem(f"   • {date} {time}")
+        item.setData(Qt.UserRole, {"kind": "visit", "link": link, "date": date, "time": time, "index": index})
+        self.list_widget.addItem(item)
 
     def filter_history(self):
         """Filter visible items by search query."""
-        query = self.search_input.text().lower().strip()
+        query = self.search_input.text().casefold().strip()
         self.list_widget.clear()
 
         if not query:
@@ -87,15 +88,19 @@ class HistoryWindow(QDialog):
 
         found = False
         for link, visits in self.history.history.items():
-            if query in link.lower():
-                self.list_widget.addItem(f"🔗 {link}")
+            link_matches = query in link.casefold()
+            matching_visits = [
+                (index, visit) for index, visit in enumerate(visits)
+                if link_matches
+                or query in str(visit.get("date", "")).casefold()
+                or query in str(visit.get("time", "")).casefold()
+            ]
+            if link_matches or matching_visits:
+                self._add_link_item(link)
+                for index, visit in matching_visits:
+                    self._add_visit_item(link, visit, index)
+                self.list_widget.addItem("")
                 found = True
-            if isinstance(visits, list):
-                for visit in visits:
-                    date, time = visit.get("date", ""), visit.get("time", "")
-                    if query in date.lower() or query in time.lower():
-                        self.list_widget.addItem(f"   • {date} {time}  -  {link}")
-                        found = True
 
         if not found:
             self.list_widget.addItem("No results found.")
@@ -107,51 +112,36 @@ class HistoryWindow(QDialog):
             QMessageBox.warning(self, "No Selection", "Select an item to delete.")
             return
 
-        text = selected_item.text().strip()
-        if text.startswith("🔗 "):
-            link = text[2:].strip()
+        metadata = selected_item.data(Qt.UserRole)
+        if not isinstance(metadata, dict):
+            QMessageBox.warning(self, "No Selection", "Select a history URL or visit entry.")
+            return
+        if metadata.get("kind") == "link":
+            link = metadata.get("link")
             confirm = QMessageBox.question(
                 self, "Confirm Delete", f"Delete ALL history for:\n{link}?"
             )
             if confirm == QMessageBox.Yes:
                 self.history.delete(link=link)
                 self.load_history()
-        elif text.startswith("•") or text.startswith("• "):
-            # Try to identify link above
-            index = self.list_widget.row(selected_item)
-            link = None
-            for i in range(index - 1, -1, -1):
-                item = self.list_widget.item(i)
-                if item and item.text().startswith("🔗 "):
-                    link = item.text()[2:].strip()
-                    break
-            if not link:
-                QMessageBox.warning(self, "Error", "Could not determine link for this entry.")
-                return
-
-            date_time = text.replace("•", "").strip().split()
-            if len(date_time) >= 2:
-                date, time = date_time[0], date_time[1]
-                confirm = QMessageBox.question(
-                    self,
-                    "Confirm Delete",
-                    f"Delete visit at {date} {time} for:\n{link}?",
-                )
-                if confirm == QMessageBox.Yes:
-                    visits = self.history.history.get(link, [])
-                    self.history.history[link] = [
-                        v for v in visits if not (v["date"] == date and v["time"] == time)
-                    ]
-                    if not self.history.history[link]:
-                        del self.history.history[link]
-                    self.history.save()
-                    self.load_history()
+        elif metadata.get("kind") == "visit":
+            link = metadata.get("link")
+            date = metadata.get("date")
+            time = metadata.get("time")
+            confirm = QMessageBox.question(
+                self,
+                "Confirm Delete",
+                f"Delete visit at {date} {time} for:\n{link}?",
+            )
+            if confirm == QMessageBox.Yes:
+                self.history.delete_visit(link, date, time, metadata.get("index"))
+                self.filter_history()
 
     def delete_by_date_time(self):
         """Delete all visits on a given date or time."""
         text, ok = QInputDialog.getText(
             self, "Delete by Date/Time",
-            "Enter date (YYYY/MM/DD) or time (HH:MM):"
+            "Enter an exact date (YYYY/MM/DD) or time (HH:MM):"
         )
         if not ok or not text.strip():
             return
@@ -159,35 +149,15 @@ class HistoryWindow(QDialog):
         text = text.strip()
         confirm = QMessageBox.question(
             self, "Confirm Delete",
-            f"Delete all history entries with date/time containing '{text}'?"
+            f"Delete all history entries with the exact date or time '{text}'?"
         )
         if confirm != QMessageBox.Yes:
             return
 
-        for link in list(self.history.history.keys()):
-            visits = self.history.history[link]
-
-            if isinstance(visits, dict):
-                visits = [visits]
-            elif isinstance(visits, str):
-                continue
-            elif not isinstance(visits, list):
-                continue
-
-            cleaned = []
-            for v in visits:
-                if not isinstance(v, dict):
-                    continue
-                if text in v.get("date", "") or text in v.get("time", ""):
-                    continue
-                cleaned.append(v)
-
-            if cleaned:
-                self.history.history[link] = cleaned
-            else:
-                del self.history.history[link]
-
-        self.history.save()
+        if "/" in text:
+            self.history.delete(date=text)
+        else:
+            self.history.delete(time=text)
         self.load_history()
 
 

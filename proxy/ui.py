@@ -160,10 +160,11 @@ class Window(QMainWindow):
     def closeEvent(self, event):
         if IS_WINDOWS:
             self.listener_running = False
-            self.listener_thread.join()
+            self.listener_thread.join(timeout=1)
         
         self.listener_running = False 
         self.tray_icon.hide()  
         self.proxyWidget._stop_services()
+        self.proxyWidget.proxy.stop()
         logger.info("The window is closing by some other method.")
         event.accept()
