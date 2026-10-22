@@ -1,11 +1,11 @@
 from PySide6.QtWidgets import (
     QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFileDialog, QSlider, QSizePolicy, QMessageBox, QSpinBox,
-    QToolButton, QCheckBox
+    QPushButton, QFileDialog, QSlider, QSizePolicy, QMessageBox, QCheckBox,
+    QStyle, QStyleOption
 )
 from PySide6.QtGui import (
-    QPixmap, QPainter, QPainterPath, QTransform, QImage, QColor, QIcon,
-    QKeySequence, QShortcut
+    QPixmap, QPainter, QPainterPath, QTransform, QImage,
+    QKeySequence, QShortcut, QPalette
 )
 from PySide6.QtCore import Qt, QPoint, QRect, Signal
 import os
@@ -28,6 +28,8 @@ class ProfilePreview(QWidget):
         self._rotation = 0.0
         self._flip_h = False
         self._flip_v = False
+        self.setObjectName("profileImagePreview")
+        self.setAttribute(Qt.WA_StyledBackground, True)
         self.setToolTip("Drag to pan, wheel to zoom, double-click to Fit")
 
     def set_pixmap(self, pix: QPixmap):
@@ -100,6 +102,16 @@ class ProfilePreview(QWidget):
         self._offset = QPoint(0, 0)
         self.update()
 
+    def reset_view(self):
+        self._offset = QPoint(0, 0)
+        self._rotation = 0.0
+        self._flip_h = False
+        self._flip_v = False
+        if not self._pix.isNull():
+            self.cover_out()
+        self.rotation_changed.emit(self._rotation)
+        self.update()
+
     def _constrain_offset(self):
         if self._pix.isNull():
             self._offset = QPoint(0, 0)
@@ -126,14 +138,17 @@ class ProfilePreview(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHints(QPainter.SmoothPixmapTransform | QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor(30, 30, 30))
+        palette = self.palette()
+        option = QStyleOption()
+        option.initFrom(self)
+        self.style().drawPrimitive(QStyle.PE_Widget, option, painter, self)
         path = QPainterPath()
         path.addEllipse(self.rect())
         painter.setClipPath(path)
         if self._pix.isNull():
-            painter.setPen(Qt.NoPen)
-            painter.setBrush(Qt.darkGray)
-            painter.drawEllipse(self.rect())
+            painter.setPen(palette.color(QPalette.Mid))
+            painter.setBrush(Qt.NoBrush)
+            painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
             return
         sw = max(1, int(self._pix.width() * self._zoom))
         sh = max(1, int(self._pix.height() * self._zoom))
@@ -155,7 +170,7 @@ class ProfilePreview(QWidget):
         src_rect = QRect(src_left, src_top, w, h)
         painter.drawPixmap(self.rect(), transformed, src_rect)
         painter.setClipping(False)
-        painter.setPen(QColor(200, 200, 200))
+        painter.setPen(palette.color(QPalette.Mid))
         painter.setBrush(Qt.NoBrush)
         painter.drawEllipse(self.rect().adjusted(1, 1, -1, -1))
 
@@ -243,13 +258,18 @@ class CustomizeProfile(QDialog):
 
     def __init__(self, username: str, parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
         self.username = username
-        self.setWindowTitle("Profile Editor — Clipboard & Copy")
-        self.setMinimumSize(760, 300)
-        self._ensure_profile_dir()
+        self.setWindowTitle("Customize profile image")
+        self.setMinimumSize(820, 410)
+        self.resize(920, 500)
 
         self.preview = ProfilePreview(diameter=320, parent=self)
         self.preview.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.preview.setAccessibleName("Profile image crop preview")
+        self.preview.setAccessibleDescription(
+            "Drag to reposition the image, use the mouse wheel to zoom, and double-click to fit."
+        )
 
         top = QHBoxLayout()
         left_col = QVBoxLayout()
@@ -473,9 +493,7 @@ class CustomizeProfile(QDialog):
         QMessageBox.information(self, "Copied", "Cropped circular image copied to clipboard (Ctrl+V to paste).")
 
     def _reset_view(self):
-        self.preview._offset = QPoint(0, 0)
-        self.preview.set_rotation(0.0)
-        self.preview.cover_out()
+        self.preview.reset_view()
         self.info_label_if_needed()
 
     def info_label_if_needed(self):
@@ -488,8 +506,12 @@ class CustomizeProfile(QDialog):
             QMessageBox.warning(self, "No Image", "No image to save.")
             return
         path = self._profile_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        ok = final.save(path, "PNG")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            ok = final.save(path, "PNG")
+        except OSError as error:
+            QMessageBox.warning(self, "Save failed", f"Could not save the profile image.\n\n{error}")
+            return
         if not ok:
             QMessageBox.warning(self, "Save failed", "Could not save image.")
             return
