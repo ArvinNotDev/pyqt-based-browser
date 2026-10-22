@@ -34,7 +34,22 @@ def _configure_chromium_proxy(port: int) -> None:
     os.environ.pop("QTWEBENGINE_DISABLE_SANDBOX", None)
 
 
+def _load_startup_settings():
+    """Load the active profile's settings before Qt WebEngine initializes."""
+    from ui.settings import Settings
+
+    settings = Settings()
+    settings.load_profile_settings()
+    profile_name = "Guest"
+    if settings.profiles_list and profile_name not in settings.profiles_list:
+        profile_name = settings.profiles_list[0]
+    settings.load(profile_name)
+    Settings.configure_hardware_acceleration(settings.hardware_acceleration)
+    return settings
+
+
 if __name__ == "__main__":
+    _load_startup_settings()
     proxy_port = _reserve_proxy_port()
     _configure_chromium_proxy(proxy_port)
 
