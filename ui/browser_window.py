@@ -1038,6 +1038,8 @@ class BrowserWindow(QMainWindow):
             logger.exception("Could not apply the current browser theme")
     
     def closeEvent(self, event):
+        for download_manager in self._download_managers.values():
+            download_manager.shutdown()
         views = list(self.views)
         self.views.clear()
         self._placeholders.clear()
