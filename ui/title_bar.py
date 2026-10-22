@@ -77,3 +77,23 @@ class CustomTitleBar(QWidget):
             event.accept()
             return
         super().mouseDoubleClickEvent(event)
+
+
+class ResizeHandle(QWidget):
+    """Thin frameless-window edge that delegates resizing to the window system."""
+
+    def __init__(self, host, edges, cursor):
+        super().__init__(host)
+        self.host = host
+        self.edges = edges
+        self.setCursor(cursor)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setFocusPolicy(Qt.NoFocus)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            handle = self.host.windowHandle()
+            if handle is not None and handle.startSystemResize(self.edges):
+                event.accept()
+                return
+        super().mousePressEvent(event)

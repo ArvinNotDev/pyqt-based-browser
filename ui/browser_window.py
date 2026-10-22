@@ -5,13 +5,13 @@ import logging
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QTimer, Signal, QPoint, QPropertyAnimation,
+    QEvent, Qt, QUrl, QTimer, Signal, QPoint, QRect, QPropertyAnimation,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu, QSizeGrip
+    QLineEdit, QMenu
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -21,7 +21,7 @@ from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
-from .title_bar import CustomTitleBar
+from .title_bar import CustomTitleBar, ResizeHandle
 from .history_window import HistoryWindow
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
@@ -472,9 +472,19 @@ class BrowserWindow(QMainWindow):
         self.setWindowTitle("R-Browser")
         self.title_bar.title.setText(self.windowTitle())
         self.apply_theme()
-        self._resize_grip = QSizeGrip(self)
-        self._resize_grip.setObjectName("windowResizeGrip")
-        self.statusBar().addPermanentWidget(self._resize_grip)
+        diagonal_down = Qt.SizeFDiagCursor
+        diagonal_up = Qt.SizeBDiagCursor
+        self._resize_handles = {
+            "top": ResizeHandle(self, Qt.TopEdge, Qt.SizeVerCursor),
+            "bottom": ResizeHandle(self, Qt.BottomEdge, Qt.SizeVerCursor),
+            "left": ResizeHandle(self, Qt.LeftEdge, Qt.SizeHorCursor),
+            "right": ResizeHandle(self, Qt.RightEdge, Qt.SizeHorCursor),
+            "top_left": ResizeHandle(self, Qt.TopEdge | Qt.LeftEdge, diagonal_down),
+            "top_right": ResizeHandle(self, Qt.TopEdge | Qt.RightEdge, diagonal_up),
+            "bottom_left": ResizeHandle(self, Qt.BottomEdge | Qt.LeftEdge, diagonal_up),
+            "bottom_right": ResizeHandle(self, Qt.BottomEdge | Qt.RightEdge, diagonal_down),
+        }
+        self._update_resize_handles()
 
         try:
             self.navbar.url_submitted.connect(self.navigate)
@@ -526,6 +536,34 @@ class BrowserWindow(QMainWindow):
         super().changeEvent(event)
         if event.type() == QEvent.WindowStateChange and hasattr(self, "title_bar"):
             self.title_bar.sync_maximize_button()
+            self._update_resize_handles()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_resize_handles()
+
+    def _update_resize_handles(self) -> None:
+        handles = getattr(self, "_resize_handles", None)
+        if not handles:
+            return
+        width, height = self.width(), self.height()
+        edge, corner = 6, 12
+        geometries = {
+            "top": QRect(corner, 0, max(0, width - 2 * corner), edge),
+            "bottom": QRect(corner, max(0, height - edge), max(0, width - 2 * corner), edge),
+            "left": QRect(0, corner, edge, max(0, height - 2 * corner)),
+            "right": QRect(max(0, width - edge), corner, edge, max(0, height - 2 * corner)),
+            "top_left": QRect(0, 0, corner, corner),
+            "top_right": QRect(max(0, width - corner), 0, corner, corner),
+            "bottom_left": QRect(0, max(0, height - corner), corner, corner),
+            "bottom_right": QRect(
+                max(0, width - corner), max(0, height - corner), corner, corner
+            ),
+        }
+        hidden = self.isMaximized() or self.isFullScreen()
+        for name, handle in handles.items():
+            handle.setGeometry(geometries[name])
+            handle.setVisible(not hidden)
 
     def _update_proxy_menu_action(self, visible: bool) -> None:
         self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
