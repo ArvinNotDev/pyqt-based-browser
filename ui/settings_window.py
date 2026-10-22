@@ -6,7 +6,7 @@ import copy
 import os
 import sys
 
-from PySide6.QtCore import QEasingCurve, Qt, QPropertyAnimation
+from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QGraphicsOpacityEffect,
+    QSizePolicy,
 )
 
 from managers.history_manager import History
@@ -72,11 +73,17 @@ class SettingsWindow(QDialog):
 
         self.pages = QStackedWidget()
         self.pages.setObjectName("settingsPages")
+        self.pages.setMinimumSize(0, 0)
+        self.pages.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.pages_scroll = QScrollArea()
         self.pages_scroll.setObjectName("settingsScroll")
-        self.pages_scroll.setWidgetResizable(True)
+        self.pages_scroll.setWidgetResizable(False)
+        self.pages_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.pages_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.pages_scroll.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         self.pages_scroll.setFrameShape(QFrame.NoFrame)
         self.pages_scroll.setWidget(self.pages)
+        self.pages_scroll.viewport().installEventFilter(self)
         content.addWidget(self.pages_scroll, 1)
         root.addLayout(content, 1)
 
@@ -112,9 +119,12 @@ class SettingsWindow(QDialog):
         self._page_animation.finished.connect(self._restore_page_opacity)
         self.section_list.currentRowChanged.connect(self._show_section)
         self.section_list.setCurrentRow(0)
+        QTimer.singleShot(0, self._update_pages_scroll_size)
 
     def _make_page(self, title: str, description: str) -> tuple[QWidget, QVBoxLayout]:
         page = QWidget()
+        page.setMinimumSize(0, 0)
+        page.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(14)
@@ -135,6 +145,35 @@ class SettingsWindow(QDialog):
         self.pages.addWidget(page)
         self.section_list.addItem(QListWidgetItem(title))
         return card, QVBoxLayout(card)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._update_pages_scroll_size)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.pages_scroll.viewport() and event.type() == QEvent.Resize:
+            QTimer.singleShot(0, self._update_pages_scroll_size)
+        return super().eventFilter(watched, event)
+
+    def _update_pages_scroll_size(self) -> None:
+        if not hasattr(self, "pages_scroll") or self.pages.count() == 0:
+            return
+        viewport = self.pages_scroll.viewport().size()
+        width = max(1, viewport.width())
+        content_height = 0
+        for index in range(self.pages.count()):
+            page = self.pages.widget(index)
+            layout = page.layout()
+            if layout is not None:
+                layout.activate()
+                content_height = max(content_height, layout.minimumSize().height())
+            if page.hasHeightForWidth():
+                content_height = max(content_height, page.heightForWidth(width))
+            else:
+                content_height = max(content_height, page.sizeHint().height())
+        height = max(viewport.height(), content_height)
+        if self.pages.width() != width or self.pages.height() != height:
+            self.pages.resize(width, height)
 
     def _add_general_page(self) -> None:
         _, card_layout = self._make_page(
@@ -285,6 +324,7 @@ class SettingsWindow(QDialog):
         page = self.pages.widget(index)
         effect = page.graphicsEffect()
         self.pages.setCurrentIndex(index)
+        QTimer.singleShot(0, self._update_pages_scroll_size)
         if not isinstance(effect, QGraphicsOpacityEffect):
             return
         self._page_animation.stop()
