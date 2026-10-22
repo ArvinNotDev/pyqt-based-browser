@@ -5,7 +5,7 @@ import logging
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    Qt, QUrl, QTimer, Signal, QPoint, QPropertyAnimation,
+    QEvent, Qt, QUrl, QTimer, Signal, QPoint, QPropertyAnimation,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -72,6 +72,7 @@ class TabButton(QFrame):
     clicked = Signal()
     closed = Signal()
     requested_preview = Signal()
+    context_requested = Signal(QPoint)
 
     def __init__(self, title: str = "New Tab"):
         super().__init__()
@@ -95,6 +96,9 @@ class TabButton(QFrame):
         self.close_btn.setFixedSize(18, 18)
         self.close_btn.setFocusPolicy(Qt.NoFocus)
         self.close_btn.setToolTip("Close tab")
+        self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.installEventFilter(self)
+        self.close_btn.installEventFilter(self)
 
         layout.addWidget(self.label)
         layout.addWidget(self.close_btn)
@@ -132,6 +136,12 @@ class TabButton(QFrame):
                 self.clicked.emit()
         super().mouseReleaseEvent(event)
 
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.ContextMenu:
+            self.context_requested.emit(event.globalPos())
+            return True
+        return super().eventFilter(obj, event)
+
     def set_active(self, active: bool):
         self._active = active
         color = "#d9534f" if active else "transparent"
@@ -152,6 +162,7 @@ class CustomTabBar(QFrame):
     tab_closed = Signal(int)
     new_tab_requested = Signal()
     tab_preview_requested = Signal(int)
+    tab_context_requested = Signal(int, QPoint)
 
     def __init__(self):
         super().__init__()
@@ -192,13 +203,16 @@ class CustomTabBar(QFrame):
         self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         self.plus_tab = QPushButton("+")
-        self.plus_tab.setFixedSize(28, TAB_HEIGHT)
+        self.plus_tab.setObjectName("tabPlusButton")
+        self.plus_tab.setFixedSize(38, TAB_HEIGHT)
+        self.plus_tab.setToolTip("New tab")
         self.plus_tab.setFocusPolicy(Qt.NoFocus)
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.clicked.connect(lambda: self.new_tab_requested.emit())
 
         self.external_plus = QPushButton("+")
-        self.external_plus.setFixedSize(28, TAB_HEIGHT)
+        self.external_plus.setObjectName("tabPlusButton")
+        self.external_plus.setFixedSize(38, TAB_HEIGHT)
         self.external_plus.setFocusPolicy(Qt.NoFocus)
         self.external_plus.setToolTip("New tab")
         self.external_plus.clicked.connect(lambda: self.new_tab_requested.emit())
@@ -216,6 +230,10 @@ class CustomTabBar(QFrame):
         tab.clicked.connect(lambda t=tab: self._on_tab_clicked(t))
         tab.closed.connect(lambda t=tab: self._on_tab_closed(t))
         tab.requested_preview.connect(lambda t=tab: self._on_tab_preview_requested(t))
+        tab.context_requested.connect(
+            lambda pos, t=tab: self.tab_context_requested.emit(self.tabs.index(t), pos)
+            if t in self.tabs else None
+        )
 
         insert_pos = max(0, self.holder_layout.count() - (1 if self.plus_inside else 0))
         self.holder_layout.insertWidget(insert_pos, tab)
@@ -413,6 +431,7 @@ class BrowserWindow(QMainWindow):
         # connect to our custom close flow
         self.tabbar.tab_closed.connect(self.request_close_tab)
         self.tabbar.tab_preview_requested.connect(self._show_tab_preview)
+        self.tabbar.tab_context_requested.connect(self._show_tab_context_menu)
 
         self.views: List[QWebEngineView] = []
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
@@ -575,6 +594,59 @@ class BrowserWindow(QMainWindow):
     def _close_current_tab(self) -> None:
         if self.current_index >= 0:
             self.request_close_tab(self.current_index)
+
+    def _show_tab_context_menu(self, index: int, global_pos: QPoint) -> None:
+        if index < 0 or index >= len(self.views):
+            return
+        view = self.views[index]
+        menu = QMenu(self)
+        new_tab_action = menu.addAction("New tab")
+        reload_action = menu.addAction("Reload tab")
+        duplicate_action = menu.addAction("Duplicate tab")
+        copy_action = menu.addAction("Copy page address")
+        menu.addSeparator()
+        close_action = menu.addAction("Close tab")
+        close_others_action = menu.addAction("Close other tabs")
+        close_right_action = menu.addAction("Close tabs to the right")
+        close_right_action.setEnabled(index < len(self.views) - 1)
+        menu.addSeparator()
+        reopen_action = menu.addAction("Reopen closed tab")
+        reopen_action.setEnabled(bool(self._closed_tab_urls))
+        selected = menu.exec(global_pos)
+
+        if selected is new_tab_action:
+            self.new_tab(self.settings.homepage)
+        elif selected is reload_action:
+            view.reload()
+        elif selected is duplicate_action:
+            self.new_tab(view.url().toString())
+        elif selected is copy_action:
+            QApplication.clipboard().setText(view.url().toString())
+            self.statusBar().showMessage("Page address copied.", 2000)
+        elif selected is close_action and view in self.views:
+            self.request_close_tab(self.views.index(view))
+        elif selected is close_others_action:
+            self._close_other_tabs(view)
+        elif selected is close_right_action:
+            self._close_tabs_to_right(view)
+        elif selected is reopen_action:
+            self._reopen_closed_tab()
+
+    def _close_other_tabs(self, keep_view: QWebEngineView) -> None:
+        for view in reversed(self.views.copy()):
+            if view is not keep_view and view in self.views:
+                self.request_close_tab(self.views.index(view))
+        if keep_view in self.views:
+            self.tabbar.set_active(self.views.index(keep_view))
+
+    def _close_tabs_to_right(self, anchor_view: QWebEngineView) -> None:
+        if anchor_view not in self.views:
+            return
+        anchor_index = self.views.index(anchor_view)
+        targets = self.views[anchor_index + 1:].copy()
+        for view in reversed(targets):
+            if view in self.views:
+                self.request_close_tab(self.views.index(view))
 
     def _reopen_closed_tab(self) -> None:
         if self._closed_tab_urls:

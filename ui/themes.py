@@ -38,6 +38,23 @@ QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed,
 QToolButton#newTabButton:pressed { background-color: #dfe5ed; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus,
 QToolButton#newTabButton:focus { border-color: #3979d6; }
+QToolButton#newTabButton {
+    color: #ffffff;
+    background-color: #3979d6;
+    border: none;
+    border-radius: 9px;
+    font-size: 22px;
+}
+QToolButton#newTabButton:hover { background-color: #2868c5; }
+QPushButton#tabPlusButton {
+    color: #3f4752;
+    background-color: #e9edf3;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    font-size: 23px;
+    font-weight: 600;
+}
+QPushButton#tabPlusButton:hover { background-color: #dce5f2; color: #285eae; }
 QToolButton#menuButton {
     background: transparent;
     color: #3f4752;
@@ -235,6 +252,23 @@ QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed,
 QToolButton#newTabButton:pressed { background-color: #343c47; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus,
 QToolButton#newTabButton:focus { border-color: #82aff4; }
+QToolButton#newTabButton {
+    color: #ffffff;
+    background-color: #3979d6;
+    border: none;
+    border-radius: 9px;
+    font-size: 22px;
+}
+QToolButton#newTabButton:hover { background-color: #4a88e3; }
+QPushButton#tabPlusButton {
+    color: #c7ced8;
+    background-color: #2a3038;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    font-size: 23px;
+    font-weight: 600;
+}
+QPushButton#tabPlusButton:hover { background-color: #35465f; color: #a8c9ff; }
 QToolButton#menuButton {
     background: transparent;
     color: #c7ced8;

@@ -134,6 +134,9 @@ class NavigationBar(QToolBar):
         self.home_btn.triggered.connect(self.home_clicked.emit)
 
         self.new_tab_btn = self._button("+", "New tab", "newTabButton")
+        self.new_tab_btn.setFixedSize(38, 34)
+        self.new_tab_btn.setFont(QFont("Segoe UI", 20, QFont.DemiBold))
+        self.new_tab_btn.setAccessibleName("Open a new tab")
         self.new_tab_btn.clicked.connect(self.new_tab_requested.emit)
         self._add_widget(self.new_tab_btn)
         self.addSeparator()
