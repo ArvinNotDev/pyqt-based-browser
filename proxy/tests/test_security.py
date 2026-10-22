@@ -263,6 +263,23 @@ class BundleSafetyTests(unittest.TestCase):
             with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)):
                 self.assertFalse(updater.check_hash(name, go_online=False))
 
+    def test_matching_cached_and_online_checksums_are_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.join(directory, "bundles")
+            os.makedirs(root)
+            name = "tor-expert-bundle-windows-x86_64-13.5.23.tar.gz"
+            archive = os.path.join(root, name)
+            with open(archive, "wb") as stream:
+                stream.write(b"verified archive")
+            digest = updater.sha256_file(archive)
+            checksum = digest + "  " + name + "\n"
+            with open(os.path.join(root, "13.5.23-sha256sums.txt"), "w", encoding="utf-8") as stream:
+                stream.write(checksum)
+            with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)):
+                self.assertTrue(updater.check_hash(name, go_online=False))
+                with mock.patch.object(updater, "_fetch_checksum", return_value=checksum):
+                    self.assertTrue(updater.check_hash(name, go_online=True))
+
     def test_online_checksum_failures_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = os.path.join(directory, "bundles")
