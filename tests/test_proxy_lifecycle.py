@@ -1,7 +1,6 @@
 import importlib
 from unittest.mock import Mock
 
-import pytest
 
 
 def test_tor_runner_start_and_stop_manage_thread_and_process(tmp_path, monkeypatch):
@@ -93,7 +92,6 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings():
     assert "ClientTransportPlugin obfs4 exec tor/pluggable_transports/lyrebird" in config
 
 
-@pytest.mark.xfail(strict=True, reason="is_port_free currently treats invalid ports as available")
 def test_invalid_port_is_not_reported_as_available():
     proxy_module = importlib.import_module("proxy.proxy")
     assert proxy_module.is_port_free("127.0.0.1", 65536) is False

@@ -75,7 +75,6 @@ def test_save_recovers_from_malformed_json(tmp_path):
     assert saved["Guest"]["homepage"] == settings.homepage
 
 
-@pytest.mark.xfail(strict=True, reason="Settings.load currently propagates malformed JSON")
 def test_load_recovers_from_malformed_json(tmp_path):
     settings_file = tmp_path / "settings.json"
     settings_file.write_text("{broken", encoding="utf-8")
