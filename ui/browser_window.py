@@ -11,9 +11,9 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu
+    QLineEdit, QMenu, QMessageBox
 )
-from PySide6.QtGui import QPixmap, QAction, QKeySequence
+from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -23,6 +23,7 @@ from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
 from .title_bar import CustomTitleBar, ResizeHandle
 from .history_window import HistoryWindow
+from .downloads_panel import DownloadsPanel
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
 from .url_utils import URLInputError, resolve_address_input
@@ -57,13 +58,9 @@ except ModuleNotFoundError as exc:
         raise
     BookmarksDialog = None
 
-try:
-    from .downloads_dialog import DownloadsDialog
-except ModuleNotFoundError as exc:
-    if exc.name != "ui.downloads_dialog":
-        raise
-    DownloadsDialog = None
 TAB_WIDTH = 160
+MIN_TAB_WIDTH = 112
+MAX_TAB_WIDTH = 220
 TAB_HEIGHT = 34
 TAB_SPACING = 4
 SCROLL_STEP = 140
@@ -81,8 +78,11 @@ class TabButton(QFrame):
         # give each tab a unique objectName so stylesheet selectors targeting this id
         # affect only this frame (and not other tab instances)
         self.setObjectName(f"tab_{int(id(self))}")
-        self.setFixedSize(TAB_WIDTH, TAB_HEIGHT)
+        self.setMinimumWidth(MIN_TAB_WIDTH)
+        self.setMaximumWidth(MAX_TAB_WIDTH)
+        self.setFixedHeight(TAB_HEIGHT)
         self.setCursor(Qt.PointingHandCursor)
+        self._title = title or "New Tab"
 
         self._active = False
 
@@ -90,11 +90,13 @@ class TabButton(QFrame):
         layout.setContentsMargins(6, 2, 6, 2)
         layout.setSpacing(6)
 
-        self.label = QLabel(title)
+        self.label = QLabel(self._title)
         self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.label.setMinimumWidth(0)
         self.label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
-        self.close_btn = QPushButton("❌")
+        self.close_btn = QPushButton("×")
+        self.close_btn.setObjectName("tabCloseButton")
         self.close_btn.setFixedSize(18, 18)
         self.close_btn.setFocusPolicy(Qt.NoFocus)
         self.close_btn.setToolTip("Close tab")
@@ -146,9 +148,9 @@ class TabButton(QFrame):
 
     def set_active(self, active: bool):
         self._active = active
-        color = "#d9534f" if active else "transparent"
+        color = "#3979d6" if active else "transparent"
         # Target only this frame by id so children (label/button) don't get the border.
-        # This ensures a single red line appears at the top of the tab only.
+        # This keeps the active-tab accent separate from the child controls.
         style = f"""
             QFrame#{self.objectName()} {{ border-top: 3px solid {color}; }}
             {self._child_css}
@@ -156,7 +158,17 @@ class TabButton(QFrame):
         self.setStyleSheet(style)
 
     def set_title(self, title: str):
-        self.label.setText(title[:30] if title else "New Tab")
+        self._title = title or "New Tab"
+        self.setToolTip(self._title)
+        self._update_elided_title()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_elided_title()
+
+    def _update_elided_title(self):
+        metrics = QFontMetrics(self.label.font())
+        self.label.setText(metrics.elidedText(self._title, Qt.ElideRight, max(0, self.label.width())))
 
 
 class CustomTabBar(QFrame):
@@ -316,13 +328,13 @@ class CustomTabBar(QFrame):
             return
         self._updating = True
         try:
-            viewport = self.scroll.viewport().width()
-            needed = len(self.tabs) * (TAB_WIDTH + TAB_SPACING) + self.plus_tab.width()
-            overflow = needed > viewport
+            count = len(self.tabs)
+            available = max(0, self.width())
+            target_width = (available - self.plus_tab.width()) // max(1, count)
+            overflow = bool(count and target_width < MIN_TAB_WIDTH)
 
             self.btn_left.setVisible(overflow)
             self.btn_right.setVisible(overflow)
-
             if overflow and self.plus_inside:
                 self.holder_layout.removeWidget(self.plus_tab)
                 self.plus_tab.setParent(None)
@@ -333,8 +345,19 @@ class CustomTabBar(QFrame):
                 self.plus_tab.setParent(self.holder)
                 self.external_plus.hide()
                 self.plus_inside = True
+            width = MIN_TAB_WIDTH if overflow else min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, target_width))
+            for tab in self.tabs:
+                tab.setFixedWidth(width)
+            content_width = count * width + (self.plus_tab.width() if self.plus_inside else 0)
+            self.holder.setMinimumWidth(content_width)
+            if overflow:
+                self.scroll.horizontalScrollBar().setPageStep(max(1, self.scroll.viewport().width()))
         finally:
             self._updating = False
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._update_overflow)
 
     def _on_tab_clicked(self, tab: TabButton):
         if tab in self.tabs:
@@ -414,6 +437,7 @@ class BrowserWindow(QMainWindow):
         self.profile = self._get_profile(self.selected_profile)
         self._apply_profile_settings(self.profile)
         self._download_managers = {}
+        self._connected_download_managers: set[int] = set()
         self._setup_feature_managers()
 
         self.navbar = NavigationBar(self.settings.profiles_list, settings=self.settings)
@@ -465,11 +489,22 @@ class BrowserWindow(QMainWindow):
             layout.addWidget(self.bookmarks_bar)
         layout.addWidget(self.tabbar)
         layout.addWidget(self.progress_bar)
-        layout.addWidget(self.view_container)
+        self.content_row = QWidget(root)
+        content_layout = QHBoxLayout(self.content_row)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+        self.downloads_panel = DownloadsPanel(self.download_manager, self.content_row)
+        self.downloads_panel.close_requested.connect(self._close_downloads_panel)
+        self.downloads_panel.hide()
+        content_layout.addWidget(self.downloads_panel)
+        content_layout.addWidget(self.view_container, 1)
+        layout.addWidget(self.content_row, 1)
         self.setCentralWidget(root)
+        self._setup_download_toast(root)
+        self._bind_download_manager()
 
         self.resize(self.settings.window_width, self.settings.window_height)
-        self.setWindowTitle("R-Browser")
+        self.setWindowTitle("ARMA Browser")
         self.title_bar.title.setText(self.windowTitle())
         self.apply_theme()
         diagonal_down = Qt.SizeFDiagCursor
@@ -541,6 +576,7 @@ class BrowserWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_resize_handles()
+        self._position_download_toast()
 
     def _update_resize_handles(self) -> None:
         handles = getattr(self, "_resize_handles", None)
@@ -823,19 +859,22 @@ class BrowserWindow(QMainWindow):
                 logger.exception("Could not initialize bookmarks for profile %s", self.selected_profile)
 
         self.download_manager = None
-        if DownloadManager is not None and not self.settings.private_mode:
+        if DownloadManager is not None:
             try:
-                self.download_manager = self._download_managers.get(self.selected_profile)
+                manager_key = (self.selected_profile, bool(self.settings.private_mode))
+                self.download_manager = self._download_managers.get(manager_key)
                 if self.download_manager is None:
                     self.download_manager = DownloadManager(
                         self.selected_profile,
                         download_dir=self.settings.download_folder,
                     )
-                    self._download_managers[self.selected_profile] = self.download_manager
+                    self._download_managers[manager_key] = self.download_manager
                 self.download_manager.attach_profile(self.profile)
             except Exception:
                 logger.exception("Could not initialize downloads for profile %s", self.selected_profile)
                 self.download_manager = None
+
+        self._bind_download_manager()
 
         if not hasattr(self, "bookmarks_bar"):
             self.bookmarks_bar = (
@@ -954,14 +993,111 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage("Could not open bookmarks.", 3000)
 
     def show_downloads(self, *args):
-        if DownloadsDialog is None or self.download_manager is None:
-            self.statusBar().showMessage("Downloads are unavailable in this session.", 3000)
+        if hasattr(self, "downloads_panel"):
+            self.downloads_panel.open()
+
+    def _bind_download_manager(self) -> None:
+        panel = getattr(self, "downloads_panel", None)
+        if panel is not None:
+            panel.set_manager(self.download_manager)
+        manager = self.download_manager
+        if manager is None or id(manager) in self._connected_download_managers:
             return
         try:
-            DownloadsDialog(self.download_manager, self).exec()
-        except Exception:
-            logger.exception("Could not open downloads")
-            self.statusBar().showMessage("Could not open downloads.", 3000)
+            manager.download_started.connect(self._on_download_started)
+            self._connected_download_managers.add(id(manager))
+        except (AttributeError, RuntimeError):
+            logger.exception("Could not connect download notifications")
+
+    def _on_download_started(self, download_id: str, source_page) -> None:
+        if self._closing:
+            return
+        self.show_downloads()
+        manager = self.download_manager
+        record = next(
+            (item for item in manager.get_downloads() if item.get("id") == download_id),
+            {},
+        ) if manager is not None else {}
+        self._show_download_toast(str(record.get("file_name") or "Your file is being downloaded"))
+        QTimer.singleShot(0, lambda page=source_page: self._close_download_source_tab(page))
+
+    def _close_download_source_tab(self, page) -> None:
+        if page is None or self._closing:
+            return
+        for index, view in enumerate(tuple(self.views)):
+            try:
+                if view.page() is page:
+                    self.request_close_tab(index)
+                    return
+            except RuntimeError:
+                continue
+
+    def _close_downloads_panel(self) -> None:
+        self.downloads_panel.close_panel()
+        if not self.views and not self.close():
+            self.new_tab(self.settings.homepage)
+
+    def _setup_download_toast(self, parent: QWidget) -> None:
+        self.download_toast = QFrame(parent)
+        self.download_toast.setObjectName("downloadToast")
+        self.download_toast.setFixedWidth(350)
+        toast_layout = QHBoxLayout(self.download_toast)
+        toast_layout.setContentsMargins(14, 11, 10, 11)
+        toast_layout.setSpacing(10)
+        toast_text = QVBoxLayout()
+        toast_text.setSpacing(3)
+        self.download_toast_title = QLabel("Download started", self.download_toast)
+        self.download_toast_title.setObjectName("downloadToastTitle")
+        self.download_toast_file = QLabel("", self.download_toast)
+        self.download_toast_file.setObjectName("downloadToastFile")
+        self.download_toast_file.setWordWrap(True)
+        toast_text.addWidget(self.download_toast_title)
+        toast_text.addWidget(self.download_toast_file)
+        toast_layout.addLayout(toast_text, 1)
+        view_button = QPushButton("View", self.download_toast)
+        view_button.setObjectName("downloadToastButton")
+        view_button.clicked.connect(self.show_downloads)
+        toast_layout.addWidget(view_button)
+        self.download_toast_effect = QGraphicsOpacityEffect(self.download_toast)
+        self.download_toast_effect.setOpacity(0.0)
+        self.download_toast.setGraphicsEffect(self.download_toast_effect)
+        self.download_toast_animation = QPropertyAnimation(self.download_toast_effect, b"opacity", self)
+        self.download_toast_animation.setDuration(180)
+        self.download_toast_timer = QTimer(self)
+        self.download_toast_timer.setSingleShot(True)
+        self.download_toast_timer.timeout.connect(self._hide_download_toast)
+        self.download_toast_animation.finished.connect(self._finish_download_toast_animation)
+        self.download_toast.hide()
+
+    def _position_download_toast(self) -> None:
+        toast = getattr(self, "download_toast", None)
+        root = self.centralWidget()
+        if toast is None or root is None:
+            return
+        toast.move(max(12, root.width() - toast.width() - 18), 50)
+
+    def _show_download_toast(self, file_name: str) -> None:
+        self.download_toast_file.setText(file_name)
+        self._position_download_toast()
+        self.download_toast.show()
+        self.download_toast.raise_()
+        self.download_toast_animation.stop()
+        self.download_toast_animation.setStartValue(self.download_toast_effect.opacity())
+        self.download_toast_animation.setEndValue(1.0)
+        self.download_toast_animation.start()
+        self.download_toast_timer.start(4500)
+
+    def _hide_download_toast(self) -> None:
+        if not hasattr(self, "download_toast_animation"):
+            return
+        self.download_toast_animation.stop()
+        self.download_toast_animation.setStartValue(self.download_toast_effect.opacity())
+        self.download_toast_animation.setEndValue(0.0)
+        self.download_toast_animation.start()
+
+    def _finish_download_toast_animation(self) -> None:
+        if self.download_toast_effect.opacity() <= 0.01:
+            self.download_toast.hide()
 
     def _capture_snapshot(self, view: QWebEngineView):
         if view not in self.views:
@@ -1078,9 +1214,11 @@ class BrowserWindow(QMainWindow):
         self._recorded_history_urls.pop(closing_view, None)
 
         if not self.views:
-            # Keep the browser usable when the last tab is closed.
             self.current_index = -1
-            self.new_tab(self.settings.homepage)
+            if self.downloads_panel.is_open:
+                return
+            if not self.close():
+                self.new_tab(self.settings.homepage)
             return
 
         if was_active:
@@ -1135,7 +1273,7 @@ class BrowserWindow(QMainWindow):
             return
         self.tabbar.set_title(self.views.index(view), title)
         if view is self.current_view():
-            window_title = f"{title} — R-Browser" if title else "R-Browser"
+            window_title = f"{title} — ARMA Browser" if title else "ARMA Browser"
             self.setWindowTitle(window_title)
             self.title_bar.title.setText(window_title)
 
@@ -1402,6 +1540,30 @@ class BrowserWindow(QMainWindow):
             logger.exception("Could not apply the current browser theme")
     
     def closeEvent(self, event):
+        active_downloads = []
+        for manager in self._download_managers.values():
+            try:
+                active_downloads.extend(
+                    item for item in manager.get_downloads()
+                    if item.get("state") in {"requested", "downloading"}
+                )
+            except (AttributeError, RuntimeError):
+                logger.exception("Could not inspect active downloads before closing")
+        if active_downloads:
+            prompt = QMessageBox(self)
+            prompt.setIcon(QMessageBox.Warning)
+            prompt.setWindowTitle("Downloads in progress")
+            prompt.setText(
+                f"{len(active_downloads)} download(s) are still in progress."
+            )
+            prompt.setInformativeText(
+                "Closing ARMA Browser will cancel them. Do you want to close the browser?"
+            )
+            prompt.setStandardButtons(QMessageBox.Close | QMessageBox.Cancel)
+            prompt.setDefaultButton(QMessageBox.Cancel)
+            if prompt.exec() != QMessageBox.Close:
+                event.ignore()
+                return
         self._closing = True
         for download_manager in self._download_managers.values():
             download_manager.shutdown()
