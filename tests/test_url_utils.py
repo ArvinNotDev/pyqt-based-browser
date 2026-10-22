@@ -62,9 +62,8 @@ class ResolveAddressInputTests(unittest.TestCase):
             "custom:scheme",
         )
         for value in rejected:
-            with self.subTest(value=value):
-                with self.assertRaises(URLInputError):
-                    resolve_address_input(value, self.search_engine)
+            with self.subTest(value=value), self.assertRaises(URLInputError):
+                resolve_address_input(value, self.search_engine)
 
 
 if __name__ == "__main__":

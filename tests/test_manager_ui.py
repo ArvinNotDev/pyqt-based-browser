@@ -1,12 +1,13 @@
 import os
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, Signal
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QApplication, QPushButton, QProgressBar, QLabel
 from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
 
 from ui.bookmarks_bar import BookmarksBar
 from ui.bookmarks_dialog import BookmarksDialog
