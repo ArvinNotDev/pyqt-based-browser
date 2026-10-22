@@ -44,6 +44,8 @@ class DownloadManager(QObject):
         self.download_dir = os.path.abspath(os.path.expanduser(os.fspath(download_dir)))
         self._downloads: list[dict[str, Any]] = []
         self._requests: dict[str, Any] = {}
+        self._request_signal_slots: dict[str, list[tuple[Any, Any]]] = {}
+        self._closed = False
         self._profile: Any = None
         self._attached_profile_download_path: str | None = None
         self._reservation_owner = uuid4().hex
@@ -179,6 +181,12 @@ class DownloadManager(QObject):
         return "requested"
 
     def _on_download_requested(self, request) -> None:
+        if self._closed:
+            try:
+                request.cancel()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            return
         download_id = uuid4().hex
         url = self._url_string(self._request_value(request, "url", ""))
         suggested = self._request_value(request, "suggestedFileName", "")
@@ -209,7 +217,9 @@ class DownloadManager(QObject):
             for signal_name in ("receivedBytesChanged", "totalBytesChanged", "stateChanged"):
                 signal = getattr(request, signal_name, None)
                 if signal is not None and hasattr(signal, "connect"):
-                    signal.connect(lambda *args, current_id=download_id: self._refresh(current_id))
+                    slot = lambda *args, current_id=download_id: self._refresh(current_id)
+                    signal.connect(slot)
+                    self._request_signal_slots.setdefault(download_id, []).append((signal, slot))
             # Publish the requested record before accepting it. Consumers can
             # then observe the same state sequence as the WebEngine request.
             self.downloads_changed.emit()
@@ -241,6 +251,8 @@ class DownloadManager(QObject):
             self.downloads_changed.emit()
 
     def _refresh(self, download_id: str) -> None:
+        if self._closed:
+            return
         request = self._requests.get(download_id)
         record = next((item for item in self._downloads if item["id"] == download_id), None)
         if request is None or record is None:
@@ -274,8 +286,41 @@ class DownloadManager(QObject):
         )
         if record["state"] in self._TERMINAL_STATES:
             self._requests.pop(download_id, None)
+            self._disconnect_request_signals(download_id)
         if current != previous:
             self.downloads_changed.emit()
+
+    def _disconnect_request_signals(self, download_id: str) -> None:
+        for signal, slot in self._request_signal_slots.pop(download_id, []):
+            try:
+                signal.disconnect(slot)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+    def shutdown(self) -> None:
+        """Cancel active downloads and detach Qt callbacks before profile teardown."""
+        if self._closed:
+            return
+        self._closed = True
+        profile = self._profile
+        self._profile = None
+        if profile is not None:
+            try:
+                profile.downloadRequested.disconnect(self._on_download_requested)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+        for download_id, request in list(self._requests.items()):
+            self._disconnect_request_signals(download_id)
+            try:
+                request.cancel()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            record = next((item for item in self._downloads if item["id"] == download_id), None)
+            if record is not None and record["state"] not in self._TERMINAL_STATES:
+                record["state"] = "cancelled"
+                record["error"] = ""
+        self._requests.clear()
 
     def get_downloads(self) -> list[dict]:
         return [deepcopy(item) for item in self._downloads]

@@ -222,7 +222,7 @@ class DataManagerTests(unittest.TestCase):
         first = manager.add_bookmark("Example", "https://example.test")
         duplicate = manager.add_bookmark("Changed title", "HTTPS://EXAMPLE.TEST:443/")
         self.assertEqual(first["id"], duplicate["id"])
-        self.assertEqual(set(("id", "title", "url", "created_at")) - first.keys(), set())
+        self.assertEqual({"id", "title", "url", "created_at"} - first.keys(), set())
         self.assertTrue(manager.is_bookmarked("https://example.test/"))
         self.assertEqual(len(BookmarksManager("Guest").list_bookmarks()), 1)
         self.assertEqual(BookmarksManager("Other").list_bookmarks(), [])
@@ -319,6 +319,30 @@ class DataManagerTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["state"], "failed")
         self.assertIn("accept rejected", records[0]["error"])
+
+    def test_download_manager_shutdown_cancels_and_detaches_callbacks(self):
+        manager = DownloadManager("Guest", str(Path(self.temp_dir.name) / "downloads"))
+        profile = FakeProfile()
+        manager.attach_profile(profile)
+        request = FakeDownloadRequest()
+        profile.downloadRequested.emit(request)
+        download_id = manager.get_downloads()[0]["id"]
+
+        manager.shutdown()
+
+        self.assertTrue(request.cancelled)
+        self.assertEqual(manager.get_downloads()[0]["state"], "cancelled")
+        self.assertEqual(profile.downloadRequested._slots, [])
+        self.assertEqual(request.receivedBytesChanged._slots, [])
+        self.assertEqual(request.totalBytesChanged._slots, [])
+        self.assertEqual(request.stateChanged._slots, [])
+        request.progress(50)
+        self.assertFalse(manager.cancel(download_id))
+
+        late_request = FakeDownloadRequest(name="late.txt")
+        profile.downloadRequested.emit(late_request)
+        self.assertFalse(late_request.accepted)
+        self.assertEqual(len(manager.get_downloads()), 1)
 
     def test_download_contract_emits_state_changes_and_returns_snapshots(self):
         manager = DownloadManager("Guest", str(Path(self.temp_dir.name) / "downloads"))
