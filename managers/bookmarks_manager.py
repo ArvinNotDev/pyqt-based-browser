@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from copy import deepcopy
 from datetime import datetime, timezone
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -127,7 +128,7 @@ class BookmarksManager:
             logger.warning("Could not load bookmarks from %s: %s", self.file_path, exc)
 
     def list_bookmarks(self) -> list[dict]:
-        return [dict(bookmark) for bookmark in self._bookmarks]
+        return [deepcopy(bookmark) for bookmark in self._bookmarks]
 
     def _save(self) -> None:
         if self._corrupt_source and os.path.exists(self.file_path):
@@ -154,7 +155,7 @@ class BookmarksManager:
         duplicate_key = self._duplicate_key(url)
         for bookmark in self._bookmarks:
             if self._duplicate_key(bookmark["url"]) == duplicate_key:
-                return dict(bookmark)
+                return deepcopy(bookmark)
         bookmark = {
             "id": uuid4().hex,
             "title": title.strip() or url,
@@ -163,7 +164,7 @@ class BookmarksManager:
         }
         self._bookmarks.append(bookmark)
         self._save()
-        return dict(bookmark)
+        return deepcopy(bookmark)
 
     def remove_bookmark(self, bookmark_id: str) -> bool:
         if not isinstance(bookmark_id, str):

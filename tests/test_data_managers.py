@@ -28,8 +28,12 @@ class FakeSignal:
 
 
 class FakeProfile:
-    def __init__(self):
+    def __init__(self, download_path=None):
         self.downloadRequested = FakeSignal()
+        self.download_path = download_path
+
+    def downloadPath(self):
+        return self.download_path or ""
 
 
 class FakeDownloadRequest:
@@ -240,6 +244,31 @@ class DataManagerTests(unittest.TestCase):
         self.assertEqual({item["id"] for item in manager.list_bookmarks()}, {"stable-id", manager.list_bookmarks()[1]["id"]})
         self.assertIsInstance(json.loads(target.read_text(encoding="utf-8")), list)
 
+    def test_bookmark_records_are_detached_snapshots(self):
+        profile_dir = Path(self.temp_dir.name) / "profile_data" / "Guest"
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "bookmarks.json").write_text(json.dumps([{
+            "id": "stable-id",
+            "title": "Old",
+            "url": "https://old.test",
+            "created_at": "2024-01-01T00:00:00+00:00",
+            "metadata": {"source": {"name": "legacy"}},
+        }]), encoding="utf-8")
+        manager = BookmarksManager("Guest")
+
+        result = manager.list_bookmarks()
+        result[0]["metadata"]["source"]["name"] = "changed"
+        self.assertEqual(
+            manager.list_bookmarks()[0]["metadata"]["source"]["name"],
+            "legacy",
+        )
+        duplicate = manager.add_bookmark("Duplicate", "https://old.test/")
+        duplicate["metadata"]["source"]["name"] = "also changed"
+        self.assertEqual(
+            manager.list_bookmarks()[0]["metadata"]["source"]["name"],
+            "legacy",
+        )
+
     def test_download_manager_tracks_safe_paths_progress_cancel_and_clear(self):
         manager = DownloadManager("Guest", str(Path(self.temp_dir.name) / "downloads"))
         profile = FakeProfile()
@@ -290,6 +319,80 @@ class DataManagerTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["state"], "failed")
         self.assertIn("accept rejected", records[0]["error"])
+
+    def test_download_contract_emits_state_changes_and_returns_snapshots(self):
+        manager = DownloadManager("Guest", str(Path(self.temp_dir.name) / "downloads"))
+        observed_states = []
+        manager.downloads_changed.connect(
+            lambda: observed_states.append([item["state"] for item in manager.get_downloads()])
+        )
+        profile = FakeProfile()
+        manager.attach_profile(profile)
+        request = FakeDownloadRequest()
+        profile.downloadRequested.emit(request)
+
+        record = manager.get_downloads()[0]
+        self.assertEqual(
+            set(record),
+            {
+                "id", "file_name", "path", "url", "received_bytes",
+                "total_bytes", "state", "error",
+            },
+        )
+        self.assertIn(["requested"], observed_states)
+        self.assertIn(["downloading"], observed_states)
+
+        exposed = manager.get_downloads()
+        original_id = exposed[0]["id"]
+        exposed[0]["state"] = "failed"
+        exposed[0]["id"] = "external-mutation"
+        self.assertEqual(manager.get_downloads()[0]["state"], "downloading")
+        self.assertEqual(manager.get_downloads()[0]["id"], original_id)
+
+        request.finish()
+        self.assertIn(["completed"], observed_states)
+        self.assertEqual(manager.get_downloads()[0]["state"], "completed")
+        self.assertFalse(manager.cancel(original_id))
+
+    def test_download_paths_are_reserved_across_profile_managers(self):
+        directory = str(Path(self.temp_dir.name) / "shared-downloads")
+        first = DownloadManager("Guest", directory)
+        second = DownloadManager("Work", directory)
+        first_profile = FakeProfile()
+        second_profile = FakeProfile()
+        first.attach_profile(first_profile)
+        second.attach_profile(second_profile)
+
+        first_profile.downloadRequested.emit(FakeDownloadRequest(name="same.txt"))
+        second_profile.downloadRequested.emit(FakeDownloadRequest(name="same.txt"))
+
+        first_record = first.get_downloads()[0]
+        second_record = second.get_downloads()[0]
+        self.assertNotEqual(first_record["path"], second_record["path"])
+        self.assertEqual(first_record["file_name"], "same.txt")
+        self.assertEqual(second_record["file_name"], "same (1).txt")
+        self.assertEqual(len(first.get_downloads()), 1)
+        self.assertEqual(len(second.get_downloads()), 1)
+
+    def test_download_manager_tracks_profile_folder_updates(self):
+        old_directory = Path(self.temp_dir.name) / "old-downloads"
+        new_directory = Path(self.temp_dir.name) / "new-downloads"
+        manager = DownloadManager("Guest", str(old_directory))
+        profile = FakeProfile(str(old_directory))
+        manager.attach_profile(profile)
+
+        profile.download_path = str(new_directory)
+        manager.attach_profile(profile)
+        request = FakeDownloadRequest(name="after-change.txt")
+        profile.downloadRequested.emit(request)
+
+        self.assertEqual(manager.download_dir, os.path.abspath(new_directory))
+        self.assertEqual(os.path.dirname(manager.get_downloads()[0]["path"]), os.path.abspath(new_directory))
+
+        explicit_directory = Path(self.temp_dir.name) / "explicit-downloads"
+        separate = DownloadManager("Other", str(explicit_directory))
+        separate.attach_profile(FakeProfile(str(old_directory)))
+        self.assertEqual(separate.download_dir, os.path.abspath(explicit_directory))
 
 
 if __name__ == "__main__":

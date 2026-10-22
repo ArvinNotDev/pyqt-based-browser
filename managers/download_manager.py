@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import os
 import re
+from copy import deepcopy
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from urllib.parse import unquote, urlsplit
 from uuid import uuid4
+import weakref
 
 from PySide6.QtCore import QObject, QStandardPaths, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
@@ -24,12 +27,16 @@ class DownloadManager(QObject):
     downloads_changed = Signal()
 
     _TERMINAL_STATES = {"completed", "cancelled", "failed"}
+    _reservation_lock = Lock()
+    _reserved_paths: set[str] = set()
+    _reservations_by_owner: dict[str, set[str]] = {}
 
     def __init__(self, profile_name: str, download_dir: str | os.PathLike[str] | None = None):
         super().__init__()
         from managers.storage import validate_profile_name
 
         self.profile_name = validate_profile_name(profile_name)
+        self._download_dir_was_explicit = download_dir is not None
         if download_dir is None:
             download_dir = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.DownloadLocation)
             if not download_dir:
@@ -38,10 +45,28 @@ class DownloadManager(QObject):
         self._downloads: list[dict[str, Any]] = []
         self._requests: dict[str, Any] = {}
         self._profile: Any = None
+        self._attached_profile_download_path: str | None = None
+        self._reservation_owner = uuid4().hex
+        self._reserved_by_download: dict[str, str] = {}
+        with self._reservation_lock:
+            self._reservations_by_owner[self._reservation_owner] = set()
+        weakref.finalize(self, DownloadManager._release_owner, self._reservation_owner)
+
+    @staticmethod
+    def _release_owner(owner: str) -> None:
+        with DownloadManager._reservation_lock:
+            paths = DownloadManager._reservations_by_owner.pop(owner, set())
+            DownloadManager._reserved_paths.difference_update(paths)
+
+    def _release_path_reservation(self, path_key: str) -> None:
+        with self._reservation_lock:
+            self._reserved_paths.discard(path_key)
+            self._reservations_by_owner.get(self._reservation_owner, set()).discard(path_key)
 
     def attach_profile(self, profile) -> None:
         """Connect to the profile's Qt WebEngine ``downloadRequested`` signal."""
         if profile is self._profile:
+            self._sync_download_dir_from_profile(profile)
             return
         if self._profile is not None:
             try:
@@ -49,7 +74,36 @@ class DownloadManager(QObject):
             except (AttributeError, RuntimeError, TypeError):
                 pass
         self._profile = profile
+        self._sync_download_dir_from_profile(profile)
         profile.downloadRequested.connect(self._on_download_requested)
+
+    @staticmethod
+    def _profile_download_path(profile) -> str | None:
+        getter = getattr(profile, "downloadPath", None)
+        if not callable(getter):
+            return None
+        try:
+            value = getter()
+        except (RuntimeError, TypeError):
+            return None
+        if not isinstance(value, (str, os.PathLike)) or not os.fspath(value):
+            return None
+        return os.path.abspath(os.path.expanduser(os.fspath(value)))
+
+    def _sync_download_dir_from_profile(self, profile) -> None:
+        profile_path = self._profile_download_path(profile)
+        if profile_path is None:
+            return
+        previous_profile_path = self._attached_profile_download_path
+        if (
+            not self._download_dir_was_explicit
+            or (
+                previous_profile_path is not None
+                and os.path.normcase(self.download_dir) == os.path.normcase(previous_profile_path)
+            )
+        ):
+            self.download_dir = profile_path
+        self._attached_profile_download_path = profile_path
 
     @staticmethod
     def _request_value(request, method: str, fallback=None):
@@ -94,16 +148,19 @@ class DownloadManager(QObject):
         os.makedirs(self.download_dir, exist_ok=True)
         root = os.path.realpath(self.download_dir)
         stem, extension = os.path.splitext(file_name)
-        reserved = {os.path.normcase(item["path"]) for item in self._downloads}
         index = 0
-        while True:
-            candidate_name = file_name if index == 0 else f"{stem} ({index}){extension}"
-            candidate = os.path.abspath(os.path.join(root, candidate_name))
-            if os.path.commonpath((root, candidate)) != root:
-                raise ValueError("Download destination escapes the download directory")
-            if not os.path.lexists(candidate) and os.path.normcase(candidate) not in reserved:
-                return candidate_name, candidate
-            index += 1
+        with self._reservation_lock:
+            while True:
+                candidate_name = file_name if index == 0 else f"{stem} ({index}){extension}"
+                candidate = os.path.abspath(os.path.join(root, candidate_name))
+                if os.path.commonpath((root, candidate)) != root:
+                    raise ValueError("Download destination escapes the download directory")
+                path_key = os.path.normcase(candidate)
+                if not os.path.lexists(candidate) and path_key not in self._reserved_paths:
+                    self._reserved_paths.add(path_key)
+                    self._reservations_by_owner[self._reservation_owner].add(path_key)
+                    return candidate_name, candidate
+                index += 1
 
     @staticmethod
     def _state_name(request) -> str:
@@ -129,8 +186,10 @@ class DownloadManager(QObject):
             suggested = self._request_value(request, "downloadFileName", "")
         safe_name = self._safe_file_name(suggested, url)
         record = None
+        allocated_path_key = None
         try:
             safe_name, path = self._allocate_path(safe_name)
+            allocated_path_key = os.path.normcase(path)
             request.setDownloadDirectory(self.download_dir)
             request.setDownloadFileName(safe_name)
             total_bytes = self._request_value(request, "totalBytes", -1)
@@ -145,11 +204,15 @@ class DownloadManager(QObject):
                 "error": "",
             }
             self._downloads.append(record)
+            self._reserved_by_download[download_id] = allocated_path_key
             self._requests[download_id] = request
             for signal_name in ("receivedBytesChanged", "totalBytesChanged", "stateChanged"):
                 signal = getattr(request, signal_name, None)
                 if signal is not None and hasattr(signal, "connect"):
                     signal.connect(lambda *args, current_id=download_id: self._refresh(current_id))
+            # Publish the requested record before accepting it. Consumers can
+            # then observe the same state sequence as the WebEngine request.
+            self.downloads_changed.emit()
             request.accept()
             self._refresh(download_id)
         except Exception as exc:
@@ -160,6 +223,8 @@ class DownloadManager(QObject):
             self._requests.pop(download_id, None)
             failed = next((item for item in self._downloads if item["id"] == download_id), None)
             if failed is None:
+                if allocated_path_key is not None:
+                    self._release_path_reservation(allocated_path_key)
                 self._downloads.append({
                     "id": download_id,
                     "file_name": safe_name,
@@ -173,13 +238,19 @@ class DownloadManager(QObject):
             else:
                 failed["state"] = "failed"
                 failed["error"] = str(exc)
-        self.downloads_changed.emit()
+            self.downloads_changed.emit()
 
     def _refresh(self, download_id: str) -> None:
         request = self._requests.get(download_id)
         record = next((item for item in self._downloads if item["id"] == download_id), None)
         if request is None or record is None:
             return
+        previous = (
+            record["received_bytes"],
+            record["total_bytes"],
+            record["state"],
+            record["error"],
+        )
         received = self._request_value(request, "receivedBytes", record["received_bytes"])
         total = self._request_value(request, "totalBytes", record["total_bytes"])
         try:
@@ -193,10 +264,21 @@ class DownloadManager(QObject):
         record["state"] = self._state_name(request)
         if record["state"] == "failed":
             record["error"] = str(self._request_value(request, "interruptReasonString", "") or "Download interrupted")
-        self.downloads_changed.emit()
+        elif record["state"] in {"downloading", "completed", "cancelled"}:
+            record["error"] = ""
+        current = (
+            record["received_bytes"],
+            record["total_bytes"],
+            record["state"],
+            record["error"],
+        )
+        if record["state"] in self._TERMINAL_STATES:
+            self._requests.pop(download_id, None)
+        if current != previous:
+            self.downloads_changed.emit()
 
     def get_downloads(self) -> list[dict]:
-        return [dict(item) for item in self._downloads]
+        return [deepcopy(item) for item in self._downloads]
 
     def cancel(self, download_id: str) -> bool:
         request = self._requests.get(download_id)
@@ -206,14 +288,18 @@ class DownloadManager(QObject):
         try:
             request.cancel()
         except Exception as exc:
-            record["error"] = str(exc)
-            record["state"] = "failed"
-            self.downloads_changed.emit()
+            if record["state"] not in self._TERMINAL_STATES:
+                record["error"] = str(exc)
+                record["state"] = "failed"
+                self._requests.pop(download_id, None)
+                self.downloads_changed.emit()
             return False
-        record["state"] = "cancelled"
-        record["error"] = ""
-        self.downloads_changed.emit()
-        return True
+        if record["state"] not in self._TERMINAL_STATES:
+            record["state"] = "cancelled"
+            record["error"] = ""
+            self._requests.pop(download_id, None)
+            self.downloads_changed.emit()
+        return record["state"] == "cancelled"
 
     def open_file(self, download_id: str) -> bool:
         record = next((item for item in self._downloads if item["id"] == download_id), None)
@@ -226,7 +312,15 @@ class DownloadManager(QObject):
 
     def clear_finished(self) -> None:
         before = len(self._downloads)
+        finished_ids = {
+            item["id"] for item in self._downloads
+            if item["state"] in self._TERMINAL_STATES
+        }
         self._downloads = [item for item in self._downloads if item["state"] not in self._TERMINAL_STATES]
+        for download_id in finished_ids:
+            path_key = self._reserved_by_download.pop(download_id, None)
+            if path_key is not None:
+                self._release_path_reservation(path_key)
         kept_ids = {item["id"] for item in self._downloads}
         self._requests = {key: value for key, value in self._requests.items() if key in kept_ids}
         if len(self._downloads) != before:
