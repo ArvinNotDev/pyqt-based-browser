@@ -48,8 +48,7 @@ QToolBar::separator {
     margin: 8px 5px;
 }
 
-QToolButton#navigationToolButton, QToolButton#utilityToolButton,
-QToolButton#newTabButton {
+QToolButton#navigationToolButton, QToolButton#utilityToolButton {
     background: transparent;
     color: #3f4752;
     border: 1px solid transparent;
@@ -57,20 +56,9 @@ QToolButton#newTabButton {
     padding: 5px 8px;
     min-height: 28px;
 }
-QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover,
-QToolButton#newTabButton:hover { background-color: #e9edf3; }
-QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed,
-QToolButton#newTabButton:pressed { background-color: #dfe5ed; }
-QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus,
-QToolButton#newTabButton:focus { border-color: #3979d6; }
-QToolButton#newTabButton {
-    color: #ffffff;
-    background-color: #3979d6;
-    border: none;
-    border-radius: 9px;
-    font-size: 22px;
-}
-QToolButton#newTabButton:hover { background-color: #2868c5; }
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #e9edf3; }
+QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #dfe5ed; }
+QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #3979d6; }
 QPushButton#tabPlusButton {
     color: #3f4752;
     background-color: #e9edf3;
@@ -80,6 +68,24 @@ QPushButton#tabPlusButton {
     font-weight: 600;
 }
 QPushButton#tabPlusButton:hover { background-color: #dce5f2; color: #285eae; }
+QFrame#downloadsPanel { background-color: #f1f3f6; border-right: 1px solid #dce1e8; }
+QLabel#downloadsTitle { color: #20242a; font-size: 19px; font-weight: 700; }
+QLabel#downloadsSubtitle, QLabel#downloadsEmpty, QLabel#downloadSource, QLabel#downloadStatus { color: #68717d; }
+QToolButton#downloadsCloseButton, QToolButton#downloadMoreButton { color: #56606c; background: transparent; border: none; border-radius: 7px; font-size: 19px; min-width: 28px; min-height: 28px; }
+QToolButton#downloadsCloseButton:hover, QToolButton#downloadMoreButton:hover { background: #e4e8ee; }
+QLineEdit#downloadsSearch { background: #ffffff; border: 1px solid #d9dde4; border-radius: 8px; padding: 8px 10px; }
+QFrame#downloadCard { background: #ffffff; border: 1px solid #e0e4ea; border-radius: 10px; }
+QLabel#downloadFileName { color: #20242a; font-weight: 600; }
+QProgressBar#downloadProgress { background: #e7ebf1; border: none; border-radius: 2px; }
+QProgressBar#downloadProgress::chunk { background: #3979d6; border-radius: 2px; }
+QPushButton#downloadsSecondaryButton { color: #3f4752; background: #ffffff; border: 1px solid #d9dde4; border-radius: 7px; padding: 7px 9px; }
+QPushButton#downloadsSecondaryButton:hover { border-color: #3979d6; color: #285eae; }
+QPushButton#downloadsPrimaryButton { color: #ffffff; background: #3979d6; border: none; border-radius: 7px; padding: 7px 12px; }
+QPushButton#downloadsPrimaryButton:hover { background: #2868c5; }
+QFrame#downloadToast { background: #ffffff; border: 1px solid #d9dde4; border-radius: 10px; }
+QLabel#downloadToastTitle { color: #20242a; font-weight: 700; }
+QLabel#downloadToastFile { color: #68717d; }
+QPushButton#downloadToastButton { color: #285eae; background: #e8f0fc; border: none; border-radius: 7px; padding: 7px 10px; }
 QToolButton#menuButton {
     background: transparent;
     color: #3f4752;
@@ -287,8 +293,7 @@ QToolBar::separator {
     margin: 8px 5px;
 }
 
-QToolButton#navigationToolButton, QToolButton#utilityToolButton,
-QToolButton#newTabButton {
+QToolButton#navigationToolButton, QToolButton#utilityToolButton {
     background: transparent;
     color: #c7ced8;
     border: 1px solid transparent;
@@ -296,20 +301,9 @@ QToolButton#newTabButton {
     padding: 5px 8px;
     min-height: 28px;
 }
-QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover,
-QToolButton#newTabButton:hover { background-color: #2a3038; }
-QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed,
-QToolButton#newTabButton:pressed { background-color: #343c47; }
-QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus,
-QToolButton#newTabButton:focus { border-color: #82aff4; }
-QToolButton#newTabButton {
-    color: #ffffff;
-    background-color: #3979d6;
-    border: none;
-    border-radius: 9px;
-    font-size: 22px;
-}
-QToolButton#newTabButton:hover { background-color: #4a88e3; }
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #2a3038; }
+QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #343c47; }
+QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #82aff4; }
 QPushButton#tabPlusButton {
     color: #c7ced8;
     background-color: #2a3038;
@@ -319,6 +313,24 @@ QPushButton#tabPlusButton {
     font-weight: 600;
 }
 QPushButton#tabPlusButton:hover { background-color: #35465f; color: #a8c9ff; }
+QFrame#downloadsPanel { background-color: #1b1e23; border-right: 1px solid #30353d; }
+QLabel#downloadsTitle { color: #e4e8ee; font-size: 19px; font-weight: 700; }
+QLabel#downloadsSubtitle, QLabel#downloadsEmpty, QLabel#downloadSource, QLabel#downloadStatus { color: #9aa4b1; }
+QToolButton#downloadsCloseButton, QToolButton#downloadMoreButton { color: #c7ced8; background: transparent; border: none; border-radius: 7px; font-size: 19px; min-width: 28px; min-height: 28px; }
+QToolButton#downloadsCloseButton:hover, QToolButton#downloadMoreButton:hover { background: #30353d; }
+QLineEdit#downloadsSearch { background: #252a31; color: #e4e8ee; border: 1px solid #3a414b; border-radius: 8px; padding: 8px 10px; }
+QFrame#downloadCard { background: #252a31; border: 1px solid #3a414b; border-radius: 10px; }
+QLabel#downloadFileName { color: #e4e8ee; font-weight: 600; }
+QProgressBar#downloadProgress { background: #343c47; border: none; border-radius: 2px; }
+QProgressBar#downloadProgress::chunk { background: #82aff4; border-radius: 2px; }
+QPushButton#downloadsSecondaryButton { color: #c7ced8; background: #252a31; border: 1px solid #3a414b; border-radius: 7px; padding: 7px 9px; }
+QPushButton#downloadsSecondaryButton:hover { border-color: #82aff4; color: #a8c9ff; }
+QPushButton#downloadsPrimaryButton { color: #ffffff; background: #3979d6; border: none; border-radius: 7px; padding: 7px 12px; }
+QPushButton#downloadsPrimaryButton:hover { background: #4a88e3; }
+QFrame#downloadToast { background: #252a31; border: 1px solid #414954; border-radius: 10px; }
+QLabel#downloadToastTitle { color: #e4e8ee; font-weight: 700; }
+QLabel#downloadToastFile { color: #9aa4b1; }
+QPushButton#downloadToastButton { color: #a8c9ff; background: #35465f; border: none; border-radius: 7px; padding: 7px 10px; }
 QToolButton#menuButton {
     background: transparent;
     color: #c7ced8;
