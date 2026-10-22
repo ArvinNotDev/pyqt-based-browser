@@ -2,6 +2,7 @@ import os
 import socket
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from main import _configure_chromium_proxy, _load_startup_settings, _reserve_proxy_port
@@ -59,6 +60,49 @@ class StartupConfigurationTests(unittest.TestCase):
                         self.assertIn("--disable-gpu", flags)
                         self.assertIn("--enable-features=TestFeature", flags)
                         self.assertEqual(os.environ["QT_OPENGL"], "software")
+
+    def test_bookmark_dialog_routes_opened_url_to_browser_navigation(self):
+        from ui import browser_window
+
+        class FakeSignal:
+            def connect(self, slot):
+                self.slot = slot
+
+            def emit(self, value):
+                self.slot(value)
+
+        class FakeDialog:
+            def __init__(self, manager, parent):
+                self.manager = manager
+                self.parent = parent
+                self.url_activated = FakeSignal()
+                self.executed = False
+
+            def exec(self):
+                self.executed = True
+
+        manager = object()
+        navigation = []
+        refreshes = []
+        browser = SimpleNamespace(
+            bookmarks_manager=manager,
+            navigate=navigation.append,
+            _refresh_bookmarks=lambda: refreshes.append(True),
+        )
+        dialogs = []
+
+        def create_dialog(*args):
+            dialog = FakeDialog(*args)
+            dialogs.append(dialog)
+            return dialog
+
+        with patch.object(browser_window, "BookmarksDialog", create_dialog):
+            browser_window.BrowserWindow.show_bookmarks(browser)
+
+        dialogs[0].url_activated.emit("https://saved.example/")
+        self.assertTrue(dialogs[0].executed)
+        self.assertEqual(navigation, ["https://saved.example/"])
+        self.assertEqual(refreshes, [True])
             finally:
                 os.chdir(original_cwd)
 

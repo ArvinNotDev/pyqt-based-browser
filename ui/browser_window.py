@@ -597,7 +597,9 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage("Bookmarks are unavailable.", 3000)
             return
         try:
-            BookmarksDialog(self.bookmarks_manager, self).exec()
+            dialog = BookmarksDialog(self.bookmarks_manager, self)
+            dialog.url_activated.connect(self.navigate)
+            dialog.exec()
             self._refresh_bookmarks()
         except Exception:
             logger.exception("Could not open bookmarks")
