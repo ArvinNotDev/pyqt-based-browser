@@ -165,4 +165,3 @@ def test_download_manager_cancel_and_failed_destination_are_safe(tmp_path):
 
     failing_request.cancel.assert_called_once_with()
     assert failing_manager.get_downloads()[0]["state"] == "failed"
-
