@@ -31,7 +31,7 @@ Qt WebEngine and QR decoding need system libraries in addition to the Python whe
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libgl1 libxcb-cursor0 libxkbcommon-x11-0 libzbar0
+sudo apt-get install -y libegl1 libgl1 libxcb-cursor0 libxkbcommon-x11-0 libzbar0
 python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
