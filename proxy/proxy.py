@@ -280,16 +280,20 @@ def get_free_port():
 
 
 def is_port_free(host: str, port: int, timeout: float = 0.15) -> bool:
+    # Validate before name resolution or socket creation. In particular, avoid
+    # int() coercion here: it accepts booleans, numeric strings, and floats.
+    if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
+        return False
     try:
-        if not 1 <= int(port) <= 65535:
+        if not isinstance(host, str) or not host or host != host.strip():
             return False
-        results = socket.getaddrinfo(host, int(port), socket.AF_UNSPEC, socket.SOCK_STREAM)
+        host = normalize_host(host)
+        results = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        if not results:
+            return False
         for af, socktype, proto, _canonname, address in results:
             with socket.socket(af, socktype, proto) as stream:
-                try:
-                    stream.bind(address)
-                except OSError:
-                    return False
+                stream.bind(address)
         return True
     except (OSError, ValueError, TypeError):
         return False

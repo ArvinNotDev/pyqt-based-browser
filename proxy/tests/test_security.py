@@ -2,6 +2,7 @@ import io
 import json
 import os
 import queue
+import socket as socket_lib
 import tarfile
 import tempfile
 import threading
@@ -90,6 +91,57 @@ class ProxyPolicyTests(unittest.TestCase):
     def test_server_rejects_non_loopback_binding(self):
         with self.assertRaises(ValueError):
             proxy_module.ThreadedHTTPServer(("0.0.0.0", 0), proxy_module.ProxyHandler, 9050)
+
+    def test_port_availability_rejects_invalid_ports_before_resolution(self):
+        invalid_ports = (0, -1, 65536, 1.5, "80", None, True, False)
+        with mock.patch.object(proxy_module.socket, "getaddrinfo") as resolve, \
+             mock.patch.object(proxy_module.socket, "socket") as socket_factory:
+            for port in invalid_ports:
+                with self.subTest(port=port):
+                    self.assertFalse(proxy_module.is_port_free("127.0.0.1", port))
+            resolve.assert_not_called()
+            socket_factory.assert_not_called()
+
+    def test_port_availability_checks_valid_boundary_ports(self):
+        address = (socket_lib.AF_INET, socket_lib.SOCK_STREAM, socket_lib.IPPROTO_TCP,
+                   "", ("127.0.0.1", 1))
+        for port in (1, 65535):
+            with self.subTest(port=port), \
+                 mock.patch.object(proxy_module.socket, "getaddrinfo", return_value=[address]) as resolve, \
+                 mock.patch.object(proxy_module.socket, "socket") as socket_factory:
+                socket_factory.return_value.__enter__.return_value.bind.return_value = None
+                self.assertTrue(proxy_module.is_port_free("127.0.0.1", port))
+                resolve.assert_called_once_with(
+                    "127.0.0.1", port, socket_lib.AF_UNSPEC, socket_lib.SOCK_STREAM
+                )
+                socket_factory.assert_called_once_with(
+                    socket_lib.AF_INET, socket_lib.SOCK_STREAM, socket_lib.IPPROTO_TCP
+                )
+
+    def test_port_availability_rejects_invalid_hosts_and_socket_errors(self):
+        invalid_hosts = (None, b"127.0.0.1", "", "  ", "bad host", "127.0.0.1\x00")
+        with mock.patch.object(proxy_module.socket, "getaddrinfo") as resolve, \
+             mock.patch.object(proxy_module.socket, "socket") as socket_factory:
+            for host in invalid_hosts:
+                with self.subTest(host=host):
+                    self.assertFalse(proxy_module.is_port_free(host, 8080))
+            resolve.assert_not_called()
+            socket_factory.assert_not_called()
+
+        with mock.patch.object(proxy_module.socket, "getaddrinfo", side_effect=OSError):
+            self.assertFalse(proxy_module.is_port_free("127.0.0.1", 8080))
+        with mock.patch.object(proxy_module.socket, "getaddrinfo", return_value=[
+            (socket_lib.AF_INET, socket_lib.SOCK_STREAM, socket_lib.IPPROTO_TCP,
+             "", ("127.0.0.1", 8080))
+        ]), mock.patch.object(proxy_module.socket, "socket", side_effect=OSError):
+            self.assertFalse(proxy_module.is_port_free("127.0.0.1", 8080))
+
+    def test_port_availability_matches_local_free_and_occupied_sockets(self):
+        self.assertTrue(proxy_module.is_port_free("127.0.0.1", proxy_module.get_free_port()))
+        with socket_lib.socket(socket_lib.AF_INET, socket_lib.SOCK_STREAM) as occupied:
+            occupied.bind(("127.0.0.1", 0))
+            port = occupied.getsockname()[1]
+            self.assertFalse(proxy_module.is_port_free("127.0.0.1", port))
 
     def test_traffic_updates_are_aggregated_on_shutdown(self):
         while True:
@@ -198,6 +250,82 @@ class BundleSafetyTests(unittest.TestCase):
                 stream.write(b"archive")
             with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)):
                 self.assertFalse(updater.check_hash(name, go_online=False))
+
+    def test_cached_checksum_mismatch_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.join(directory, "bundles")
+            os.makedirs(root)
+            name = "tor-expert-bundle-windows-x86_64-13.5.23.tar.gz"
+            with open(os.path.join(root, name), "wb") as stream:
+                stream.write(b"archive contents")
+            with open(os.path.join(root, "13.5.23-sha256sums.txt"), "w", encoding="utf-8") as stream:
+                stream.write("0" * 64 + "  " + name + "\n")
+            with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)):
+                self.assertFalse(updater.check_hash(name, go_online=False))
+
+    def test_online_checksum_failures_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.join(directory, "bundles")
+            os.makedirs(root)
+            name = "tor-expert-bundle-windows-x86_64-13.5.23.tar.gz"
+            with open(os.path.join(root, name), "wb") as stream:
+                stream.write(b"archive contents")
+            with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)), \
+                 mock.patch.object(updater, "_fetch_checksum", side_effect=updater.requests.ConnectionError):
+                self.assertFalse(updater.check_hash(name, go_online=True))
+            response = SimpleNamespace(
+                url="https://attacker.invalid/13.5.23/sha256sums.txt",
+                close=mock.Mock(),
+                raise_for_status=mock.Mock(),
+            )
+            with mock.patch.object(updater, "resource_path", side_effect=lambda path: os.path.join(directory, path)), \
+                 mock.patch.object(updater.requests, "get", return_value=response):
+                self.assertFalse(updater.check_hash(name, go_online=True))
+            response.close.assert_called_once()
+
+    def test_bad_checksum_does_not_replace_existing_archive(self):
+        name = "tor-expert-bundle-windows-x86_64-13.5.23.tar.gz"
+        original = b"existing bundle archive"
+        bad_checksums = "0" * 64 + "  " + name + "\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.join(directory, "bundles")
+            os.makedirs(root)
+            path = os.path.join(root, name)
+            with open(path, "wb") as stream:
+                stream.write(original)
+            with mock.patch.object(updater, "resource_path", side_effect=lambda item: os.path.join(directory, item)), \
+                 mock.patch.object(updater, "_fetch_checksum", return_value=bad_checksums):
+                with self.assertRaisesRegex(ValueError, "left untouched"):
+                    updater.download_file(name, "13.5.23")
+            with open(path, "rb") as stream:
+                self.assertEqual(stream.read(), original)
+
+    def test_supported_bundle_discovery_and_safe_extraction(self):
+        os_name = {"Windows": "windows", "Linux": "linux"}.get(updater.OS_NAME)
+        arch = "x86_64" if updater.ARCHITECTURE == 64 else "i686"
+        if os_name is None:
+            self.skipTest("Current OS is not a supported Tor bundle platform")
+        name = f"tor-expert-bundle-{os_name}-{arch}-13.5.23"
+        if not updater.check_bundle_compatibility(name + ".tar.gz"):
+            self.skipTest("Current architecture is not supported by the Tor bundle selector")
+        with tempfile.TemporaryDirectory() as directory:
+            root = os.path.join(directory, "bundles")
+            bundle_dir = os.path.join(root, name)
+            os.makedirs(bundle_dir)
+            self.assertTrue(updater.check_bundle_compatibility(bundle_dir))
+            with mock.patch.object(updater, "resource_path", side_effect=lambda item: os.path.join(directory, item)):
+                self.assertEqual(updater.get_own_bundles(), [bundle_dir])
+
+            archive = os.path.join(directory, "safe.tar.gz")
+            with tarfile.open(archive, "w:gz") as tar:
+                payload = b"verified layout"
+                member = tarfile.TarInfo("tor/tor")
+                member.size = len(payload)
+                tar.addfile(member, io.BytesIO(payload))
+            destination = os.path.join(directory, "extracted")
+            utils.extract_tar_gz_file(archive, destination)
+            with open(os.path.join(destination, "tor", "tor"), "rb") as stream:
+                self.assertEqual(stream.read(), b"verified layout")
 
     def test_download_checksum_mismatch_leaves_no_archive(self):
         name = "tor-expert-bundle-windows-x86_64-13.5.23.tar.gz"

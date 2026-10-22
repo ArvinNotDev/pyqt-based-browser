@@ -295,7 +295,11 @@ def list_downloaded_bundles():
 
 
 def check_bundle_compatibility(filename):
-    return _supported_bundle_name(os.path.basename(os.fspath(filename)))
+    name = os.path.basename(os.fspath(filename))
+    # Extracted bundles are directories whose names omit the archive suffix.
+    if not name.endswith(".tar.gz"):
+        name += ".tar.gz"
+    return _supported_bundle_name(name)
 
 
 def get_own_bundles():
