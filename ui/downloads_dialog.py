@@ -1,4 +1,4 @@
-"""Non-blocking download list backed by an injected DownloadManager."""
+"""Download list backed by the browser profile's DownloadManager."""
 
 import os
 
@@ -18,13 +18,19 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ._manager_ui import call_manager, manager_records, normalize_download
+from ._manager_ui import normalize_download
 
 
-_ACTIVE = {"created", "queued", "pending", "running", "downloading", "in_progress", "started"}
-_COMPLETED = {"complete", "completed", "finished", "succeeded", "success"}
-_CANCELLED = {"cancelled", "canceled", "aborted"}
-_FAILED = {"failed", "error", "interrupted"}
+_ACTIVE = {"requested", "downloading"}
+_TERMINAL = {"completed", "cancelled", "failed"}
+_STATE_LABELS = {
+    "requested": "Requested",
+    "downloading": "Downloading",
+    "completed": "Completed",
+    "cancelled": "Cancelled",
+    "failed": "Failed",
+    "unknown": "Status unavailable",
+}
 
 
 class DownloadsDialog(QDialog):
@@ -52,6 +58,7 @@ class DownloadsDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.setFocusPolicy(Qt.StrongFocus)
         self.table.verticalHeader().hide()
         self.table.setShowGrid(False)
         header = self.table.horizontalHeader()
@@ -86,21 +93,16 @@ class DownloadsDialog(QDialog):
         buttons.addWidget(close_button)
         root.addLayout(buttons)
 
-        self._connect_manager_signal()
+        # The manager emits from its in-memory state transitions; the dialog
+        # does not poll or perform work on a download's network path.
+        self.manager.downloads_changed.connect(self.refresh)
         self.refresh()
 
-    def _connect_manager_signal(self):
-        signal = getattr(self.manager, "downloads_changed", None)
-        if signal is not None and callable(getattr(signal, "connect", None)):
-            signal.connect(self.refresh)
-
-    def refresh(self):
+    def refresh(self, *_signal_args):
         try:
-            records = manager_records(
-                self.manager,
-                methods=("get_downloads", "list_downloads"),
-                attributes=("downloads", "items"),
-            )
+            records = self.manager.get_downloads()
+            if not isinstance(records, (list, tuple)):
+                raise TypeError("get_downloads() must return a list of download records")
         except Exception as error:
             self._set_status(f"Could not load downloads: {error}")
             self.table.setRowCount(0)
@@ -113,31 +115,33 @@ class DownloadsDialog(QDialog):
         downloads = []
         invalid_count = 0
         for record in records:
-            try:
-                downloads.append(normalize_download(record))
-            except Exception as error:
+            download = normalize_download(record)
+            if download is None:
                 invalid_count += 1
-                self._report_error(f"Skipped an unreadable download record: {error}")
+            else:
+                downloads.append(download)
+
         self.table.setRowCount(len(downloads))
         finished_count = 0
         for row, download in enumerate(downloads):
             state = download["status"]
-            complete = state in _COMPLETED
-            if complete or state in _CANCELLED or state in _FAILED:
+            if state in _TERMINAL:
                 finished_count += 1
 
             self._set_file_cell(row, download)
-            self._set_progress_cell(row, download, state)
-            self._set_status_cell(row, download, state)
-            self._set_actions_cell(row, download, state)
+            self._set_progress_cell(row, download)
+            self._set_status_cell(row, download)
+            self._set_actions_cell(row, download)
             self.table.setRowHeight(row, 76)
 
         self.table.setVisible(bool(downloads))
         self.empty_label.setVisible(not downloads)
-        self.empty_label.setText("No downloads yet.")
+        self.empty_label.setText(
+            "No downloads yet." if not records else "No usable downloads found."
+        )
         self.clear_button.setEnabled(finished_count > 0)
         self._set_status(
-            f"Skipped {invalid_count} unreadable download record(s)." if invalid_count else ""
+            f"Skipped {invalid_count} invalid download record(s)." if invalid_count else ""
         )
 
     def _set_file_cell(self, row, download):
@@ -159,7 +163,7 @@ class DownloadsDialog(QDialog):
         layout.addWidget(origin)
         self.table.setCellWidget(row, 0, cell)
 
-    def _set_progress_cell(self, row, download, state):
+    def _set_progress_cell(self, row, download):
         cell = QWidget(self.table)
         cell.setObjectName("downloadCell")
         layout = QVBoxLayout(cell)
@@ -167,114 +171,174 @@ class DownloadsDialog(QDialog):
         layout.setSpacing(6)
         progress = QProgressBar(cell)
         progress.setTextVisible(False)
-        total = _positive_int(download["total"])
-        received = _positive_int(download["received"])
-        percent = _progress_percent(download["progress"])
-        if total:
-            value = min(100, int(received * 100 / total))
-            progress.setRange(0, 100)
-            progress.setValue(100 if state in _COMPLETED else value)
+
+        state = download["status"]
+        total = download["total"]
+        received = download["received"]
+        if total is not None:
+            if total > 0:
+                progress.setRange(0, 100)
+                progress.setValue(100 if state == "completed" else min(100, received * 100 // total))
+            elif state == "completed":
+                progress.setRange(0, 100)
+                progress.setValue(100)
+            elif state in _ACTIVE:
+                # A known zero-byte total cannot produce a meaningful ratio.
+                progress.setRange(0, 0)
+            else:
+                progress.setRange(0, 100)
+                progress.setValue(0)
             size_text = f"{_format_size(received)} of {_format_size(total)}"
-        elif state in _COMPLETED:
-            progress.setRange(0, 100)
-            progress.setValue(100)
-            size_text = _size_for_download(download)
         elif state in _ACTIVE:
             progress.setRange(0, 0)
             size_text = f"{_format_size(received)} downloaded · total unknown"
         else:
             progress.setRange(0, 100)
-            progress.setValue(min(100, percent))
+            progress.setValue(100 if state == "completed" else 0)
             size_text = _size_for_download(download)
+
         size_label = QLabel(size_text, cell)
         size_label.setObjectName("dialogStatus")
         layout.addWidget(progress)
         layout.addWidget(size_label)
         self.table.setCellWidget(row, 1, cell)
 
-    def _set_status_cell(self, row, download, state):
-        if state in _COMPLETED:
-            text = "Completed"
-        elif state in _CANCELLED:
-            text = "Cancelled"
-        elif state in _FAILED:
-            text = "Failed"
-        elif state in _ACTIVE:
-            text = "In progress"
-        else:
-            text = "Status unknown"
+    def _set_status_cell(self, row, download):
+        state = download["status"]
+        text = _STATE_LABELS[state]
         if download["error"]:
             text = f"{text}\n{download['error']}"
         status_item = QTableWidgetItem(text)
         status_item.setToolTip(download["error"] or text)
         self.table.setItem(row, 2, status_item)
 
-    def _set_actions_cell(self, row, download, state):
+    def _set_actions_cell(self, row, download):
         cell = QWidget(self.table)
         cell.setObjectName("downloadCell")
         layout = QHBoxLayout(cell)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
-        path = download["path"]
-        usable_file = state in _COMPLETED and bool(path) and os.path.isfile(path)
-        usable_folder = usable_file and os.path.isdir(os.path.dirname(os.path.abspath(path)))
 
-        identifier = download["id"] if download["id"] is not None else path
-        if state in _ACTIVE:
+        path = download["path"]
+        download_id = download["id"]
+        state = download["status"]
+        valid_file = state == "completed" and _is_file(path)
+        valid_folder = state == "completed" and _is_folder_for(path)
+
+        if state in _ACTIVE and download_id:
             cancel_button = QPushButton("Cancel", cell)
-            cancel_button.setEnabled(identifier is not None)
             cancel_button.setToolTip("Cancel this download")
+            cancel_button.setAccessibleName(f"Cancel {download['filename']}")
             cancel_button.clicked.connect(
-                lambda checked=False, download_id=identifier: self.cancel_download(download_id)
+                lambda checked=False, current_id=download_id: self.cancel_download(current_id)
             )
             layout.addWidget(cancel_button)
-        elif state in _COMPLETED and usable_file:
+        elif state == "completed" and valid_file and download_id:
             open_button = QPushButton("Open", cell)
             open_button.setToolTip("Open the completed file")
-            open_button.clicked.connect(lambda checked=False, p=path: self._open_path(p))
+            open_button.setAccessibleName(f"Open {download['filename']}")
+            open_button.clicked.connect(
+                lambda checked=False, current_id=download_id: self.open_download(current_id)
+            )
             layout.addWidget(open_button)
 
-            if usable_folder:
-                folder_button = QPushButton("Show folder", cell)
-                folder_button.setToolTip("Open the folder containing the completed file")
-                folder_button.clicked.connect(lambda checked=False, p=path: self._open_folder(p))
-                layout.addWidget(folder_button)
+        if state == "completed" and valid_folder and download_id:
+            folder_button = QPushButton("Show folder", cell)
+            folder_button.setToolTip("Open the folder containing the completed file")
+            folder_button.setAccessibleName(f"Show folder for {download['filename']}")
+            folder_button.clicked.connect(
+                lambda checked=False, current_id=download_id: self.open_download_folder(current_id)
+            )
+            layout.addWidget(folder_button)
+
         layout.addStretch(1)
         self.table.setCellWidget(row, 3, cell)
 
-    def _open_path(self, path):
-        if not path or not os.path.isfile(path):
-            self._report_error("The completed file is no longer available.")
-            return
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(path))):
-            self._report_error(f"Could not open the file: {path}")
+    def _find_download(self, download_id):
+        records = self.manager.get_downloads()
+        if not isinstance(records, (list, tuple)):
+            raise TypeError("get_downloads() must return a list of download records")
+        for record in records:
+            download = normalize_download(record)
+            if download is not None and download["id"] == download_id:
+                return download
+        return None
 
-    def _open_folder(self, path):
-        folder = os.path.dirname(os.path.abspath(path)) if path else ""
+    def cancel_download(self, download_id):
+        if not download_id:
+            self._report_error("This download has no identifier to cancel.")
+            return
+        try:
+            download = self._find_download(download_id)
+            if download is None:
+                self.refresh()
+                self._report_error("This download is no longer available.")
+                return
+            if download["status"] not in _ACTIVE:
+                label = _STATE_LABELS[download["status"]].lower()
+                self.refresh()
+                if download["status"] in _TERMINAL:
+                    self._report_error(f"This download is already {label}.")
+                else:
+                    self._report_error("This download cannot be cancelled because its status is unavailable.")
+                return
+            cancelled = self.manager.cancel(download_id)
+        except Exception as error:
+            self._report_error(f"Could not cancel download: {error}")
+            return
+
+        self.refresh()
+        if not cancelled:
+            self._report_error("The download could not be cancelled; it may have finished already.")
+        else:
+            self._set_status("")
+
+    def open_download(self, download_id):
+        try:
+            download = self._find_download(download_id)
+            if download is None:
+                self.refresh()
+                self._report_error("This download is no longer available.")
+                return
+            if download["status"] != "completed":
+                self.refresh()
+                self._report_error("Only completed downloads can be opened.")
+                return
+            if not _is_file(download["path"]):
+                self.refresh()
+                self._report_error("The completed file is no longer available.")
+                return
+            opened = self.manager.open_file(download_id)
+        except Exception as error:
+            self._report_error(f"Could not open download: {error}")
+            return
+
+        if not opened:
+            self._report_error("The download manager could not open this file.")
+        else:
+            self._set_status("")
+
+    def open_download_folder(self, download_id):
+        try:
+            download = self._find_download(download_id)
+        except Exception as error:
+            self._report_error(f"Could not locate download folder: {error}")
+            return
+        if download is None or download["status"] != "completed":
+            self._report_error("This completed download is no longer available.")
+            return
+        folder = os.path.dirname(os.path.abspath(download["path"])) if download["path"] else ""
         if not folder or not os.path.isdir(folder):
             self._report_error("The download folder is no longer available.")
             return
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(folder)):
             self._report_error(f"Could not open the folder: {folder}")
-
-    def cancel_download(self, download_id):
-        if download_id is None:
-            self._report_error("This download has no identifier to cancel.")
-            return
-        try:
-            call_manager(self.manager, ("cancel_download", "cancel"), download_id)
-        except Exception as error:
-            self._report_error(f"Could not cancel download: {error}")
-            return
-        self._set_status("")
-        self.refresh()
+        else:
+            self._set_status("")
 
     def clear_finished(self):
         try:
-            call_manager(
-                self.manager,
-                ("clear_finished_downloads", "clear_finished", "clear_completed_downloads"),
-            )
+            self.manager.clear_finished()
         except Exception as error:
             self._report_error(f"Could not clear finished downloads: {error}")
             return
@@ -290,28 +354,10 @@ class DownloadsDialog(QDialog):
         self.status_label.setVisible(bool(text))
 
 
-def _positive_int(value):
-    try:
-        return max(0, int(value)) if value is not None else 0
-    except (TypeError, ValueError, OverflowError):
-        return 0
-
-
-def _progress_percent(value):
-    try:
-        value = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return 0
-    if 0 <= value <= 1:
-        value *= 100
-    return max(0, min(100, int(value)))
-
-
 def _format_size(value):
-    number = _positive_int(value)
+    number = max(0, int(value))
     units = ("B", "KB", "MB", "GB", "TB")
     amount = float(number)
-    unit = units[0]
     for unit in units:
         if amount < 1024 or unit == units[-1]:
             break
@@ -320,13 +366,25 @@ def _format_size(value):
 
 
 def _size_for_download(download):
-    total = _positive_int(download["total"])
-    if total:
-        return _format_size(total)
-    path = download["path"]
-    if download["status"] in _COMPLETED and path and os.path.isfile(path):
+    if download["status"] == "completed" and _is_file(download["path"]):
         try:
-            return _format_size(os.path.getsize(path))
+            return _format_size(os.path.getsize(download["path"]))
         except OSError:
-            return "Size unavailable"
+            pass
+    if download["received"] or download["status"] in _ACTIVE:
+        return f"{_format_size(download['received'])} downloaded · total unknown"
     return "Size unknown"
+
+
+def _is_file(path):
+    try:
+        return bool(path) and os.path.isfile(path)
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _is_folder_for(path):
+    try:
+        return bool(path) and os.path.isdir(os.path.dirname(os.path.abspath(path)))
+    except (OSError, TypeError, ValueError):
+        return False

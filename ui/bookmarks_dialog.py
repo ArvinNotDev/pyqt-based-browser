@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ._manager_ui import call_manager, manager_records, normalize_bookmark
+from ._manager_ui import normalize_bookmark
 
 
 class BookmarksDialog(QDialog):
@@ -40,6 +40,7 @@ class BookmarksDialog(QDialog):
         self.table.setSelectionMode(QAbstractItemView.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setAlternatingRowColors(True)
+        self.table.setFocusPolicy(Qt.StrongFocus)
         self.table.verticalHeader().hide()
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.horizontalHeader().setMinimumSectionSize(100)
@@ -63,7 +64,7 @@ class BookmarksDialog(QDialog):
         buttons.addStretch(1)
         self.open_button = QPushButton("Open", self)
         self.open_button.setObjectName("primaryButton")
-        self.open_button.setDefault(True)
+        self.open_button.setAutoDefault(False)
         self.open_button.clicked.connect(self.open_selected)
         buttons.addWidget(self.open_button)
 
@@ -78,21 +79,13 @@ class BookmarksDialog(QDialog):
         root.addLayout(buttons)
 
         self.table.itemSelectionChanged.connect(self._update_buttons)
-        self._connect_manager_signal()
         self.refresh()
-
-    def _connect_manager_signal(self):
-        signal = getattr(self.manager, "bookmarks_changed", None)
-        if signal is not None and callable(getattr(signal, "connect", None)):
-            signal.connect(self.refresh)
 
     def refresh(self):
         try:
-            records = manager_records(
-                self.manager,
-                methods=("get_bookmarks", "list_bookmarks"),
-                attributes=("bookmarks", "items"),
-            )
+            records = self.manager.list_bookmarks()
+            if not isinstance(records, (list, tuple)):
+                raise TypeError("list_bookmarks() must return a list of bookmark records")
         except Exception as error:
             self._set_status(f"Could not load bookmarks: {error}")
             self.table.setRowCount(0)
@@ -105,12 +98,7 @@ class BookmarksDialog(QDialog):
         normalized = []
         invalid_count = 0
         for record in records:
-            try:
-                bookmark = normalize_bookmark(record)
-            except Exception as error:
-                self._set_status(f"Skipped an unreadable bookmark record: {error}")
-                invalid_count += 1
-                continue
+            bookmark = normalize_bookmark(record)
             if bookmark is None:
                 invalid_count += 1
             else:
@@ -160,13 +148,13 @@ class BookmarksDialog(QDialog):
         if bookmark is None:
             return
         try:
-            call_manager(
-                self.manager,
-                ("remove_bookmark", "delete_bookmark", "remove"),
-                bookmark["id"],
-            )
+            removed = self.manager.remove_bookmark(bookmark["id"])
         except Exception as error:
             self._set_status(f"Could not remove bookmark: {error}")
+            return
+        if not removed:
+            self.refresh()
+            self._set_status("This bookmark no longer exists.")
             return
         self._set_status("")
         self.refresh()
