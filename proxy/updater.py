@@ -1,160 +1,318 @@
+"""Download and validate Tor expert bundles from the Tor Project distribution."""
+
+import glob
+import hashlib
+import logging
+import os
+import re
+import shutil
+import tempfile
+import time
+from urllib.parse import urljoin, urlsplit
+
 import requests
 from bs4 import BeautifulSoup
-from proxy.config import TOR_BUNDLE_BASE_URL, OS_NAME, ARCHITECTURE, BUNDLE_DIR, CHECKSUM_FILE
-import io
-import hashlib
-import os
-import glob
-import shutil
+
+from proxy.config import (
+    ARCHITECTURE,
+    BUNDLE_DIR,
+    CHECKSUM_FILE,
+    MACHINE,
+    OS_NAME,
+    TOR_BUNDLE_BASE_URL,
+)
 from proxy.utils import resource_path
-from urllib.parse import urljoin
-import logging
 
 logger = logging.getLogger(__name__)
 
+REQUEST_TIMEOUT = (10, 30)
+MAX_BUNDLE_BYTES = 512 * 1024 * 1024
+MAX_DOWNLOAD_SECONDS = 600
+_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
+_BUNDLE_RE = re.compile(
+    r"^tor-expert-bundle-(windows|linux)-(x86_64|i686)-([A-Za-z0-9][A-Za-z0-9.+-]{0,63})\.tar\.gz$"
+)
+_CHECKSUM_FILES = ("sha256sums-signed-build.txt", CHECKSUM_FILE, "sha256sums-unsigned-build.txt")
+
+
 def bundle_path(filename):
-    return resource_path(os.path.join(BUNDLE_DIR, filename))
+    name = os.path.basename(os.fspath(filename))
+    if name != os.fspath(filename) and not os.path.isabs(os.fspath(filename)):
+        raise ValueError("Bundle path must be a filename")
+    if not name or name in (".", ".."):
+        raise ValueError("Invalid bundle filename")
+    root = os.path.realpath(resource_path(BUNDLE_DIR))
+    candidate = os.path.realpath(os.fspath(filename)) if os.path.isabs(os.fspath(filename)) else os.path.realpath(os.path.join(root, name))
+    if os.path.commonpath((root, candidate)) != root:
+        raise ValueError("Bundle path escapes the bundle directory")
+    return candidate
+
 
 def create_bundle_dir():
-    os.makedirs(BUNDLE_DIR ,exist_ok=True)
-    
+    os.makedirs(resource_path(BUNDLE_DIR), exist_ok=True)
+
+
+def _validate_version(version):
+    version = str(version).strip().strip("/")
+    if not _VERSION_RE.fullmatch(version) or ".." in version:
+        raise ValueError("Invalid Tor bundle version")
+    return version
+
+
+def _official_base(base_url):
+    parts = urlsplit(base_url)
+    if (
+        parts.scheme.lower() != "https"
+        or parts.hostname != "dist.torproject.org"
+        or parts.port not in (None, 443)
+        or parts.username is not None
+        or parts.password is not None
+        or parts.query
+        or parts.fragment
+    ):
+        raise ValueError("Tor bundle sources must use the official Tor Project HTTPS host")
+    return base_url.rstrip("/") + "/"
+
+
+def _get_response(url, *, stream=False):
+    response = requests.get(url, stream=stream, timeout=REQUEST_TIMEOUT)
+    response.raise_for_status()
+    final = urlsplit(response.url)
+    if (
+        final.scheme.lower() != "https"
+        or final.hostname != "dist.torproject.org"
+        or final.port not in (None, 443)
+        or final.username is not None
+        or final.password is not None
+    ):
+        response.close()
+        raise ValueError("Tor bundle request redirected away from the official host")
+    return response
+
+
 def get_tor_versions(url=TOR_BUNDLE_BASE_URL):
-    links = []
+    versions = []
     try:
-        html = requests.get(url).text
-        soup = BeautifulSoup(html, "html.parser")    
+        url = _official_base(url)
+        with _get_response(url) as response:
+            soup = BeautifulSoup(response.text, "html.parser")
         for link in soup.find_all("a"):
-            if link.text.endswith("/"):
-                links.append(link.text)
-                #
-                get_checksum(link.text)
-    except Exception as e:
-        logger.error(f"error in get tor version: {e}")
-    return links
+            candidate = link.get("href", "").strip("/")
+            if candidate and _VERSION_RE.fullmatch(candidate) and ".." not in candidate:
+                versions.append(candidate)
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Could not retrieve Tor bundle versions (%s)", type(exc).__name__)
+    return sorted(set(versions), reverse=True)
+
+
+def _supported_bundle_name(name):
+    match = _BUNDLE_RE.fullmatch(os.path.basename(name))
+    if not match:
+        return False
+    bundle_os, bundle_arch, _version = match.groups()
+    expected_os = {"Windows": "windows", "Linux": "linux"}.get(OS_NAME)
+    if bundle_os != expected_os:
+        return False
+    machine = MACHINE.lower()
+    if bundle_arch == "x86_64":
+        return ARCHITECTURE == 64 and machine in ("x86_64", "amd64", "x64")
+    return ARCHITECTURE == 32 and machine in ("i386", "i486", "i586", "i686", "x86")
 
 
 def get_bundle_links(version, base_url=TOR_BUNDLE_BASE_URL):
     links = []
     try:
-        version = version.replace("/", "")
-        url = base_url + version
-        html = requests.get(url).text
-        soup = BeautifulSoup(html, "html.parser")    
-        logger.debug(f"tor-expert-bundle-{OS_NAME.lower()}")
+        version = _validate_version(version)
+        base_url = _official_base(base_url)
+        with _get_response(urljoin(base_url, version + "/")) as response:
+            soup = BeautifulSoup(response.text, "html.parser")
         for link in soup.find_all("a"):
-            if link.text.startswith(f"tor-expert-bundle-{OS_NAME.lower()}") and link.text.endswith(".gz"):
-                
-                if "i686" in link.text and ARCHITECTURE == 32:
-                    links.append(link.text)
-                    
-                elif "x86_64" in link.text and ARCHITECTURE == 64:
-                    links.append(link.text)
-    except Exception as e:
-        logger.error(f"error in get bundle links: {e}")
-        
-    return links
+            name = os.path.basename(link.get("href", ""))
+            if _supported_bundle_name(name):
+                links.append(name)
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Could not retrieve Tor bundle links (%s)", type(exc).__name__)
+    return sorted(set(links))
 
 
 def sha256_file(filename):
-    """Compute SHA256 hash of a local file"""
+    digest = hashlib.sha256()
+    with open(filename, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _checksum_cache_path(version):
+    return resource_path(os.path.join(BUNDLE_DIR, f"{version}-{CHECKSUM_FILE}"))
+
+
+def _extract_expected_hash(text, filename):
+    for line in text.splitlines():
+        match = re.match(r"^\s*([0-9a-fA-F]{64})\s+\*?(.+?)\s*$", line)
+        if not match:
+            continue
+        digest, listed_name = match.groups()
+        listed_name = listed_name.removeprefix("./").replace("\\", "/")
+        if listed_name == filename or listed_name.endswith("/" + filename):
+            return digest.lower()
+    return None
+
+
+def _fetch_checksum(version, base_url=TOR_BUNDLE_BASE_URL, filename=None):
+    version = _validate_version(version)
+    base_url = _official_base(base_url)
+    last_error = None
+    for checksum_file in _CHECKSUM_FILES:
+        url = urljoin(base_url, f"{version}/{checksum_file}")
+        try:
+            with _get_response(url) as response:
+                text = response.text
+            if text.strip() and (filename is None or _extract_expected_hash(text, filename) is not None):
+                return text
+        except requests.RequestException as exc:
+            last_error = exc
+    if last_error:
+        raise ValueError("Tor Project checksum file is unavailable") from last_error
+    raise ValueError("Tor Project checksum file is empty")
+
+
+def _save_checksum(text, version):
     create_bundle_dir()
-    h = hashlib.sha256()
-    with open(filename, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
+    path = _checksum_cache_path(version)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=os.path.dirname(path),
+            prefix=".checksum-", suffix=".tmp", delete=False
+        ) as stream:
+            temp_path = stream.name
+            stream.write(text)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
 
-def save_checksum(file, version):
-    file.seek(0)
-    text = file.read()
-    with open(resource_path(os.path.join(BUNDLE_DIR,f"{version}-{CHECKSUM_FILE}")), "w", encoding="utf-8") as f:
-        f.write(text.decode())
 
-def get_checksum(version, base_url=TOR_BUNDLE_BASE_URL,):
-    file = io.BytesIO()
-    version = version.replace("/", "")
-    
-    url = urljoin(base_url, f"{version}/{CHECKSUM_FILE}")
-    with requests.get(url, stream=True) as r:
-            for chunk in r.iter_content(chunk_size=8192):
-                file.write(chunk)
-                    
-    save_checksum(file, version)
-    
+def get_checksum(version, base_url=TOR_BUNDLE_BASE_URL):
+    text = _fetch_checksum(version, base_url)
+    _save_checksum(text, _validate_version(version))
+    return text
+
+
+def get_version_by_bundle(filename, with_slash=False):
+    name = os.path.basename(os.fspath(filename))
+    match = _BUNDLE_RE.fullmatch(name)
+    if not match:
+        raise ValueError("Invalid Tor expert bundle filename")
+    version = match.group(3)
+    return version + "/" if with_slash else version
+
+
 def check_hash(filename, base_url=TOR_BUNDLE_BASE_URL, go_online=False):
     try:
-        version = get_version_by_bundle(filename)
-        if not os.path.exists(resource_path(os.path.join(BUNDLE_DIR,f"{version}-{CHECKSUM_FILE}"))):
-            if go_online:
-                
-                file = io.BytesIO()
-                url = urljoin(base_url, f"{version}/{CHECKSUM_FILE}")
-                with requests.get(url, stream=True) as r:
-                        for chunk in r.iter_content(chunk_size=8192):
-                            file.write(chunk)
-                file_hash = sha256_file(bundle_path(filename))
-                file.seek(0)
-                text = file.read().decode()
-                save_checksum(file, version)
-            else:
-                return True
-            
+        path = bundle_path(filename)
+        name = os.path.basename(path)
+        version = get_version_by_bundle(name)
+        if not os.path.isfile(path):
+            return False
+        if go_online:
+            checksum_text = _fetch_checksum(version, base_url, name)
         else:
-            with open(resource_path(os.path.join(BUNDLE_DIR,f"{version}-{CHECKSUM_FILE}")), "r") as f:
-                text = f.read()
-        file_hash = sha256_file(bundle_path(filename))
-        for i in text.splitlines():
-            hash, name = i.strip().split(None, 1)
-            if name.strip() == filename:
-                if hash.strip() == file_hash:
-                    return True
-    except Exception as e:
-        logger.error(f"check hash: {e}")
-    return False
+            cache_path = _checksum_cache_path(version)
+            if not os.path.isfile(cache_path):
+                return False
+            with open(cache_path, "r", encoding="utf-8") as stream:
+                checksum_text = stream.read()
+        expected = _extract_expected_hash(checksum_text, name)
+        return expected is not None and sha256_file(path) == expected
+    except (OSError, ValueError, requests.RequestException) as exc:
+        logger.warning("Tor bundle checksum verification failed (%s)", type(exc).__name__)
+        return False
+
 
 def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL):
     create_bundle_dir()
-    version = version if version.endswith("/") else version + "/"
-    
-    if os.path.exists(bundle_path(filename)):
-        return 
-    url = base_url + version + filename
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(bundle_path(filename), "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                f.write(chunk)
-    logger.info(f"Downloaded {filename}")
+    name = os.path.basename(os.fspath(filename))
+    if name != os.fspath(filename) or not _BUNDLE_RE.fullmatch(name):
+        raise ValueError("Invalid Tor expert bundle filename")
+    version = _validate_version(version)
+    if get_version_by_bundle(name) != version:
+        raise ValueError("Bundle filename and version do not match")
+    base_url = _official_base(base_url)
+    path = bundle_path(name)
+
+    if os.path.exists(path):
+        if check_hash(path, base_url=base_url, go_online=True):
+            return path
+        raise ValueError("Existing Tor bundle failed checksum verification; it was left untouched")
+
+    checksum_text = _fetch_checksum(version, base_url, name)
+    expected = _extract_expected_hash(checksum_text, name)
+    if expected is None:
+        raise ValueError("Tor Project checksum does not contain this bundle")
+
+    url = urljoin(base_url, f"{version}/{name}")
+    temp_path = None
+    started_at = time.monotonic()
+    try:
+        with tempfile.NamedTemporaryFile(
+            "wb", dir=os.path.dirname(path), prefix=".tor-download-", suffix=".tmp", delete=False
+        ) as stream:
+            temp_path = stream.name
+            with _get_response(url, stream=True) as response:
+                content_length = response.headers.get("Content-Length")
+                if content_length and int(content_length) > MAX_BUNDLE_BYTES:
+                    raise ValueError("Tor bundle exceeds the configured size limit")
+                received = 0
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if time.monotonic() - started_at > MAX_DOWNLOAD_SECONDS:
+                        raise TimeoutError("Tor bundle download exceeded its time limit")
+                    if not chunk:
+                        continue
+                    received += len(chunk)
+                    if received > MAX_BUNDLE_BYTES:
+                        raise ValueError("Tor bundle exceeds the configured size limit")
+                    stream.write(chunk)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if sha256_file(temp_path) != expected:
+            raise ValueError("Downloaded Tor bundle checksum does not match Tor Project data")
+        os.replace(temp_path, path)
+        temp_path = None
+        _save_checksum(checksum_text, version)
+        logger.info("Downloaded and checksum-verified Tor bundle %s", name)
+        return path
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+
 
 def list_downloaded_bundles():
-    return glob.glob(resource_path(BUNDLE_DIR)+"*.gz")
+    return sorted(glob.glob(os.path.join(resource_path(BUNDLE_DIR), "tor-expert-bundle-*.tar.gz")))
 
-def get_version_by_bundle(filename, with_slash=False):
-    return filename.replace(".tar.gz", "").rsplit("-", 1)[-1]
 
 def check_bundle_compatibility(filename):
-    name = os.path.splitext(os.path.basename(filename))[0]
+    return _supported_bundle_name(os.path.basename(os.fspath(filename)))
 
-    if ((ARCHITECTURE == 64 and "x86_64" in name) or (ARCHITECTURE == 32 and "i686" in name)) and OS_NAME.lower() in name and name.startswith("tor-expert-bundle-"):
-        return True
-    return False
 
 def get_own_bundles():
-    res = []
-    for i in glob.glob(resource_path(BUNDLE_DIR)+"tor-expert-bundle*"):
-        if os.path.isdir(i):
-            res.append(i)
-    return res    
+    pattern = os.path.join(resource_path(BUNDLE_DIR), "tor-expert-bundle-*")
+    return sorted(path for path in glob.glob(pattern) if os.path.isdir(path) and check_bundle_compatibility(path))
+
 
 def delete_bundle(name):
-    name = name.replace(".tar.gz", "")
-    
-    try:
-        shutil.rmtree(os.path.join(BUNDLE_DIR, name), ignore_errors=True)
-    except Exception as e:
-        logger.error(f"rmdir bundle failed: {e}")
-    try:
-        os.remove(os.path.join(BUNDLE_DIR, name+".tar.gz"))
-    except Exception as e: 
-        logger.error(f"remove bundle failed: {e}")
-
+    bundle_name = os.path.basename(os.fspath(name)).removesuffix(".tar.gz")
+    if not bundle_name.startswith("tor-expert-bundle-") or any(sep in bundle_name for sep in ("/", "\\")):
+        raise ValueError("Invalid Tor bundle name")
+    root = os.path.abspath(resource_path(BUNDLE_DIR))
+    directory = os.path.abspath(os.path.join(root, bundle_name))
+    archive = os.path.abspath(os.path.join(root, bundle_name + ".tar.gz"))
+    if os.path.commonpath((root, directory)) != root or os.path.commonpath((root, archive)) != root:
+        raise ValueError("Tor bundle path escapes the bundle directory")
+    if os.path.isdir(directory):
+        shutil.rmtree(directory)
+    if os.path.isfile(archive):
+        os.remove(archive)

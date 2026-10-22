@@ -151,24 +151,28 @@ class UpdaterWindow(QWidget):
         self.updates_list.setEnabled(False)
         bundle = item.text()
         version = get_version_by_bundle(bundle)
+        self.lbl_status.setText(f"Downloading and verifying {bundle}")
         self.worker = Worker(self.download_bundle, bundle , version)
+        self.worker.signals.finished.connect(self._download_complete)
+        self.worker.signals.error.connect(self._download_error)
         self.thread_pool.start(self.worker)
     
     def download_bundle(self, bundle, version):
-        try:
-            logger.info(f"Downloading {bundle}")
-            self.lbl_status.setText(f"Downloading {bundle}")
-            
-            download_file(bundle, version)
-            base_path = os.path.join(BUNDLE_DIR, os.path.basename(bundle).replace(".tar.gz", ""))
-            extract_tar_gz_file(resource_path(os.path.join(BUNDLE_DIR, bundle)), base_path)
-            
-        except Exception as e:
-            self.lbl_status.setText(f"Download  {bundle} ended with error")
-            delete_bundle(bundle)
-            logger.info(f"Download {bundle} ended with error and removed. error {e}")
-            
-        self.lbl_status.setText(f"Download {bundle} ended.")
+        logger.info("Downloading Tor bundle %s", bundle)
+        archive = download_file(bundle, version)
+        base_path = resource_path(os.path.join(BUNDLE_DIR, os.path.basename(bundle).replace(".tar.gz", "")))
+        if not os.path.isdir(base_path):
+            extract_tar_gz_file(archive, base_path)
+        return bundle
+
+    def _download_complete(self, bundle):
+        self.lbl_status.setText(f"Downloaded and verified {bundle}")
+        self.refresh_version()
+        self.updates_list.setEnabled(True)
+
+    def _download_error(self, error):
+        logger.warning("Tor bundle download or extraction failed (%s)", error)
+        self.lbl_status.setText("Download or extraction failed; the archive was retained.")
         self.updates_list.setEnabled(True)
         
 
