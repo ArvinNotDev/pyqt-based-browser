@@ -7,7 +7,7 @@ import logging
 import os
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QObject, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QKeySequence, QPainter, QPixmap, QShortcut
+from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -80,6 +80,9 @@ class NavigationBar(QToolBar):
     bookmark_requested = Signal()
     show_bookmarks_requested = Signal()
     show_downloads_requested = Signal()
+    show_history_requested = Signal()
+    proxy_panel_requested = Signal()
+    gaming_mode_toggled = Signal(bool)
 
     def __init__(self, profiles_list, settings: Settings | None = None, parent=None):
         super().__init__("Navigation", parent)
@@ -147,8 +150,6 @@ class NavigationBar(QToolBar):
         self.url_bar.setToolTip("Search or enter a website address (Ctrl+L)")
         self.url_bar.installEventFilter(self)
         self._add_widget(self.url_bar, expanding=True)
-        self._url_shortcut = QShortcut(QKeySequence("Ctrl+L"), self)
-        self._url_shortcut.activated.connect(self._focus_url_bar)
         self.url_bar.returnPressed.connect(self._on_url_entered)
         self.url_bar.textEdited.connect(self._on_url_typed)
         self.url_bar.editingFinished.connect(self._close_suggestion_popup)
@@ -158,17 +159,46 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.clicked.connect(self.bookmark_requested.emit)
         self._add_widget(self.bookmark_btn)
 
-        self.show_bookmarks_btn = self._button("Bookmarks", "Show bookmarks", "utilityToolButton")
-        self.show_bookmarks_btn.clicked.connect(self.show_bookmarks_requested.emit)
-        self._add_widget(self.show_bookmarks_btn)
+        self.browser_menu = QMenu(self)
+        self.new_tab_action = QAction("New tab", self)
+        self.new_tab_action.triggered.connect(self.new_tab_requested.emit)
+        self.browser_menu.addAction(self.new_tab_action)
+        self.browser_menu.addSeparator()
 
-        self.show_downloads_btn = self._button("Downloads", "Show downloads", "utilityToolButton")
-        self.show_downloads_btn.clicked.connect(self.show_downloads_requested.emit)
-        self._add_widget(self.show_downloads_btn)
+        self.bookmark_action = QAction("Bookmark this page", self)
+        self.bookmark_action.triggered.connect(self.bookmark_requested.emit)
+        self.browser_menu.addAction(self.bookmark_action)
+        self.show_bookmarks_action = QAction("Bookmarks", self)
+        self.show_bookmarks_action.triggered.connect(self.show_bookmarks_requested.emit)
+        self.browser_menu.addAction(self.show_bookmarks_action)
+        self.show_history_action = QAction("History", self)
+        self.show_history_action.triggered.connect(self.show_history_requested.emit)
+        self.browser_menu.addAction(self.show_history_action)
+        self.show_downloads_action = QAction("Downloads", self)
+        self.show_downloads_action.triggered.connect(self.show_downloads_requested.emit)
+        self.browser_menu.addAction(self.show_downloads_action)
+        self.proxy_panel_action = QAction("Proxy panel", self)
+        self.proxy_panel_action.triggered.connect(self.proxy_panel_requested.emit)
+        self.browser_menu.addAction(self.proxy_panel_action)
+        self.browser_menu.addSeparator()
+        self.gaming_mode_action = QAction("Gaming mode", self)
+        self.gaming_mode_action.setCheckable(True)
+        self.gaming_mode_action.toggled.connect(self.gaming_mode_toggled.emit)
+        self.browser_menu.addAction(self.gaming_mode_action)
+        self.browser_menu.addSeparator()
+        self.settings_btn.triggered.connect(self._close_suggestion_popup)
+        self.browser_menu.addAction(self.settings_btn)
+
+        self.menu_button = QToolButton(self)
+        self.menu_button.setObjectName("menuButton")
+        self.menu_button.setText("⋮")
+        self.menu_button.setToolTip("Browser menu")
+        self.menu_button.setAccessibleName("Browser menu")
+        self.menu_button.setPopupMode(QToolButton.InstantPopup)
+        self.menu_button.setMenu(self.browser_menu)
+        self._add_widget(self.menu_button)
 
         self.addSeparator()
-        self.settings_btn.triggered.connect(self._close_suggestion_popup)
-        self._add_styled_action(self.settings_btn)
         self.profile_btn = self._action("Profiles", os.path.join(icon_path, "profile.png"))
         self.profile_btn.setToolTip("Choose or customize a profile")
         self._add_styled_action(self.profile_btn)

@@ -28,6 +28,8 @@ class Settings:
     download_folder: str = "./downloads"
     show_dev_tools: bool = False
     hardware_acceleration: bool = True
+    proxy_panel_visible: bool = True
+    site_compatibility_mode: bool = True
 
     # Retained for callers that used these public attributes. Neither is
     # serialized as a per-profile setting.
@@ -173,7 +175,8 @@ class Settings:
         string_fields = {"homepage", "default_search_engine", "download_folder"}
         boolean_fields = {
             "dark_mode", "save_history", "save_cookies", "private_mode",
-            "show_dev_tools", "hardware_acceleration",
+            "show_dev_tools", "hardware_acceleration", "proxy_panel_visible",
+            "site_compatibility_mode",
         }
         for name in string_fields:
             value = values.get(name)
@@ -220,6 +223,8 @@ class Settings:
             "download_folder": "./downloads",
             "show_dev_tools": False,
             "hardware_acceleration": True,
+            "proxy_panel_visible": True,
+            "site_compatibility_mode": True,
         }
         # Settings instances are reused while switching profiles. Reset every
         # profile field first so an absent/partial profile cannot inherit the

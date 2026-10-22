@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from typing import List, Optional, Dict
@@ -11,7 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget
 )
-from PySide6.QtGui import QPixmap, QAction
+from PySide6.QtGui import QPixmap, QAction, QKeySequence
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -19,6 +20,7 @@ from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
+from .history_window import HistoryWindow
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
 from .url_utils import URLInputError, resolve_address_input
@@ -371,6 +373,12 @@ class BrowserWindow(QMainWindow):
             self.selected_profile = self.settings.profiles_list[0]
         self.settings.load(self.selected_profile)
 
+        self._closed_tab_urls: List[str] = []
+        self._browser_shortcuts: Dict[QAction, list[QKeySequence]] = {}
+        self._ui_shortcut_actions: set[QAction] = set()
+        self._gaming_mode_active = False
+        self._closing = False
+
         self.history: Optional[History] = None
         self._refresh_history()
 
@@ -379,6 +387,7 @@ class BrowserWindow(QMainWindow):
             os.makedirs(self.storage_path, exist_ok=True)
 
         self._profiles: Dict[tuple[str, bool], QWebEngineProfile] = {}
+        self._profile_default_user_agents: Dict[int, str] = {}
         self.profile = self._get_profile(self.selected_profile)
         self._apply_profile_settings(self.profile)
         self._download_managers = {}
@@ -452,6 +461,8 @@ class BrowserWindow(QMainWindow):
                 self.navbar.bookmark_requested.connect(self._add_current_bookmark)
             if hasattr(self.navbar, "show_bookmarks_requested"):
                 self.navbar.show_bookmarks_requested.connect(self.show_bookmarks)
+            if hasattr(self.navbar, "show_history_requested"):
+                self.navbar.show_history_requested.connect(self.show_history)
             if hasattr(self.navbar, "show_downloads_requested"):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
         except (AttributeError, RuntimeError):
@@ -460,32 +471,129 @@ class BrowserWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self.new_tab(self.settings.homepage))
         self._last_progress_ts = 0
         
-        self.dock = QDockWidget("Proxy Window", self)
+        self.dock = QDockWidget("Proxy", self)
+        self.dock.setObjectName("proxyDock")
         self.dock.setMinimumWidth(300)
         self.dock.setMaximumWidth(400)
         self.dock.setWidget(self.proxy_panel)
         self.dock.setFloating(False)
         self.dock.setFeatures(QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-
-        # override close behavior dock
-        self.dock.closeEvent = self._on_dock_close
-        btn = QAction("Proxy", self.navbar)
-        self.navbar.addAction(btn)
-        btn.triggered.connect(self.show_proxy)
-        
-
-    def _on_dock_close(self, event):
-        self.dock.hide()
-        event.ignore()  
+        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+        self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
+        self.navbar.proxy_panel_requested.connect(self.show_proxy)
+        self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
+        self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
+        self._install_browser_shortcuts()
 
     def show_proxy(self):
-        if not self.dock.isHidden():
-            self.dock.hide()
+        self.dock.setVisible(not self.dock.isVisible())
+        if self.dock.isVisible():
+            self.dock.raise_()
+
+    def _update_proxy_menu_action(self, visible: bool) -> None:
+        self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
+
+    def _on_proxy_visibility_changed(self, visible: bool) -> None:
+        self._update_proxy_menu_action(visible)
+        if self._closing or bool(self.settings.proxy_panel_visible) == bool(visible):
             return
-        self.dock.show()
-        self.dock.raise_() 
-        self.dock.activateWindow() 
+        self.settings.proxy_panel_visible = bool(visible)
+        try:
+            self.settings.save(self.selected_profile)
+        except (OSError, ValueError, TypeError):
+            logger.exception("Could not save proxy panel visibility")
+
+    def _install_browser_shortcuts(self) -> None:
+        """Install Chrome-style browser shortcuts that Gaming mode can pause."""
+        for action, sequences in (
+            (self.navbar.new_tab_action, ["Ctrl+T"]),
+            (self.navbar.bookmark_action, ["Ctrl+D"]),
+            (self.navbar.show_history_action, ["Ctrl+H"]),
+            (self.navbar.show_downloads_action, ["Ctrl+J"]),
+            (self.navbar.settings_btn, ["Ctrl+,"]),
+            (self.navbar.back_btn, ["Alt+Left"]),
+            (self.navbar.forward_btn, ["Alt+Right"]),
+            (self.navbar.reload_btn, ["Ctrl+R", "F5"]),
+            (self.navbar.home_btn, ["Alt+Home"]),
+        ):
+            self._register_browser_shortcut(action, sequences, ui_action=True)
+
+        self._add_shortcut("Close tab", ["Ctrl+W"], self._close_current_tab)
+        self._add_shortcut("Reopen closed tab", ["Ctrl+Shift+T"], self._reopen_closed_tab)
+        self._add_shortcut("Next tab", ["Ctrl+Tab", "Ctrl+PageDown"], lambda: self._cycle_tabs(1))
+        self._add_shortcut(
+            "Previous tab", ["Ctrl+Shift+Tab", "Ctrl+PageUp"], lambda: self._cycle_tabs(-1)
+        )
+        self._add_shortcut("Focus address bar", ["Ctrl+L", "Alt+D"], self.navbar._focus_url_bar)
+        for number in range(1, 9):
+            self._add_shortcut(
+                f"Switch to tab {number}",
+                [f"Ctrl+{number}"],
+                lambda tab_number=number: self._switch_to_tab(tab_number),
+            )
+        self._add_shortcut("Switch to last tab", ["Ctrl+9"], lambda: self._switch_to_tab(9))
+
+    def _register_browser_shortcut(
+        self, action: QAction, sequences: list[str], *, ui_action: bool = False,
+        callback=None,
+    ) -> None:
+        key_sequences = [QKeySequence(sequence) for sequence in sequences]
+        action.setShortcuts(key_sequences)
+        action.setShortcutContext(Qt.WindowShortcut)
+        if callback is not None:
+            action.triggered.connect(lambda _checked=False: callback())
+        self.addAction(action)
+        self._browser_shortcuts[action] = key_sequences
+        if ui_action:
+            self._ui_shortcut_actions.add(action)
+
+    def _add_shortcut(self, label: str, sequences: list[str], callback) -> QAction:
+        action = QAction(label, self)
+        self._register_browser_shortcut(action, sequences, callback=callback)
+        return action
+
+    def _set_gaming_mode(self, enabled: bool) -> None:
+        self._gaming_mode_active = bool(enabled)
+        for action, sequences in self._browser_shortcuts.items():
+            action.setShortcuts([] if enabled else sequences)
+            if action not in self._ui_shortcut_actions:
+                action.setEnabled(not enabled)
+
+        self.navbar.menu_button.setProperty("gamingMode", bool(enabled))
+        self.navbar.menu_button.setToolTip(
+            "Gaming mode is on — browser shortcuts are paused" if enabled else "Browser menu"
+        )
+        self.navbar.menu_button.style().unpolish(self.navbar.menu_button)
+        self.navbar.menu_button.style().polish(self.navbar.menu_button)
+        self.statusBar().showMessage(
+            "Gaming mode on · browser shortcuts paused" if enabled else "Gaming mode off",
+            2500,
+        )
+
+    def _close_current_tab(self) -> None:
+        if self.current_index >= 0:
+            self.request_close_tab(self.current_index)
+
+    def _reopen_closed_tab(self) -> None:
+        if self._closed_tab_urls:
+            self.new_tab(self._closed_tab_urls.pop())
+
+    def _cycle_tabs(self, offset: int) -> None:
+        if self.views:
+            self.tabbar.set_active((self.current_index + offset) % len(self.views))
+
+    def _switch_to_tab(self, number: int) -> None:
+        if self.views:
+            index = len(self.views) - 1 if number == 9 else number - 1
+            if index < len(self.views):
+                self.tabbar.set_active(index)
+
+    def show_history(self) -> None:
+        if self.history is None:
+            self.statusBar().showMessage("History is unavailable in this session.", 3000)
+            return
+        HistoryWindow(self.selected_profile, self.history, self).exec()
 
     def _refresh_history(self):
         if self.settings.private_mode or not self.settings.save_history:
@@ -519,6 +627,18 @@ class BrowserWindow(QMainWindow):
             else QWebEngineProfile.NoPersistentCookies
         )
         profile.setPersistentCookiesPolicy(policy)
+
+        profile_key = id(profile)
+        default_user_agent = self._profile_default_user_agents.setdefault(
+            profile_key, profile.httpUserAgent()
+        )
+        if self.settings.site_compatibility_mode:
+            compatible_user_agent = re.sub(
+                r"\s+QtWebEngine/[^\s]+", "", default_user_agent, flags=re.IGNORECASE
+            )
+            profile.setHttpUserAgent(compatible_user_agent)
+        else:
+            profile.setHttpUserAgent(default_user_agent)
 
         if not private_mode:
             profile_dir = os.path.join(self.storage_path, self.selected_profile)
@@ -710,6 +830,10 @@ class BrowserWindow(QMainWindow):
             return
 
         closing_view = self.views.pop(index)
+        closed_url = closing_view.url().toString().strip()
+        if closed_url and closed_url != "about:blank":
+            self._closed_tab_urls.append(closed_url)
+            self._closed_tab_urls = self._closed_tab_urls[-10:]
         was_active = index == self.current_index
         self.tabbar.remove_tab(index, activate=False)
         placeholder = self._placeholders.pop(closing_view, None)
@@ -989,6 +1113,7 @@ class BrowserWindow(QMainWindow):
         self.settings = new_settings
         self.navbar.settings = new_settings
         self.change_profile(profile_name)
+        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
         self.new_tab(self.settings.homepage)
 
@@ -1021,6 +1146,7 @@ class BrowserWindow(QMainWindow):
             previous_private_mode = bool(self.settings.private_mode)
             self.settings.load(self.selected_profile)
             self._refresh_history()
+            self.dock.setVisible(bool(self.settings.proxy_panel_visible))
             if previous_private_mode != bool(self.settings.private_mode):
                 self.change_profile(self.selected_profile)
             else:
@@ -1038,6 +1164,7 @@ class BrowserWindow(QMainWindow):
             logger.exception("Could not apply the current browser theme")
     
     def closeEvent(self, event):
+        self._closing = True
         for download_manager in self._download_managers.values():
             download_manager.shutdown()
         views = list(self.views)
@@ -1047,9 +1174,6 @@ class BrowserWindow(QMainWindow):
             view.stop()
             self.view_layout.removeWidget(view)
             view.deleteLater()
-        # dock widget hide instead of close
-        if self.dock.isVisible():
-            self.dock.hide()   
         try:
             self.proxy_panel.close()
             self.proxy_panel.proxyWidget._stop_services()
@@ -1059,7 +1183,6 @@ class BrowserWindow(QMainWindow):
             proxy_runner = self.proxy_panel.proxyWidget.proxy
             if proxy_runner.started and proxy_runner.server is not None:
                 proxy_runner.stop()
-            self.dock.close()
         except (AttributeError, OSError, RuntimeError):
             logger.exception("Error while shutting down browser services")
         finally:
