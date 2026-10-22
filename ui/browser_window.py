@@ -26,6 +26,7 @@ from .history_window import HistoryWindow
 from managers.history_manager import History
 from .themes import light_theme, dark_theme
 from .url_utils import URLInputError, resolve_address_input
+from proxy import proxy as proxy_routing
 from proxy.ui import Window
 
 try:
@@ -370,6 +371,7 @@ class BrowserWindow(QMainWindow):
     def __init__(self, proxy_port: Optional[int] = None):
         super().__init__()
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        proxy_routing.load_exclude()
         self.proxy_panel = Window(self, None)
         proxy_widget = self.proxy_panel.proxyWidget
         if proxy_port is not None:
@@ -511,6 +513,7 @@ class BrowserWindow(QMainWindow):
         self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
+        self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
 
@@ -536,6 +539,39 @@ class BrowserWindow(QMainWindow):
             self.settings.save(self.selected_profile)
         except (OSError, ValueError, TypeError):
             logger.exception("Could not save proxy panel visibility")
+
+    def _sync_site_connection_action(self, url: str) -> None:
+        host = QUrl(url).host()
+        try:
+            host = proxy_routing.normalize_host(host) if host else ""
+        except (ValueError, UnicodeError):
+            host = ""
+        direct = bool(host and host in proxy_routing.get_exclude())
+        self.navbar.set_site_connection_state(host, direct)
+
+    def _set_current_site_direct(self, direct: bool) -> None:
+        view = self.current_view()
+        if view is None:
+            return
+        host = view.url().host()
+        try:
+            host = proxy_routing.normalize_host(host)
+            if direct:
+                proxy_routing.add_to_exclude_hosts(host)
+            else:
+                proxy_routing.remove_exclude(host)
+            proxy_routing.save_exclude()
+        except (OSError, ValueError, UnicodeError) as error:
+            logger.exception("Could not update direct route exception for %s", host)
+            self.statusBar().showMessage(f"Could not update site connection: {error}", 5000)
+            self._sync_site_connection_action(view.url().toString())
+            return
+        self._sync_site_connection_action(view.url().toString())
+        view.reload()
+        self.statusBar().showMessage(
+            f"Reconnecting {host} directly" if direct else f"Restoring the configured route for {host}",
+            3000,
+        )
 
     def _install_browser_shortcuts(self) -> None:
         """Install Chrome-style browser shortcuts that Gaming mode can pause."""
@@ -1036,6 +1072,7 @@ class BrowserWindow(QMainWindow):
         self._set_tab_visibility()
         view = self.views[index]
         self.navbar.url_bar.setText(view.url().toString())
+        self._sync_site_connection_action(view.url().toString())
         if self.bookmarks_manager is not None:
             self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(view.url().toString()))
         self._update_navigation_actions(view)
@@ -1067,6 +1104,7 @@ class BrowserWindow(QMainWindow):
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():
             self.navbar.url_bar.setText(url.toString())
+            self._sync_site_connection_action(url.toString())
             if self.bookmarks_manager is not None:
                 self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url.toString()))
             self._update_navigation_actions(view)

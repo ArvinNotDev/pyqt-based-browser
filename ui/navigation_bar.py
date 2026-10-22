@@ -83,6 +83,7 @@ class NavigationBar(QToolBar):
     show_history_requested = Signal()
     proxy_panel_requested = Signal()
     gaming_mode_toggled = Signal(bool)
+    site_connection_toggled = Signal(bool)
 
     def __init__(self, profiles_list, settings: Settings | None = None, parent=None):
         super().__init__("Navigation", parent)
@@ -183,6 +184,13 @@ class NavigationBar(QToolBar):
         self.proxy_panel_action = QAction("Proxy panel", self)
         self.proxy_panel_action.triggered.connect(self.proxy_panel_requested.emit)
         self.browser_menu.addAction(self.proxy_panel_action)
+        self.site_connection_action = QAction("Connect directly for this site", self)
+        self.site_connection_action.setCheckable(True)
+        self.site_connection_action.setToolTip(
+            "Bypass Tor for the current site when Tor routing is enabled, then reload it"
+        )
+        self.site_connection_action.toggled.connect(self.site_connection_toggled.emit)
+        self.browser_menu.addAction(self.site_connection_action)
         self.browser_menu.addSeparator()
         self.gaming_mode_action = QAction("Gaming mode", self)
         self.gaming_mode_action.setCheckable(True)
@@ -221,6 +229,14 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.setToolTip(label)
         self.bookmark_btn.setAccessibleName(label)
         self.bookmark_action.setText(label)
+
+    def set_site_connection_state(self, host: str, direct: bool) -> None:
+        action = self.site_connection_action
+        action.blockSignals(True)
+        action.setVisible(bool(host))
+        action.setText(f"Connect directly for {host}" if host else "Connect directly for this site")
+        action.setChecked(bool(direct))
+        action.blockSignals(False)
 
     def _action(self, label: str, icon_path: str) -> QAction:
         action = QAction(QIcon(icon_path), label, self)
