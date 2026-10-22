@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -37,9 +37,9 @@ class DownloadsPanel(QFrame):
     def __init__(self, manager=None, parent=None):
         super().__init__(parent)
         self.setObjectName("downloadsPanel")
-        self.setMinimumWidth(0)
-        self.setMaximumWidth(0)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setMinimumWidth(245)
+        self.setMaximumWidth(600)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._manager = None
         self._is_open = False
 
@@ -103,10 +103,6 @@ class DownloadsPanel(QFrame):
         self.scroll.setWidget(self.list_host)
         root.addWidget(self.scroll, 1)
 
-        self._animation = QPropertyAnimation(self, b"maximumWidth", self)
-        self._animation.setDuration(230)
-        self._animation.setEasingCurve(QEasingCurve.OutCubic)
-        self._animation.finished.connect(self._finish_animation)
         self.set_manager(manager)
 
     @property
@@ -128,27 +124,11 @@ class DownloadsPanel(QFrame):
         self.refresh()
 
     def open(self) -> None:
-        self._animate_to(self.PANEL_WIDTH, True)
+        self._is_open = True
+        self.show()
 
     def close_panel(self) -> None:
-        self._animate_to(0, False)
-
-    def _animate_to(self, width: int, opening: bool) -> None:
-        self._animation.stop()
-        current = self.maximumWidth()
-        if opening:
-            self._is_open = True
-            self.show()
-            self.raise_()
-        else:
-            self._is_open = False
-        self._animation.setStartValue(current)
-        self._animation.setEndValue(width)
-        self._animation.start()
-
-    def _finish_animation(self) -> None:
-        if not self._is_open and self.maximumWidth() == 0:
-            self.hide()
+        self._is_open = False
 
     def refresh(self, *_args) -> None:
         while self.list_layout.count() > 0:

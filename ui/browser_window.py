@@ -6,12 +6,13 @@ from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
     QEvent, Qt, QUrl, QTimer, Signal, QPoint, QRect, QPropertyAnimation,
+    QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu, QMessageBox
+    QLineEdit, QMenu, QMessageBox, QSplitter
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -61,7 +62,7 @@ except ModuleNotFoundError as exc:
 TAB_WIDTH = 160
 MIN_TAB_WIDTH = 112
 MAX_TAB_WIDTH = 220
-TAB_HEIGHT = 34
+TAB_HEIGHT = 38
 TAB_SPACING = 4
 SCROLL_STEP = 140
 logger = logging.getLogger(__name__)
@@ -75,9 +76,7 @@ class TabButton(QFrame):
 
     def __init__(self, title: str = "New Tab"):
         super().__init__()
-        # give each tab a unique objectName so stylesheet selectors targeting this id
-        # affect only this frame (and not other tab instances)
-        self.setObjectName(f"tab_{int(id(self))}")
+        self.setObjectName("browserTab")
         self.setMinimumWidth(MIN_TAB_WIDTH)
         self.setMaximumWidth(MAX_TAB_WIDTH)
         self.setFixedHeight(TAB_HEIGHT)
@@ -113,14 +112,6 @@ class TabButton(QFrame):
         self._hover_timer.setInterval(500)
         self._hover_timer.timeout.connect(self._emit_preview)
 
-        # child styling (keeps children borderless / transparent)
-        self._child_css = """
-            QLabel { padding-left: 4px; padding-right: 4px; }
-            QPushButton { border: none; background: transparent; padding: 0px; }
-            QPushButton:hover { background: rgba(0,0,0,0.03); border-radius: 2px; }
-        """
-
-        # initialize inactive style (no top border)
         self.set_active(False)
 
     def _emit_preview(self):
@@ -148,14 +139,11 @@ class TabButton(QFrame):
 
     def set_active(self, active: bool):
         self._active = active
-        color = "#3979d6" if active else "transparent"
-        # Target only this frame by id so children (label/button) don't get the border.
-        # This keeps the active-tab accent separate from the child controls.
-        style = f"""
-            QFrame#{self.objectName()} {{ border-top: 3px solid {color}; }}
-            {self._child_css}
-        """
-        self.setStyleSheet(style)
+        self.setProperty("active", bool(active))
+        style = self.style()
+        style.unpolish(self)
+        style.polish(self)
+        self.update()
 
     def set_title(self, title: str):
         self._title = title or "New Tab"
@@ -180,14 +168,14 @@ class CustomTabBar(QFrame):
 
     def __init__(self):
         super().__init__()
-        self.setFixedHeight(TAB_HEIGHT)
+        self.setFixedHeight(TAB_HEIGHT + 4)
         self.tabs: List[TabButton] = []
         self.active_index: int = -1
         self.plus_inside = True
         self._updating = False
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(0, 0, 0, 0)
+        root.setContentsMargins(4, 2, 4, 2)
         root.setSpacing(0)
 
         self.btn_left = QPushButton("◀")
@@ -205,11 +193,12 @@ class CustomTabBar(QFrame):
         self.holder = QWidget()
         self.holder_layout = QHBoxLayout(self.holder)
         self.holder_layout.setContentsMargins(0, 0, 0, 0)
-        self.holder_layout.setSpacing(0)
+        self.holder_layout.setSpacing(TAB_SPACING)
         self.holder_layout.setAlignment(Qt.AlignLeft)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.scroll.setWidget(self.holder)
@@ -329,8 +318,10 @@ class CustomTabBar(QFrame):
         self._updating = True
         try:
             count = len(self.tabs)
-            available = max(0, self.width())
-            target_width = (available - self.plus_tab.width()) // max(1, count)
+            available = max(0, self.width() - 8)
+            target_width = (
+                available - self.plus_tab.width() - TAB_SPACING * count
+            ) // max(1, count)
             overflow = bool(count and target_width < MIN_TAB_WIDTH)
 
             self.btn_left.setVisible(overflow)
@@ -348,10 +339,17 @@ class CustomTabBar(QFrame):
             width = MIN_TAB_WIDTH if overflow else min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, target_width))
             for tab in self.tabs:
                 tab.setFixedWidth(width)
-            content_width = count * width + (self.plus_tab.width() if self.plus_inside else 0)
+            content_width = count * width + TAB_SPACING * max(0, count - 1)
+            if self.plus_inside:
+                content_width += self.plus_tab.width() + (TAB_SPACING if count else 0)
             self.holder.setMinimumWidth(content_width)
             if overflow:
                 self.scroll.horizontalScrollBar().setPageStep(max(1, self.scroll.viewport().width()))
+                if self.active_index >= 0:
+                    QTimer.singleShot(
+                        0,
+                        lambda index=self.active_index: self.ensure_tab_visible(index),
+                    )
         finally:
             self._updating = False
 
@@ -394,6 +392,7 @@ class BrowserWindow(QMainWindow):
     def __init__(self, proxy_port: Optional[int] = None):
         super().__init__()
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
         proxy_routing.load_exclude()
         self.proxy_panel = Window(self, None)
         proxy_widget = self.proxy_panel.proxyWidget
@@ -454,6 +453,7 @@ class BrowserWindow(QMainWindow):
         self.progress_bar.hide()
 
         self.tabbar = CustomTabBar()
+        self.tabbar.setObjectName("browserTabBar")
         self.tabbar.new_tab_requested.connect(lambda: self.new_tab(self.settings.homepage))
         self.tabbar.tab_changed.connect(self._on_tab_changed)
         # connect to our custom close flow
@@ -467,8 +467,9 @@ class BrowserWindow(QMainWindow):
         self._recorded_history_urls: Dict[QWebEngineView, str] = {}
         self.current_index: int = -1
         self.view_container = QWidget()
+        self.view_container.setObjectName("browserContentCard")
         self.view_layout = QVBoxLayout(self.view_container)
-        self.view_layout.setContentsMargins(0, 0, 0, 0)
+        self.view_layout.setContentsMargins(5, 5, 5, 5)
 
         self._preview_label = QLabel(self)
         self._preview_label.setWindowFlags(Qt.ToolTip)
@@ -479,16 +480,22 @@ class BrowserWindow(QMainWindow):
         self._preview_animation.setDuration(180)
 
         root = QWidget()
+        root.setObjectName("browserWindowRoot")
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(0)
+        shell = QFrame(root)
+        shell.setObjectName("browserShell")
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(1, 1, 1, 1)
+        shell_layout.setSpacing(0)
         self.title_bar = CustomTitleBar(self)
-        layout.addWidget(self.title_bar)
-        layout.addWidget(self.navbar)
+        shell_layout.addWidget(self.title_bar)
+        shell_layout.addWidget(self.navbar)
         if self.bookmarks_bar is not None:
-            layout.addWidget(self.bookmarks_bar)
-        layout.addWidget(self.tabbar)
-        layout.addWidget(self.progress_bar)
+            shell_layout.addWidget(self.bookmarks_bar)
+        shell_layout.addWidget(self.tabbar)
+        shell_layout.addWidget(self.progress_bar)
         self.content_row = QWidget(root)
         content_layout = QHBoxLayout(self.content_row)
         content_layout.setContentsMargins(0, 0, 0, 0)
@@ -496,10 +503,26 @@ class BrowserWindow(QMainWindow):
         self.downloads_panel = DownloadsPanel(self.download_manager, self.content_row)
         self.downloads_panel.close_requested.connect(self._close_downloads_panel)
         self.downloads_panel.hide()
-        content_layout.addWidget(self.downloads_panel)
-        content_layout.addWidget(self.view_container, 1)
-        layout.addWidget(self.content_row, 1)
+        self.downloads_splitter = QSplitter(Qt.Horizontal, self.content_row)
+        self.downloads_splitter.setObjectName("downloadsSplitter")
+        self.downloads_splitter.setHandleWidth(10)
+        self.downloads_splitter.setChildrenCollapsible(True)
+        self.downloads_splitter.setCollapsible(0, True)
+        self.downloads_splitter.setCollapsible(1, False)
+        self.downloads_splitter.setStretchFactor(0, 0)
+        self.downloads_splitter.setStretchFactor(1, 1)
+        self.downloads_splitter.addWidget(self.downloads_panel)
+        self.downloads_splitter.addWidget(self.view_container)
+        self.downloads_splitter.handle(1).setCursor(Qt.SplitHCursor)
+        self.downloads_splitter.splitterMoved.connect(self._on_downloads_splitter_moved)
+        self._downloads_panel_width = DownloadsPanel.PANEL_WIDTH
+        self._downloads_splitter_animating = False
+        self._downloads_splitter_animation = None
+        content_layout.addWidget(self.downloads_splitter, 1)
+        shell_layout.addWidget(self.content_row, 1)
+        layout.addWidget(shell, 1)
         self.setCentralWidget(root)
+        QTimer.singleShot(0, self._collapse_downloads_splitter)
         self._setup_download_toast(root)
         self._bind_download_manager()
 
@@ -994,7 +1017,7 @@ class BrowserWindow(QMainWindow):
 
     def show_downloads(self, *args):
         if hasattr(self, "downloads_panel"):
-            self.downloads_panel.open()
+            self._animate_downloads_panel(True)
 
     def _bind_download_manager(self) -> None:
         panel = getattr(self, "downloads_panel", None)
@@ -1033,8 +1056,91 @@ class BrowserWindow(QMainWindow):
                 continue
 
     def _close_downloads_panel(self) -> None:
-        self.downloads_panel.close_panel()
+        self._animate_downloads_panel(False)
         if not self.views and not self.close():
+            self.new_tab(self.settings.homepage)
+
+    def _collapse_downloads_splitter(self) -> None:
+        if not hasattr(self, "downloads_splitter"):
+            return
+        total = max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())
+        self.downloads_splitter.setSizes([0, total])
+
+    def _animate_downloads_panel(self, opening: bool) -> None:
+        splitter = self.downloads_splitter
+        panel = self.downloads_panel
+        if opening and panel.is_open:
+            return
+        if not opening and not panel.is_open and splitter.sizes()[0] == 0:
+            return
+
+        current_animation = self._downloads_splitter_animation
+        if current_animation is not None:
+            current_animation.stop()
+            current_animation.deleteLater()
+
+        available = max(1, splitter.width() - splitter.handleWidth())
+        if opening:
+            panel.setMinimumWidth(0)
+            panel.open()
+            splitter.setSizes([0, available])
+            start_width = 0
+            target_width = min(
+                panel.maximumWidth(),
+                self._downloads_panel_width,
+                max(245, available - 280),
+            )
+        else:
+            panel.close_panel()
+            panel.setMinimumWidth(0)
+            start_width = max(0, splitter.sizes()[0])
+            target_width = 0
+
+        self._downloads_splitter_animating = True
+        animation = QVariantAnimation(self)
+        animation.setDuration(230)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(start_width)
+        animation.setEndValue(target_width)
+        animation.valueChanged.connect(
+            lambda value: splitter.setSizes([int(value), max(1, available - int(value))])
+        )
+        animation.finished.connect(
+            lambda opened=opening, width=target_width: self._finish_downloads_panel_animation(opened, width)
+        )
+        self._downloads_splitter_animation = animation
+        animation.start()
+
+    def _finish_downloads_panel_animation(self, opened: bool, width: int) -> None:
+        self._downloads_splitter_animating = False
+        self.downloads_panel.setMinimumWidth(245)
+        if opened:
+            self.downloads_panel.show()
+            self._downloads_panel_width = width
+        else:
+            self.downloads_panel.hide()
+            self.downloads_splitter.setSizes(
+                [0, max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())]
+            )
+        self._downloads_splitter_animation = None
+
+    def _on_downloads_splitter_moved(self, _position: int, _index: int) -> None:
+        if self._downloads_splitter_animating:
+            return
+        sizes = self.downloads_splitter.sizes()
+        if not sizes:
+            return
+        if sizes[0] > 0:
+            self._downloads_panel_width = min(self.downloads_panel.maximumWidth(), sizes[0])
+            self.downloads_panel.open()
+        else:
+            self.downloads_panel.close_panel()
+            self.downloads_panel.hide()
+            if not self.views:
+                QTimer.singleShot(0, self._close_empty_browser)
+
+    def _close_empty_browser(self) -> None:
+        if not self.views and not self.downloads_panel.is_open and not self.close():
             self.new_tab(self.settings.homepage)
 
     def _setup_download_toast(self, parent: QWidget) -> None:
