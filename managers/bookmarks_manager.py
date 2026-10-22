@@ -176,6 +176,17 @@ class BookmarksManager:
         self._save()
         return True
 
+    def get_bookmark_for_url(self, url: str) -> dict | None:
+        """Return the saved record matching a URL, including normalized variants."""
+        try:
+            duplicate_key = self._duplicate_key(self._validate_url(url))
+        except ValueError:
+            return None
+        for bookmark in self._bookmarks:
+            if self._duplicate_key(bookmark["url"]) == duplicate_key:
+                return deepcopy(bookmark)
+        return None
+
     def is_bookmarked(self, url: str) -> bool:
         try:
             key = self._duplicate_key(self._validate_url(url))

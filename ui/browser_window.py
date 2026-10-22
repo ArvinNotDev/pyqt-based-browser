@@ -685,6 +685,7 @@ class BrowserWindow(QMainWindow):
             )
             if self.bookmarks_bar is not None:
                 self.bookmarks_bar.url_activated.connect(self.navigate)
+                self.bookmarks_bar.manage_requested.connect(self.show_bookmarks)
         self._refresh_bookmarks()
 
     def _refresh_bookmarks(self):
@@ -706,11 +707,16 @@ class BrowserWindow(QMainWindow):
         url = view.url().toString()
         title = view.title().strip() or url
         try:
-            self.bookmarks_manager.add_bookmark(title, url)
+            bookmark = self.bookmarks_manager.get_bookmark_for_url(url)
+            if bookmark is not None:
+                self.bookmarks_manager.remove_bookmark(bookmark["id"])
+            else:
+                self.bookmarks_manager.add_bookmark(title, url)
             self._refresh_bookmarks()
+            self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url))
         except Exception:
-            logger.exception("Could not add bookmark for %s", url)
-            self.statusBar().showMessage("Could not add bookmark.", 3000)
+            logger.exception("Could not toggle bookmark for %s", url)
+            self.statusBar().showMessage("Could not update bookmark.", 3000)
 
     def show_bookmarks(self, *args):
         if BookmarksDialog is None or self.bookmarks_manager is None:
@@ -882,6 +888,8 @@ class BrowserWindow(QMainWindow):
         self._set_tab_visibility()
         view = self.views[index]
         self.navbar.url_bar.setText(view.url().toString())
+        if self.bookmarks_manager is not None:
+            self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(view.url().toString()))
         self._update_navigation_actions(view)
         self.tabbar.set_active(index)
 
@@ -907,6 +915,8 @@ class BrowserWindow(QMainWindow):
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():
             self.navbar.url_bar.setText(url.toString())
+            if self.bookmarks_manager is not None:
+                self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url.toString()))
             self._update_navigation_actions(view)
 
     def _on_load_started(self, view: QWebEngineView):

@@ -46,6 +46,10 @@ class BookmarksBar(QWidget):
         self.empty_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         layout.addWidget(self.empty_label, 1)
 
+        # Keep the actions anchored at the trailing edge as bookmark buttons are
+        # inserted and removed. The flexible space belongs after the bookmarks.
+        layout.addStretch(1)
+
         self._more_menu = QMenu(self)
         self.more_button = QToolButton(self)
         self.more_button.setObjectName("bookmarkMore")
@@ -111,7 +115,7 @@ class BookmarksBar(QWidget):
             button.setFixedWidth(width)
             button.clicked.connect(lambda checked=False, url=normalized["url"]: self.url_activated.emit(url))
             self._buttons.append(button)
-            self._layout.insertWidget(self._layout.count() - 2, button)
+            self._layout.insertWidget(self._layout.count() - 3, button)
 
         self.empty_label.setVisible(not self._bookmarks)
         if invalid_count and not self._bookmarks:
@@ -139,7 +143,7 @@ class BookmarksBar(QWidget):
             return
 
         heading_width = self.heading.width() if self.width() >= 450 else 0
-        fixed_width = heading_width + self.manage_button.width() + 34
+        fixed_width = heading_width + self.manage_button.width() + 3 * self._layout.spacing()
         available = max(0, self.contentsRect().width() - fixed_width)
         total_width = sum(button.width() for button in self._buttons)
         spacing = self._layout.spacing()

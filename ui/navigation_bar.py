@@ -211,6 +211,14 @@ class NavigationBar(QToolBar):
         self.apply_theme()
         self._install_popup_event_filter()
 
+    def set_bookmark_state(self, bookmarked: bool) -> None:
+        """Keep the star and menu label in sync with the current page."""
+        self.bookmark_btn.setText("★" if bookmarked else "☆")
+        label = "Remove bookmark" if bookmarked else "Bookmark this page"
+        self.bookmark_btn.setToolTip(label)
+        self.bookmark_btn.setAccessibleName(label)
+        self.bookmark_action.setText(label)
+
     def _action(self, label: str, icon_path: str) -> QAction:
         action = QAction(QIcon(icon_path), label, self)
         action.setToolTip(label)
