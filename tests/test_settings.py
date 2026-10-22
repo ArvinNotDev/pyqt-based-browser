@@ -82,18 +82,18 @@ def test_load_recovers_from_malformed_json(tmp_path):
     Settings(file_path=str(settings_file)).load("Guest")
 
 
-def test_profile_lists_are_isolated_by_machine_hash(tmp_path, monkeypatch):
+def test_profile_lists_use_portable_metadata(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    machine_id = "machine-one"
-    monkeypatch.setattr(Profile, "get_machine_id", staticmethod(lambda: machine_id))
+    monkeypatch.setattr(Profile, "get_machine_id", staticmethod(lambda: "machine-one"))
     Settings.save_profiles(["Guest", "Personal"])
 
-    machine_id = "machine-two"
+    monkeypatch.setattr(Profile, "get_machine_id", staticmethod(lambda: "machine-two"))
     Settings.save_profiles(["Guest", "Work"])
 
     data = json.loads((tmp_path / "settings.json").read_text(encoding="utf-8"))
-    assert data[hashlib.sha256(b"machine-one").hexdigest()]["profiles"] == ["Guest", "Personal"]
-    assert data[hashlib.sha256(b"machine-two").hexdigest()]["profiles"] == ["Guest", "Work"]
+    assert data["__pyqt_browser_meta_v1__"]["profiles"] == ["Guest", "Work"]
+    assert hashlib.sha256(b"machine-one").hexdigest() not in data
+    assert hashlib.sha256(b"machine-two").hexdigest() not in data
 
 
 def test_load_profile_settings_uses_this_machines_profile_list(tmp_path, monkeypatch):

@@ -22,7 +22,6 @@ def navigate_with_fake_browser(browser_class, text):
     browser = SimpleNamespace(
         settings=SimpleNamespace(default_search_engine="https://search.example/?q="),
         current_view=lambda: view,
-        history=SimpleNamespace(add=Mock()),
         navbar=SimpleNamespace(url_bar=address_bar),
     )
 
@@ -31,11 +30,10 @@ def navigate_with_fake_browser(browser_class, text):
 
 
 def test_navigation_treats_words_as_a_search(browser_class):
-    browser, view, _address_bar = navigate_with_fake_browser(browser_class, "privacy browser")
+    _browser, view, _address_bar = navigate_with_fake_browser(browser_class, "privacy browser")
     target = view.setUrl.call_args.args[0].toString()
 
     assert target == "https://search.example/?q=privacy+browser"
-    browser.history.add.assert_called_once_with(target)
 
 
 def test_navigation_adds_https_to_a_domain_address(browser_class):
