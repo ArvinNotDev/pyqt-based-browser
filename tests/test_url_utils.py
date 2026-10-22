@@ -58,6 +58,7 @@ class ResolveAddressInputTests(unittest.TestCase):
             "https://",
             "http://999.999.999.999",
             "http://example.org:99999",
+            "https://user:pass@example.com",
             "custom:scheme",
         )
         for value in rejected:

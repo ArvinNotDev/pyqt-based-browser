@@ -58,6 +58,10 @@ def _http_url(value: str, *, explicit: bool) -> str | None:
         if explicit:
             raise URLInputError(f"Unsupported URL scheme: {parsed.scheme}")
         return None
+    if parsed.username is not None or parsed.password is not None:
+        if explicit:
+            raise URLInputError("Credentials are not allowed in a web address.")
+        return None
     if not parsed.netloc or not _valid_host(parsed.hostname or ""):
         if explicit:
             raise URLInputError("Enter a valid web address with a hostname.")
