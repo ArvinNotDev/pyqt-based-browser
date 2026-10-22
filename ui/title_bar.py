@@ -9,11 +9,11 @@ class CustomTitleBar(QWidget):
         super().__init__(window)
         self.host = window
         self.setObjectName("customTitleBar")
-        self.setFixedHeight(40)
+        self.setFixedHeight(38)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 0, 8, 0)
-        layout.setSpacing(9)
+        layout.setContentsMargins(12, 0, 7, 0)
+        layout.setSpacing(8)
 
         self.logo = QLabel("A", self)
         self.logo.setObjectName("titleBarLogo")
@@ -46,7 +46,7 @@ class CustomTitleBar(QWidget):
         button.setText(text)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
-        button.setFixedSize(40, 30)
+        button.setFixedSize(34, 27)
         button.setFocusPolicy(Qt.NoFocus)
         return button
 
