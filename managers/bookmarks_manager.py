@@ -187,6 +187,27 @@ class BookmarksManager:
                 return deepcopy(bookmark)
         return None
 
+    def update_bookmark(self, bookmark_id: str, title: str, url: str) -> dict:
+        """Update a saved record while preserving its id and creation time."""
+        if not isinstance(bookmark_id, str) or not bookmark_id:
+            raise ValueError("Bookmark id must be a non-empty string")
+        if not isinstance(title, str):
+            raise ValueError("Bookmark title must be a string")
+        url = self._validate_url(url)
+        duplicate_key = self._duplicate_key(url)
+        target = next((item for item in self._bookmarks if item["id"] == bookmark_id), None)
+        if target is None:
+            raise ValueError("Bookmark no longer exists")
+        if any(
+            item["id"] != bookmark_id and self._duplicate_key(item["url"]) == duplicate_key
+            for item in self._bookmarks
+        ):
+            raise ValueError("Another bookmark already uses this address")
+        target["title"] = title.strip() or url
+        target["url"] = url
+        self._save()
+        return deepcopy(target)
+
     def is_bookmarked(self, url: str) -> bool:
         try:
             key = self._duplicate_key(self._validate_url(url))

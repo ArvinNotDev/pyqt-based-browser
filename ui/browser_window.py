@@ -8,9 +8,10 @@ from PySide6.QtCore import (
     Qt, QUrl, QTimer, Signal, QPoint, QPropertyAnimation,
 )
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QGraphicsOpacityEffect, QDockWidget
+    QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
+    QLineEdit, QMenu
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -686,6 +687,9 @@ class BrowserWindow(QMainWindow):
             if self.bookmarks_bar is not None:
                 self.bookmarks_bar.url_activated.connect(self.navigate)
                 self.bookmarks_bar.manage_requested.connect(self.show_bookmarks)
+                self.bookmarks_bar.bookmark_context_requested.connect(
+                    self._show_bookmark_context_menu
+                )
         self._refresh_bookmarks()
 
     def _refresh_bookmarks(self):
@@ -696,6 +700,65 @@ class BrowserWindow(QMainWindow):
         except Exception:
             logger.exception("Could not refresh bookmarks for profile %s", self.selected_profile)
             self.statusBar().showMessage("Could not refresh bookmarks.", 3000)
+
+    def _show_bookmark_context_menu(self, bookmark: dict, global_pos: QPoint) -> None:
+        """Show bookmark actions for both visible and overflow entries."""
+        if self.bookmarks_manager is None:
+            return
+        menu = QMenu(self)
+        open_current = menu.addAction("Open")
+        open_new = menu.addAction("Open in new tab")
+        copy_url = menu.addAction("Copy address")
+        menu.addSeparator()
+        edit_action = menu.addAction("Edit…")
+        remove_action = menu.addAction("Remove bookmark")
+        selected = menu.exec(global_pos)
+        if selected is open_current:
+            self.navigate(bookmark["url"])
+        elif selected is open_new:
+            self.new_tab(bookmark["url"])
+        elif selected is copy_url:
+            QApplication.clipboard().setText(bookmark["url"])
+            self.statusBar().showMessage("Bookmark address copied.", 2000)
+        elif selected is edit_action:
+            self._edit_bookmark(bookmark)
+        elif selected is remove_action:
+            self._remove_bookmark(bookmark)
+
+    def _edit_bookmark(self, bookmark: dict) -> None:
+        title, accepted = QInputDialog.getText(
+            self, "Edit bookmark", "Name:", QLineEdit.Normal, bookmark["title"]
+        )
+        if not accepted:
+            return
+        url, accepted = QInputDialog.getText(
+            self, "Edit bookmark", "Address:", QLineEdit.Normal, bookmark["url"]
+        )
+        if not accepted:
+            return
+        try:
+            self.bookmarks_manager.update_bookmark(bookmark["id"], title, url)
+            self._refresh_bookmarks()
+            current = self.current_view()
+            if current is not None:
+                self.navbar.set_bookmark_state(
+                    self.bookmarks_manager.is_bookmarked(current.url().toString())
+                )
+        except (OSError, ValueError, TypeError) as error:
+            self.statusBar().showMessage(f"Could not update bookmark: {error}", 5000)
+
+    def _remove_bookmark(self, bookmark: dict) -> None:
+        try:
+            if not self.bookmarks_manager.remove_bookmark(bookmark["id"]):
+                self.statusBar().showMessage("This bookmark no longer exists.", 3000)
+            self._refresh_bookmarks()
+            current = self.current_view()
+            if current is not None:
+                self.navbar.set_bookmark_state(
+                    self.bookmarks_manager.is_bookmarked(current.url().toString())
+                )
+        except (OSError, ValueError, TypeError) as error:
+            self.statusBar().showMessage(f"Could not remove bookmark: {error}", 5000)
 
     def _add_current_bookmark(self, *args):
         if self.bookmarks_manager is None:

@@ -2,7 +2,7 @@
 
 import logging
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QPoint, Qt, Signal
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -19,9 +19,23 @@ from ._manager_ui import normalize_bookmark
 logger = logging.getLogger(__name__)
 
 
+class BookmarkOverflowMenu(QMenu):
+    bookmark_context_requested = Signal(dict, QPoint)
+
+    def contextMenuEvent(self, event):
+        action = self.actionAt(event.pos())
+        bookmark = action.data() if action is not None else None
+        if isinstance(bookmark, dict):
+            self.bookmark_context_requested.emit(bookmark, event.globalPos())
+            event.accept()
+            return
+        super().contextMenuEvent(event)
+
+
 class BookmarksBar(QWidget):
     url_activated = Signal(str)
     manage_requested = Signal()
+    bookmark_context_requested = Signal(dict, QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,7 +64,8 @@ class BookmarksBar(QWidget):
         # inserted and removed. The flexible space belongs after the bookmarks.
         layout.addStretch(1)
 
-        self._more_menu = QMenu(self)
+        self._more_menu = BookmarkOverflowMenu(self)
+        self._more_menu.bookmark_context_requested.connect(self.bookmark_context_requested)
         self.more_button = QToolButton(self)
         self.more_button.setObjectName("bookmarkMore")
         self.more_button.setText("More ▾")
@@ -111,9 +126,14 @@ class BookmarksBar(QWidget):
             button.setAccessibleName(f"Open bookmark: {title}")
             button.setFocusPolicy(Qt.StrongFocus)
             button.setCursor(Qt.PointingHandCursor)
+            button.setContextMenuPolicy(Qt.CustomContextMenu)
             width = max(64, min(172, QFontMetrics(button.font()).horizontalAdvance(display) + 22))
             button.setFixedWidth(width)
             button.clicked.connect(lambda checked=False, url=normalized["url"]: self.url_activated.emit(url))
+            button.customContextMenuRequested.connect(
+                lambda pos, item=dict(normalized), target=button:
+                    self.bookmark_context_requested.emit(item, target.mapToGlobal(pos))
+            )
             self._buttons.append(button)
             self._layout.insertWidget(self._layout.count() - 3, button)
 
@@ -169,4 +189,5 @@ class BookmarksBar(QWidget):
         for item in overflow_items:
             action = self._more_menu.addAction(item["title"])
             action.setToolTip(item["url"])
+            action.setData(dict(item))
             action.triggered.connect(lambda checked=False, url=item["url"]: self.url_activated.emit(url))
