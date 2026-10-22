@@ -90,7 +90,8 @@ class NavigationBar(QToolBar):
         self.setObjectName("NavigationBar")
         self.setMovable(False)
         self.setFloatable(False)
-        self.setIconSize(QSize(18, 18))
+        self.setContentsMargins(8, 1, 8, 1)
+        self.setIconSize(QSize(16, 16))
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
         # Kept for compatibility with older integrations. The authoritative, visible
@@ -140,8 +141,8 @@ class NavigationBar(QToolBar):
         self.url_bar.setObjectName("urlBar")
         self.url_bar.setPlaceholderText("Search or enter address")
         self.url_bar.setFont(QFont("Segoe UI", 10))
-        self.url_bar.setMinimumWidth(140)
-        self.url_bar.setMinimumHeight(34)
+        self.url_bar.setMinimumWidth(100)
+        self.url_bar.setMinimumHeight(29)
         self.url_bar.setClearButtonEnabled(True)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.url_bar.setAccessibleName("Address and search bar")
@@ -156,6 +157,15 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.setAccessibleName("Bookmark this page")
         self.bookmark_btn.clicked.connect(self.bookmark_requested.emit)
         self._add_widget(self.bookmark_btn)
+
+        self.addSeparator()
+        self.profile_btn = self._action("Profiles", os.path.join(icon_path, "profile.png"))
+        self.profile_btn.setToolTip("Choose or customize a profile")
+        self._add_styled_action(self.profile_btn)
+        self.profile_menu = QMenu(self)
+        self.profile_btn.triggered.connect(self._show_profile_menu)
+        self.profile_selected.connect(self._on_profile_selected)
+        self._populate_profile_menu()
 
         self.browser_menu = QMenu(self)
         self.new_tab_action = QAction("New tab", self)
@@ -197,20 +207,15 @@ class NavigationBar(QToolBar):
         self.menu_button = QToolButton(self)
         self.menu_button.setObjectName("menuButton")
         self.menu_button.setText("⋮")
+        self.menu_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.menu_button.setToolTip("Browser menu")
         self.menu_button.setAccessibleName("Browser menu")
         self.menu_button.setPopupMode(QToolButton.InstantPopup)
         self.menu_button.setMenu(self.browser_menu)
+        self.menu_button.setProperty("menuOpen", False)
+        self.browser_menu.aboutToShow.connect(lambda: self._set_menu_open(True))
+        self.browser_menu.aboutToHide.connect(lambda: self._set_menu_open(False))
         self._add_widget(self.menu_button)
-
-        self.addSeparator()
-        self.profile_btn = self._action("Profiles", os.path.join(icon_path, "profile.png"))
-        self.profile_btn.setToolTip("Choose or customize a profile")
-        self._add_styled_action(self.profile_btn)
-        self.profile_menu = QMenu(self)
-        self.profile_btn.triggered.connect(self._show_profile_menu)
-        self.profile_selected.connect(self._on_profile_selected)
-        self._populate_profile_menu()
 
         self.get_history()
         self.apply_theme()
@@ -433,6 +438,13 @@ class NavigationBar(QToolBar):
         rect = self.actionGeometry(self.profile_btn)
         pos = self.mapToGlobal(rect.bottomLeft() if rect.isValid() else QPoint(0, self.height()))
         self.profile_menu.popup(pos)
+
+    def _set_menu_open(self, opened: bool) -> None:
+        self.menu_button.setProperty("menuOpen", bool(opened))
+        style = self.menu_button.style()
+        style.unpolish(self.menu_button)
+        style.polish(self.menu_button)
+        self.menu_button.update()
 
     def _profile_image_path(self, profile_name: str) -> str:
         return os.path.join("profile_data", profile_name, "profile", "image.png")
