@@ -2,7 +2,7 @@
 
 ## Supported deliverable
 
-The reproducible deliverable is a source ZIP built from a version tag on Windows. It contains the tracked application source, assets, pinned runtime requirements, documentation, and the tracked Windows and Linux x64 Tor archives. Install it into a writable directory with Python 3.10–3.13 and the commands in the README. The release workflow attaches the ZIP and a SHA-256 checksum file to the GitHub release.
+The reproducible deliverable is a source ZIP built from a version tag on Windows. It contains the tracked application source, assets, pinned runtime requirements, documentation, and the tracked Windows and Linux x64 Tor archives. The customized `proxy/exclude_hosts.json` is marked `export-ignore` because it contains a domain exclusion list rather than a distribution default; the app starts with an empty exclusion list when that file is absent. The packaging script checks for required assets and rejects settings, proxy state, histories, or profile data in the ZIP. Install it into a writable directory with Python 3.10–3.13 and the commands in the README. The release workflow attaches the ZIP and a SHA-256 checksum file to the GitHub release.
 
 To build the same artifact locally from a fetched tag:
 

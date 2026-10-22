@@ -1,0 +1,2 @@
+# This file contains a customized domain exclusion list, not a distribution default.
+proxy/exclude_hosts.json export-ignore
