@@ -1,42 +1,63 @@
 import os
-import socket
 import tempfile
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from main import _configure_chromium_proxy, _load_startup_settings, _reserve_proxy_port
+from main import _consume_session, _load_startup_settings, _runtime_arguments, _wait_for_parent_exit
 from managers.profile_manager import Profile
 from ui.settings import Settings
 
 
 class StartupConfigurationTests(unittest.TestCase):
-    def test_proxy_port_is_available_on_loopback(self):
-        port = _reserve_proxy_port()
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
-            listener.bind(("127.0.0.1", port))
+    def test_startup_settings_do_not_add_or_replace_chromium_proxy(self):
+        original_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            try:
+                os.chdir(temp_dir)
+                with patch.object(Profile, "get_machine_id", return_value="test-machine"):
+                    with patch.dict(
+                        os.environ,
+                        {"QTWEBENGINE_CHROMIUM_FLAGS": "--enable-features=TestFeature"},
+                    ):
+                        _load_startup_settings()
+                        self.assertEqual(
+                            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"],
+                            "--enable-features=TestFeature",
+                        )
+            finally:
+                os.chdir(original_cwd)
 
-    def test_chromium_flags_preserve_safe_options_and_enforce_sandbox(self):
-        initial_flags = (
-            "--disable-gpu --no-sandbox --disable-software-rasterizer "
-            "--proxy-server old-proxy:1234 --enable-features=TestFeature"
+    def test_network_mode_handoff_arguments_are_removed_before_qt(self):
+        qt_args, tor_mode, session_path, parent_pid = _runtime_arguments([
+            "--enable-features=TestFeature",
+            "--tor-mode",
+            "--resume-session=C:/Temp/arma-network-switch-test.json",
+            "--wait-for-parent=1234",
+        ])
+        self.assertEqual(qt_args, ["--enable-features=TestFeature"])
+        self.assertTrue(tor_mode)
+        self.assertEqual(session_path, "C:/Temp/arma-network-switch-test.json")
+        self.assertEqual(parent_pid, 1234)
+
+    def test_session_handoff_is_consumed_only_from_its_owned_temp_path(self):
+        descriptor, safe_path = tempfile.mkstemp(
+            prefix="arma-network-switch-", suffix=".json"
         )
-        with patch.dict(
-            os.environ,
-            {
-                "QTWEBENGINE_CHROMIUM_FLAGS": initial_flags,
-                "QTWEBENGINE_DISABLE_SANDBOX": "1",
-            },
-        ):
-            _configure_chromium_proxy(43210)
-            flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
-            self.assertIn("--disable-gpu", flags)
-            self.assertIn("--enable-features=TestFeature", flags)
-            self.assertIn("--proxy-server=http://127.0.0.1:43210", flags)
-            self.assertNotIn("--no-sandbox", flags)
-            self.assertNotIn("--disable-software-rasterizer", flags)
-            self.assertNotIn("old-proxy:1234", flags)
-            self.assertNotIn("QTWEBENGINE_DISABLE_SANDBOX", os.environ)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write('{"tabs": ["https://example.test/"]}')
+        self.assertEqual(_consume_session(safe_path), {"tabs": ["https://example.test/"]})
+        self.assertFalse(os.path.exists(safe_path))
+
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as stream:
+            unrelated_path = stream.name
+            stream.write(b'{"leave":"untouched"}')
+        self.assertIsNone(_consume_session(unrelated_path))
+        self.assertTrue(os.path.exists(unrelated_path))
+        os.remove(unrelated_path)
+
+    def test_invalid_parent_pid_is_rejected_for_handoff_wait(self):
+        self.assertFalse(_wait_for_parent_exit(0))
 
     def test_startup_applies_selected_profile_hardware_setting_before_qt(self):
         original_cwd = os.getcwd()
