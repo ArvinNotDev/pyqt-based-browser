@@ -1521,6 +1521,10 @@ class BrowserWindow(QMainWindow):
         )
 
     def _toggle_downloads_panel_mode(self) -> None:
+        # Ignore rapid repeat clicks while an opening/closing or mode transition
+        # animation owns the panel geometry and splitter sizes.
+        if self._downloads_mode_transitioning or self._downloads_splitter_animating:
+            return
         next_mode = "split" if self._downloads_panel_mode == "overlay" else "overlay"
         if self.downloads_panel.is_open:
             self._switch_downloads_panel_mode(next_mode)
