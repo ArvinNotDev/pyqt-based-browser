@@ -23,9 +23,13 @@ def qapp():
 
 def test_rounded_corner_cutout_uses_antialiased_paint(qapp):
     host = QWidget()
+    host.resize(12, 12)
     cutout = _RoundedCornerCutout(host, "top-left", 12)
     cutout.set_color(QColor("#ff0000"))
     cutout.resize(12, 12)
+    host.show()
+    cutout.show()
+    qapp.processEvents()
 
     image = QImage(12, 12, QImage.Format.Format_ARGB32_Premultiplied)
     image.fill(Qt.GlobalColor.transparent)
