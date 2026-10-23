@@ -827,6 +827,8 @@ class BrowserWindow(QMainWindow):
         self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
 
     def _on_proxy_visibility_changed(self, visible: bool) -> None:
+        if visible and self.proxy_panel is None:
+            self._ensure_proxy_panel()
         self._update_proxy_menu_action(visible)
         if self._closing or bool(self.settings.proxy_panel_visible) == bool(visible):
             return
