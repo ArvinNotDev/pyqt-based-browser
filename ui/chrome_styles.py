@@ -305,6 +305,20 @@ QToolButton#bookmarkMenuButton {
 QToolButton#bookmarkMenuButton:hover { background: rgba(255,255,255,205); border-color: rgba(192,210,237,190); }
 QMenu#bookmarksPopupMenu { padding: 6px; }
 QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
+
+
+QPushButton#tabScrollButton {
+    color: #68778b;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0;
+}
+QPushButton#tabScrollButton:hover {
+    color: #2f5c95;
+    background: rgba(255,255,255,175);
+    border-color: rgba(190,207,232,165);
+}
 """
 
 DARK_CHROME_POLISH = """
@@ -607,6 +621,20 @@ QToolButton#bookmarkMenuButton {
 QToolButton#bookmarkMenuButton:hover { color: #edf4ff; background: rgba(75,94,123,205); border-color: rgba(130,175,244,110); }
 QMenu#bookmarksPopupMenu { padding: 6px; }
 QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
+
+
+QPushButton#tabScrollButton {
+    color: #a9b7c9;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0;
+}
+QPushButton#tabScrollButton:hover {
+    color: #edf4ff;
+    background: rgba(67,80,101,155);
+    border-color: rgba(147,169,201,75);
+}
 """
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]
