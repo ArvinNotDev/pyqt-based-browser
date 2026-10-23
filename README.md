@@ -50,9 +50,9 @@ Private browsing uses a separate in-memory Qt WebEngine profile and does not kee
 
 ### Proxy and Tor tools
 
-The browser includes a proxy panel for local proxy and Tor configuration, along with host blocking and route-exclusion rules. The app configures Chromium to use its loopback proxy before WebEngine starts. Tor routing depends on a usable Tor expert bundle, available local ports, and network access; bridge routes also need valid bridge lines and compatible transport support. A successful UI setup does not guarantee that a particular network or website will be reachable.
+The browser includes an optional proxy panel for local proxy and Tor configuration, along with host blocking and route-exclusion rules. Tor routing depends on a usable Tor expert bundle, available local ports, and network access; bridge routes also need valid bridge lines and compatible transport support. A successful UI setup does not guarantee that a particular network or website will be reachable.
 
-The browser menu can switch the proxy panel, connect the current site directly when Tor routing is active, and toggle Gaming mode. Gaming mode temporarily disables ARMA Browser's registered browser keyboard shortcuts; turn it off from the same menu to restore them.
+The browser uses its normal Qt/system network route by default. The proxy panel does not start a local proxy until you choose **Connect**. Switching between Tor and regular browsing restarts the browser so WebEngine applies the selected route from profile startup; open tabs are restored. The browser menu can switch the proxy panel, connect the current site directly when Tor routing is active, and toggle Gaming mode. Gaming mode temporarily disables ARMA Browser's registered browser keyboard shortcuts; turn it off from the same menu to restore them.
 
 ## Keyboard shortcuts
 
