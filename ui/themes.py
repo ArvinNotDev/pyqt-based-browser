@@ -908,3 +908,8 @@ QFrame#downloadsGlassMaterial {
 QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
 QWidget#downloadsListHost { background: transparent; border: none; }
 """
+from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
+
+# Keep legacy dialog/feature styles intact, then apply one final coherent chrome layer.
+light_theme = f"{light_theme}\\n{LIGHT_CHROME_POLISH}"
+dark_theme = f"{dark_theme}\\n{DARK_CHROME_POLISH}"
