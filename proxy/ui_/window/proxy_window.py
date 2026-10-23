@@ -14,6 +14,7 @@ from proxy.proxy import get_free_port, is_port_free
 from proxy import proxy
 from proxy.set_proxy import manage_proxy
 from proxy.tor import TorRunner, Runner
+from proxy.updater import CancellationToken
 
 from proxy.whatismyip import what_is_my_ip
 from proxy.ui_.window.log_window import LogWindow
@@ -24,7 +25,6 @@ from proxy.ui_.emojis import CHANGE_IDENTITY, LOGS, WHAT_IS_MY_IP, TAP_TO_CONNEC
 from proxy.config import CONFIG
 import json
 import logging
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class ProxyWindow(QWidget):
         self.thread_pool = QThreadPool(self)
         self.thread_pool.setMaxThreadCount(3)
         self._shutdown_prepared = False
-        self._worker_cancel_event = threading.Event()
+        self._worker_cancel_event = CancellationToken()
         self.data = Data()
         self.running = False
         self.connected = False

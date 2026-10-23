@@ -145,5 +145,6 @@ if __name__ == "__main__":
     except Exception as exc:
         QMessageBox.critical(None, "ARMA Browser", f"Could not initialize the requested network mode: {exc}")
         sys.exit(1)
+    app.aboutToQuit.connect(window.prepare_shutdown)
     window.showMaximized()
     sys.exit(app.exec())

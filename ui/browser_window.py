@@ -3992,6 +3992,39 @@ class BrowserWindow(QMainWindow):
                 logger.debug("Native hit testing failed; using Qt fallback.", exc_info=True)
         return super().nativeEvent(eventType, message)
 
+    def prepare_shutdown(self):
+        """Idempotently stop browser pages, downloads and embedded Tor resources."""
+        if getattr(self, "_shutdown_resources_prepared", False):
+            return
+        self._shutdown_resources_prepared = True
+        self._closing = True
+        for download_manager in self._download_managers.values():
+            try:
+                download_manager.shutdown()
+            except Exception:
+                logger.exception("Could not stop a browser download manager")
+        views = list(self.views)
+        self.views.clear()
+        self._page_load_overlays.clear()
+        self._placeholders.clear()
+        for view in views:
+            try:
+                view.stop()
+                self.view_layout.removeWidget(view)
+                view.deleteLater()
+            except (RuntimeError, AttributeError):
+                logger.debug("A browser page was already destroyed during shutdown.", exc_info=True)
+        try:
+            if self.proxy_panel is not None:
+                self.proxy_panel.prepare_shutdown()
+        except (AttributeError, OSError, RuntimeError):
+            logger.exception("Error while shutting down embedded Tor/Proxy services")
+        try:
+            for tab in self.tabbar.tabs:
+                tab._hover_timer.stop()
+        except (AttributeError, RuntimeError):
+            logger.debug("Tab hover timer cleanup was skipped.", exc_info=True)
+
     def closeEvent(self, event):
         active_downloads = []
         for manager in self._download_managers.values():
@@ -4029,31 +4062,8 @@ class BrowserWindow(QMainWindow):
             event.ignore()
             return
         self._pending_network_restart = None
-        self._closing = True
-        for download_manager in self._download_managers.values():
-            download_manager.shutdown()
-        views = list(self.views)
-        self.views.clear()
-        self._page_load_overlays.clear()
-        self._placeholders.clear()
-        for view in views:
-            view.stop()
-            self.view_layout.removeWidget(view)
-            view.deleteLater()
-        try:
-            if self.proxy_panel is not None:
-                self.proxy_panel.close()
-                self.proxy_panel.proxyWidget._stop_services(reload_pages=False)
-                self.proxy_panel.proxyWidget.stop_timer.emit()
-                proxy_runner = self.proxy_panel.proxyWidget.proxy
-                if proxy_runner.started and proxy_runner.server is not None:
-                    proxy_runner.stop()
-            for tab in self.tabbar.tabs:
-                tab._hover_timer.stop()
-        except (AttributeError, OSError, RuntimeError):
-            logger.exception("Error while shutting down browser services")
-        finally:
-            event.accept()
+        self.prepare_shutdown()
+        event.accept()
 
     def reload_engine(self):
         for view in tuple(self.views):

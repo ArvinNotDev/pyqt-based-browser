@@ -27,6 +27,7 @@ class Window(QMainWindow):
     def __init__(self, parent=None, profile=None):
         self._parent = parent
         self.profile = profile
+        self._shutdown_prepared = False
         self._embedded = parent is not None
         parent_settings = getattr(parent, "settings", None)
         if self._embedded:
@@ -271,16 +272,34 @@ class Window(QMainWindow):
             if callable(status_bar):
                 status_bar().showMessage(f"{title}: {message}", 4500)
 
+    def prepare_shutdown(self):
+        """Stop all owned resources for both standalone and embedded Tor Proxy."""
+        if self._shutdown_prepared:
+            return
+        self._shutdown_prepared = True
+        self.listener_running = False
+        if self.tray_icon is not None:
+            self.tray_icon.hide()
+        try:
+            self.updater_window.prepare_shutdown()
+        except (AttributeError, RuntimeError):
+            logger.exception("Could not cancel Tor bundle updater work")
+        try:
+            self.proxyWidget.prepare_shutdown(reload_pages=False)
+        except (AttributeError, OSError, RuntimeError):
+            logger.exception("Could not stop embedded Tor/proxy services")
+        if not self._embedded:
+            try:
+                keyboard.unhook_all_hotkeys()
+            except (AttributeError, RuntimeError):
+                logger.debug("Could not unhook Tor Proxy shortcuts during shutdown.", exc_info=True)
+        if IS_WINDOWS and self.listener_thread is not None:
+            self.listener_thread.join(timeout=1)
+
     def closeEvent(self, event):
         if self._embedded:
             event.ignore()
             return
-        self.listener_running = False
-        if IS_WINDOWS and self.listener_thread is not None:
-            self.listener_thread.join(timeout=1)
-        if self.tray_icon is not None:
-            self.tray_icon.hide()
-        self.proxyWidget._stop_services()
-        self.proxyWidget.proxy.stop()
-        logger.info("The window is closing by some other method.")
+        self.prepare_shutdown()
+        logger.info("The Tor Proxy window is closing.")
         event.accept()
