@@ -2,7 +2,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, QUrl, QUrlQuery
 from PySide6.QtNetwork import QNetworkProxy, QNetworkProxyFactory
@@ -363,4 +363,24 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
     placeholder.loading_progress.hide.assert_called_once_with()
     placeholder.retry_button.show.assert_called_once_with()
+
+def test_proxy_panel_is_created_only_when_requested():
+    browser = SimpleNamespace(
+        proxy_panel=None,
+        profile=object(),
+        dock=SimpleNamespace(setWidget=Mock()),
+        _proxy_placeholder=Mock(),
+    )
+    panel = Mock()
+
+    with patch("ui.browser_window.Window", return_value=panel) as create_panel:
+        result = BrowserWindow._ensure_proxy_panel(browser)
+
+    assert result is panel
+    assert browser.proxy_panel is panel
+    assert panel.profile is browser.profile
+    browser.dock.setWidget.assert_called_once_with(panel)
+    browser._proxy_placeholder.deleteLater.assert_called_once_with()
+    assert browser._proxy_placeholder is None
+    create_panel.assert_called_once_with(browser, None)
 
