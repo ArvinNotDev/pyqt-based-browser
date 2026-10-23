@@ -4,7 +4,7 @@ import json
 import pytest
 
 from managers.profile_manager import Profile
-from ui.settings import Settings
+from ui.settings import Settings, default_download_directory
 
 
 @pytest.fixture(autouse=True)
@@ -25,7 +25,7 @@ def test_defaults_are_independent_and_stable():
     assert first.save_history is True
     assert first.save_cookies is True
     assert first.private_mode is False
-    assert first.download_folder == "./downloads"
+    assert first.download_folder == default_download_directory()
     assert first.show_dev_tools is False
     assert first.hardware_acceleration is True
     assert first.profile is not second.profile
@@ -103,6 +103,24 @@ def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
     loaded.load("Guest")
     assert loaded.startup_page == "dashboard"
     assert loaded.new_tab_page == "dashboard"
+
+
+def test_old_project_relative_download_default_migrates_to_system_downloads(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(
+        json.dumps({"Guest": {"download_folder": "./downloads"}}),
+        encoding="utf-8",
+    )
+    settings = Settings(file_path=str(settings_file))
+    settings.load("Guest")
+    assert settings.download_folder == default_download_directory()
+
+    settings_file.write_text(
+        json.dumps({"Guest": {"download_folder": str(tmp_path / "my-downloads")}}),
+        encoding="utf-8",
+    )
+    settings.load("Guest")
+    assert settings.download_folder == str(tmp_path / "my-downloads")
 
 
 def test_save_recovers_from_malformed_json(tmp_path):
