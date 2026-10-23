@@ -406,14 +406,17 @@ class BrowserPage(QWebEnginePage):
     def _reset_media_decode_warning(self) -> None:
         self._media_decode_warning_shown = False
 
-    def javaScriptConsoleMessage(self, level, message, line_number, source_id) -> None:
-        """Keep Chromium diagnostics intact and surface a helpful audio compatibility hint."""
+    @staticmethod
+    def _is_audio_decode_error(message: str) -> bool:
         normalized = str(message).casefold()
-        is_audio_decode_error = (
+        return (
             "loading fsb failed for audio clip" in normalized
             or "unable to decode audio data" in normalized
         )
-        if is_audio_decode_error and not self._media_decode_warning_shown:
+
+    def javaScriptConsoleMessage(self, level, message, line_number, source_id) -> None:
+        """Keep Chromium diagnostics intact and surface a helpful audio compatibility hint."""
+        if self._is_audio_decode_error(message) and not self._media_decode_warning_shown:
             self._media_decode_warning_shown = True
             QTimer.singleShot(0, self._show_audio_decode_warning)
         super().javaScriptConsoleMessage(level, message, line_number, source_id)
