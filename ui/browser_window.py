@@ -1443,10 +1443,13 @@ class BrowserWindow(QMainWindow):
 
         if opening:
             panel.setMinimumWidth(0)
+            # Collapse while the splitter still has both children. Moving the drawer
+            # out first would change its child count and make a two-size collapse
+            # capable of shrinking the lone remaining page view.
+            self._collapse_downloads_splitter()
             panel.setParent(row)
             # The page remains full-width; this drawer is composited above a blurred
             # snapshot, rather than inserted into the page's horizontal layout.
-            self._collapse_downloads_splitter()
             self._prepare_downloads_overlay()
             panel.setGeometry(QRect(-panel_width, 0, panel_width, row_height))
             panel.open()
