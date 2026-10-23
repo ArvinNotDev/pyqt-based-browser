@@ -423,8 +423,6 @@ QToolButton#downloadsModeButton {
     padding: 5px 9px; min-height: 22px;
 }
 QToolButton#downloadsModeButton:hover { background: rgba(57,121,214,24); border-color: #8bb4ed; }
-QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
-QFrame#downloadsOverlayTint { background: rgba(12,18,30,42); border: none; }
 
 /* Precision pass: fixed-centre menu control and legible frosted downloads material. */
 QToolButton#menuButton {
@@ -879,8 +877,6 @@ QToolButton#downloadsModeButton {
     padding: 5px 9px; min-height: 22px;
 }
 QToolButton#downloadsModeButton:hover { background: rgba(130,175,244,32); border-color: rgba(130,175,244,110); }
-QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
-QFrame#downloadsOverlayTint { background: rgba(6,10,18,45); border: none; }
 
 /* Precision pass: fixed-centre menu control and legible frosted downloads material. */
 QToolButton#menuButton {
