@@ -1,6 +1,6 @@
 """Custom, draggable title bar for the frameless browser window."""
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 import qtawesome as qta
@@ -37,6 +37,9 @@ class CustomTitleBar(QWidget):
         layout.addWidget(self.maximize_button)
         layout.addWidget(self.close_button)
 
+        self._manual_move_active = False
+        self._manual_move_origin = QPoint()
+        self._manual_move_geometry = QRect()
         self.minimize_button.clicked.connect(window.showMinimized)
         self.maximize_button.clicked.connect(self._toggle_maximized)
         self.close_button.clicked.connect(window.close)
@@ -79,15 +82,40 @@ class CustomTitleBar(QWidget):
         self.maximize_button.setAccessibleName(self.maximize_button.toolTip())
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             handle = self.host.windowHandle()
             if handle is not None and handle.startSystemMove():
+                self._manual_move_active = False
                 event.accept()
                 return
+            self._manual_move_origin = event.globalPosition().toPoint()
+            self._manual_move_geometry = self.host.geometry()
+            self._manual_move_active = not self.host.isMaximized() and not self.host.isFullScreen()
+            event.accept()
+            return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event):
+        if (
+            self._manual_move_active
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and not self.host.isMaximized()
+            and not self.host.isFullScreen()
+        ):
+            delta = event.globalPosition().toPoint() - self._manual_move_origin
+            self.host.move(self._manual_move_geometry.topLeft() + delta)
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._manual_move_active = False
+        super().mouseReleaseEvent(event)
+
     def mouseDoubleClickEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._manual_move_active = False
             self._toggle_maximized()
             event.accept()
             return
@@ -101,14 +129,57 @@ class ResizeHandle(QWidget):
         super().__init__(host)
         self.host = host
         self.edges = edges
+        self._manual_resize_active = False
+        self._resize_origin = QPoint()
+        self._resize_geometry = QRect()
         self.setCursor(cursor)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setFocusPolicy(Qt.NoFocus)
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             handle = self.host.windowHandle()
             if handle is not None and handle.startSystemResize(self.edges):
                 event.accept()
                 return
+            self._resize_origin = event.globalPosition().toPoint()
+            self._resize_geometry = self.host.geometry()
+            self._manual_resize_active = not self.host.isMaximized() and not self.host.isFullScreen()
+            event.accept()
+            return
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if (
+            self._manual_resize_active
+            and event.buttons() & Qt.MouseButton.LeftButton
+            and not self.host.isMaximized()
+            and not self.host.isFullScreen()
+        ):
+            delta = event.globalPosition().toPoint() - self._resize_origin
+            start = self._resize_geometry
+            left, top = start.left(), start.top()
+            right, bottom = start.right(), start.bottom()
+            min_width = max(1, self.host.minimumWidth())
+            min_height = max(1, self.host.minimumHeight())
+            if self.edges & Qt.Edge.LeftEdge:
+                left = min(left + delta.x(), right - min_width + 1)
+            elif self.edges & Qt.Edge.RightEdge:
+                right = max(right + delta.x(), left + min_width - 1)
+            if self.edges & Qt.Edge.TopEdge:
+                top = min(top + delta.y(), bottom - min_height + 1)
+            elif self.edges & Qt.Edge.BottomEdge:
+                bottom = max(bottom + delta.y(), top + min_height - 1)
+            self.host.setGeometry(QRect(
+                left, top,
+                max(min_width, right - left + 1),
+                max(min_height, bottom - top + 1),
+            ))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._manual_resize_active = False
+        super().mouseReleaseEvent(event)

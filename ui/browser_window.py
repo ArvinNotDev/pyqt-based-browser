@@ -19,7 +19,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
+    QPushButton, QToolButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
@@ -88,6 +88,44 @@ MAX_TAB_WIDTH = 198
 TAB_HEIGHT = 32
 TAB_SPACING = 4
 SCROLL_STEP = 220
+
+# Keep Qt's custom frameless chrome while restoring native Windows resizing and
+# snap capabilities that Qt normally removes with FramelessWindowHint.
+_WIN_GWL_STYLE = -16
+_WIN_WS_CAPTION = 0x00C00000
+_WIN_WS_SYSMENU = 0x00080000
+_WIN_WS_THICKFRAME = 0x00040000
+_WIN_WS_MINIMIZEBOX = 0x00020000
+_WIN_WS_MAXIMIZEBOX = 0x00010000
+_WIN_SWP_NOSIZE = 0x0001
+_WIN_SWP_NOMOVE = 0x0002
+_WIN_SWP_NOZORDER = 0x0004
+_WIN_SWP_NOACTIVATE = 0x0010
+_WIN_SWP_FRAMECHANGED = 0x0020
+_WIN_WM_NCHITTEST = 0x0084
+_WIN_HTCAPTION = 2
+_WIN_HTMAXBUTTON = 9
+_WIN_HTLEFT = 10
+_WIN_HTRIGHT = 11
+_WIN_HTTOP = 12
+_WIN_HTTOPLEFT = 13
+_WIN_HTTOPRIGHT = 14
+_WIN_HTBOTTOM = 15
+_WIN_HTBOTTOMLEFT = 16
+_WIN_HTBOTTOMRIGHT = 17
+
+
+def _with_resizable_frameless_windows_style(style: int) -> int:
+    """Retain the custom title bar, but keep the native resize/snap styles."""
+    style |= (
+        _WIN_WS_THICKFRAME
+        | _WIN_WS_SYSMENU
+        | _WIN_WS_MINIMIZEBOX
+        | _WIN_WS_MAXIMIZEBOX
+    )
+    return style & ~_WIN_WS_CAPTION
+
+
 logger = logging.getLogger(__name__)
 register_dashboard_scheme()
 
@@ -755,6 +793,9 @@ class BrowserPage(QWebEnginePage):
 class BrowserWindow(QMainWindow):
     def __init__(self, tor_mode: bool = False, restored_session: Optional[dict] = None):
         super().__init__()
+        self._window_handle_connected = None
+        self._native_refresh_pending = False
+        self._native_style_hwnd = 0
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         proxy_routing.load_exclude()
@@ -1219,7 +1260,7 @@ class BrowserWindow(QMainWindow):
         if not handles:
             return
         width, height = self.width(), self.height()
-        edge, corner = 6, 12
+        edge, corner = 8, 14
         geometries = {
             "top": QRect(corner, 0, max(0, width - 2 * corner), edge),
             "bottom": QRect(corner, max(0, height - edge), max(0, width - 2 * corner), edge),
@@ -1236,6 +1277,10 @@ class BrowserWindow(QMainWindow):
         for name, handle in handles.items():
             handle.setGeometry(geometries[name])
             handle.setVisible(not hidden)
+        if not hidden:
+            # Keep the resize targets above the web viewport and rounded shell.
+            for handle in handles.values():
+                handle.raise_()
 
     def _update_proxy_menu_action(self, visible: bool) -> None:
         self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
@@ -3265,38 +3310,205 @@ class BrowserWindow(QMainWindow):
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
+    def _apply_native_window_styles(self) -> None:
+        """Restore Windows resize/maximize styles without adding a visible title bar."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            get_style.argtypes = (wintypes.HWND, ctypes.c_int)
+            get_style.restype = ctypes.c_ssize_t
+            set_style.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+            set_style.restype = ctypes.c_ssize_t
+            current = int(get_style(wintypes.HWND(hwnd), _WIN_GWL_STYLE))
+            desired = _with_resizable_frameless_windows_style(current)
+            if current != desired:
+                set_style(wintypes.HWND(hwnd), _WIN_GWL_STYLE, desired)
+                set_window_pos = user32.SetWindowPos
+                set_window_pos.argtypes = (
+                    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, wintypes.UINT,
+                )
+                set_window_pos.restype = wintypes.BOOL
+                flags = (
+                    _WIN_SWP_NOMOVE | _WIN_SWP_NOSIZE | _WIN_SWP_NOZORDER
+                    | _WIN_SWP_NOACTIVATE | _WIN_SWP_FRAMECHANGED
+                )
+                if not set_window_pos(wintypes.HWND(hwnd), wintypes.HWND(0), 0, 0, 0, 0, flags):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            self._native_style_hwnd = hwnd
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.debug("Could not restore native frameless-window styles.", exc_info=True)
+
+    def _connect_window_handle_signals(self) -> None:
+        handle = self.windowHandle()
+        if handle is None or handle is self._window_handle_connected:
+            return
+        self._window_handle_connected = handle
+        try:
+            handle.screenChanged.connect(self._on_window_screen_changed)
+        except (AttributeError, RuntimeError):
+            logger.debug("Could not connect the active-screen signal.", exc_info=True)
+
+    def _queue_window_frame_refresh(self) -> None:
+        if getattr(self, "_native_refresh_pending", False):
+            return
+        self._native_refresh_pending = True
+        QTimer.singleShot(0, self._refresh_window_platform_state)
+
+    def _refresh_window_platform_state(self) -> None:
+        self._native_refresh_pending = False
+        if getattr(self, "_closing", False):
+            return
+        self._connect_window_handle_signals()
+        self._apply_native_window_styles()
+        self._sync_window_frame()
+        self._update_resize_handles()
+        if hasattr(self, "title_bar"):
+            self.title_bar.sync_maximize_button()
+
+    def _on_window_screen_changed(self, screen) -> None:
+        """Recalculate custom frame geometry when the window moves across monitors."""
+        self._sync_window_frame()
+        self._update_resize_handles()
+        self._queue_window_frame_refresh()
+        QTimer.singleShot(0, lambda target=screen: self._recover_offscreen_geometry(target))
+
+    def _recover_offscreen_geometry(self, screen=None) -> None:
+        """Recover a normal window when its last monitor is disconnected."""
+        if self.isMaximized() or self.isFullScreen() or getattr(self, "_closing", False):
+            return
+        app = QApplication.instance()
+        screens = app.screens() if app is not None else []
+        current = self.frameGeometry()
+        if any(current.intersects(candidate.availableGeometry()) for candidate in screens):
+            return
+        target = screen or (self.windowHandle().screen() if self.windowHandle() else None)
+        target = target or (app.primaryScreen() if app is not None else None)
+        if target is None:
+            return
+        available = target.availableGeometry()
+        width = min(max(self.minimumWidth(), self.width()), available.width())
+        height = min(max(self.minimumHeight(), self.height()), available.height())
+        x = available.x() + max(0, (available.width() - width) // 2)
+        y = available.y() + max(0, (available.height() - height) // 2)
+        self.setGeometry(x, y, width, height)
+        self._sync_window_frame()
+        self._update_resize_handles()
+
+    def event(self, event):
+        result = super().event(event)
+        refresh_types = {QEvent.Type.WinIdChange}
+        for name in ("ScreenChangeInternal", "DevicePixelRatioChange"):
+            value = getattr(QEvent.Type, name, None)
+            if value is not None:
+                refresh_types.add(value)
+        if event.type() in refresh_types:
+            self._queue_window_frame_refresh()
+        return result
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._queue_window_frame_refresh()
+
     def nativeEvent(self, eventType, message):
-        """Expose native caption/maximize hit targets so Windows Snap layouts work."""
+        """Hit-test native resize edges, the caption, and the Windows 11 Snap button."""
         if sys.platform == "win32":
             try:
                 native = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
-                if native.message == 0x0084:  # WM_NCHITTEST
+                if native.message == _WIN_WM_NCHITTEST:
                     packed = int(native.lParam)
-                    point = QPoint(
+                    screen_point = wintypes.POINT(
                         ctypes.c_short(packed & 0xFFFF).value,
                         ctypes.c_short((packed >> 16) & 0xFFFF).value,
                     )
-                    maximize = getattr(getattr(self, "title_bar", None), "maximize_button", None)
-                    if maximize is not None:
-                        maximize_rect = QRect(maximize.mapToGlobal(QPoint(0, 0)), maximize.size())
-                        if maximize_rect.contains(point):
-                            return True, 9  # HTMAXBUTTON: native Snap Layouts hover target
+                    hwnd = wintypes.HWND(int(self.winId()))
+                    user32 = ctypes.WinDLL("user32", use_last_error=True)
+                    client_point = wintypes.POINT(screen_point.x, screen_point.y)
+                    user32.ScreenToClient.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.POINT))
+                    user32.ScreenToClient.restype = wintypes.BOOL
+                    user32.ScreenToClient(hwnd, ctypes.byref(client_point))
+                    ratio = max(1.0, float(self.devicePixelRatioF()))
+                    local_point = QPoint(
+                        int(round(client_point.x / ratio)),
+                        int(round(client_point.y / ratio)),
+                    )
+
                     title_bar = getattr(self, "title_bar", None)
                     if title_bar is not None:
-                        title_rect = QRect(title_bar.mapToGlobal(QPoint(0, 0)), title_bar.size())
-                        if title_rect.contains(point):
-                            buttons = (
-                                title_bar.minimize_button,
-                                title_bar.maximize_button,
-                                title_bar.close_button,
-                            )
-                            if not any(
-                                QRect(button.mapToGlobal(QPoint(0, 0)), button.size()).contains(point)
-                                for button in buttons
-                            ):
-                                return True, 2  # HTCAPTION: native move/snap/Win+Arrow support
+                        maximize = getattr(title_bar, "maximize_button", None)
+                        if maximize is not None:
+                            rect = QRect(maximize.mapTo(self, QPoint(0, 0)), maximize.size())
+                            if rect.contains(local_point):
+                                return True, _WIN_HTMAXBUTTON
+                        buttons = tuple(
+                            getattr(title_bar, name, None)
+                            for name in ("minimize_button", "maximize_button", "close_button")
+                        )
+                        if any(
+                            button is not None and QRect(
+                                button.mapTo(self, QPoint(0, 0)), button.size()
+                            ).contains(local_point)
+                            for button in buttons
+                        ):
+                            return False, 0
+
+                    rect = wintypes.RECT()
+                    user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+                    user32.GetWindowRect.restype = wintypes.BOOL
+                    if (
+                        not self.isMaximized()
+                        and not self.isFullScreen()
+                        and user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                    ):
+                        dpi = 96
+                        get_dpi = getattr(user32, "GetDpiForWindow", None)
+                        if get_dpi is not None:
+                            get_dpi.argtypes = (wintypes.HWND,)
+                            get_dpi.restype = wintypes.UINT
+                            dpi = max(96, int(get_dpi(hwnd)))
+                        metrics = getattr(user32, "GetSystemMetricsForDpi", None)
+                        if metrics is not None:
+                            metrics.argtypes = (ctypes.c_int, wintypes.UINT)
+                            metrics.restype = ctypes.c_int
+                            edge = max(6, min(16, metrics(32, dpi) + metrics(92, dpi)))
+                        else:
+                            get_metric = user32.GetSystemMetrics
+                            get_metric.argtypes = (ctypes.c_int,)
+                            get_metric.restype = ctypes.c_int
+                            edge = max(6, min(16, get_metric(32) + get_metric(92)))
+                        left = screen_point.x - rect.left < edge
+                        right = rect.right - screen_point.x <= edge
+                        top = screen_point.y - rect.top < edge
+                        bottom = rect.bottom - screen_point.y <= edge
+                        if top and left:
+                            return True, _WIN_HTTOPLEFT
+                        if top and right:
+                            return True, _WIN_HTTOPRIGHT
+                        if bottom and left:
+                            return True, _WIN_HTBOTTOMLEFT
+                        if bottom and right:
+                            return True, _WIN_HTBOTTOMRIGHT
+                        if left:
+                            return True, _WIN_HTLEFT
+                        if right:
+                            return True, _WIN_HTRIGHT
+                        if top:
+                            return True, _WIN_HTTOP
+                        if bottom:
+                            return True, _WIN_HTBOTTOM
+
+                    if title_bar is not None:
+                        title_rect = QRect(title_bar.mapTo(self, QPoint(0, 0)), title_bar.size())
+                        if title_rect.contains(local_point):
+                            return True, _WIN_HTCAPTION
             except (AttributeError, TypeError, ValueError, OSError):
-                logger.debug("Native window hit test was unavailable.", exc_info=True)
+                logger.debug("Native hit testing failed; using Qt fallback.", exc_info=True)
         return super().nativeEvent(eventType, message)
 
     def closeEvent(self, event):

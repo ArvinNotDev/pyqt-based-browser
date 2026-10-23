@@ -650,3 +650,67 @@ def test_many_tabs_use_compact_scrolling_and_an_all_tabs_menu():
     tabs.close()
     tabs.deleteLater()
     app.processEvents()
+
+
+
+def test_custom_tab_bar_constructs_its_all_tabs_button(qapp):
+    from PySide6.QtWidgets import QToolButton
+    from ui.browser_window import CustomTabBar
+
+    tabs = CustomTabBar()
+    assert isinstance(tabs.tab_list_button, QToolButton)
+    assert tabs.tab_list_button.objectName() == "tabListButton"
+    assert not tabs.tab_list_button.icon().isNull()
+    tabs.close()
+    tabs.deleteLater()
+    qapp.processEvents()
+
+
+def test_native_frameless_style_preserves_resize_and_snap_capabilities():
+    from ui.browser_window import (
+        _WIN_WS_CAPTION,
+        _WIN_WS_MAXIMIZEBOX,
+        _WIN_WS_MINIMIZEBOX,
+        _WIN_WS_SYSMENU,
+        _WIN_WS_THICKFRAME,
+        _with_resizable_frameless_windows_style,
+    )
+
+    original = 0x80000000 | _WIN_WS_CAPTION
+    updated = _with_resizable_frameless_windows_style(original)
+
+    assert updated & _WIN_WS_THICKFRAME
+    assert updated & _WIN_WS_MAXIMIZEBOX
+    assert updated & _WIN_WS_MINIMIZEBOX
+    assert updated & _WIN_WS_SYSMENU
+    assert updated & 0x80000000
+    assert not updated & _WIN_WS_CAPTION
+
+
+def test_resize_handles_cover_and_raise_all_four_window_corners():
+    from PySide6.QtCore import QRect
+    from ui.browser_window import BrowserWindow
+
+    names = (
+        "top", "bottom", "left", "right",
+        "top_left", "top_right", "bottom_left", "bottom_right",
+    )
+    handles = {
+        name: SimpleNamespace(setGeometry=Mock(), setVisible=Mock(), raise_=Mock())
+        for name in names
+    }
+    browser = SimpleNamespace(
+        _resize_handles=handles,
+        width=lambda: 900,
+        height=lambda: 700,
+        isMaximized=lambda: False,
+        isFullScreen=lambda: False,
+    )
+
+    BrowserWindow._update_resize_handles(browser)
+
+    assert handles["bottom_left"].setGeometry.call_args.args[0] == QRect(0, 686, 14, 14)
+    assert handles["bottom_right"].setGeometry.call_args.args[0] == QRect(886, 686, 14, 14)
+    for handle in handles.values():
+        handle.setVisible.assert_called_once_with(True)
+        handle.raise_.assert_called_once_with()
