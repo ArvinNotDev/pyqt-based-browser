@@ -443,8 +443,10 @@ class BrowserWindow(QMainWindow):
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         proxy_routing.load_exclude()
-        self.proxy_panel = Window(self, None)
         self.tor_mode = bool(tor_mode)
+        # Tor must configure its proxy before WebEngine profiles exist. In ordinary
+        # mode the comparatively heavy proxy widget is created only when requested.
+        self.proxy_panel = Window(self, None) if self.tor_mode else None
         self._pending_network_restart = None
         self._restored_session = restored_session if isinstance(restored_session, dict) else {}
         if self.tor_mode:
@@ -647,12 +649,21 @@ class BrowserWindow(QMainWindow):
         self.dock.setObjectName("proxyDock")
         self.dock.setMinimumWidth(300)
         self.dock.setMaximumWidth(400)
-        self.dock.setWidget(self.proxy_panel)
+        self._proxy_placeholder = None
+        if self.proxy_panel is not None:
+            self.dock.setWidget(self.proxy_panel)
+        else:
+            # A tiny placeholder avoids constructing the proxy UI on every normal launch.
+            self._proxy_placeholder = QWidget(self.dock)
+            self._proxy_placeholder.setObjectName("deferredProxyPlaceholder")
+            self.dock.setWidget(self._proxy_placeholder)
         self.dock.setFloating(False)
         self.dock.setFeatures(QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
+        if self.settings.proxy_panel_visible:
+            self._ensure_proxy_panel()
+        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
@@ -744,10 +755,27 @@ class BrowserWindow(QMainWindow):
                 logger.warning("Could not remove the unused session handoff file")
         return False
 
+    def _ensure_proxy_panel(self):
+        """Create the proxy controls on first use, not on every ordinary browser launch."""
+        if self.proxy_panel is not None:
+            return self.proxy_panel
+        panel = Window(self, None)
+        panel.profile = self.profile
+        self.proxy_panel = panel
+        placeholder = getattr(self, "_proxy_placeholder", None)
+        self.dock.setWidget(panel)
+        self._proxy_placeholder = None
+        if placeholder is not None:
+            placeholder.deleteLater()
+        return panel
+
     def show_proxy(self):
-        self.dock.setVisible(not self.dock.isVisible())
-        if self.dock.isVisible():
+        if not self.dock.isVisible():
+            self._ensure_proxy_panel()
+            self.dock.setVisible(True)
             self.dock.raise_()
+        else:
+            self.dock.setVisible(False)
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -2098,7 +2126,8 @@ class BrowserWindow(QMainWindow):
         self._refresh_history()
         self.profile = self._get_profile(profile_name)
         self._apply_profile_settings(self.profile)
-        self.proxy_panel.profile = self.profile
+        if self.proxy_panel is not None:
+            self.proxy_panel.profile = self.profile
         self._setup_feature_managers()
 
         for view in list(self.views):
@@ -2246,14 +2275,15 @@ class BrowserWindow(QMainWindow):
             self.view_layout.removeWidget(view)
             view.deleteLater()
         try:
-            self.proxy_panel.close()
-            self.proxy_panel.proxyWidget._stop_services(reload_pages=False)
-            self.proxy_panel.proxyWidget.stop_timer.emit()
+            if self.proxy_panel is not None:
+                self.proxy_panel.close()
+                self.proxy_panel.proxyWidget._stop_services(reload_pages=False)
+                self.proxy_panel.proxyWidget.stop_timer.emit()
+                proxy_runner = self.proxy_panel.proxyWidget.proxy
+                if proxy_runner.started and proxy_runner.server is not None:
+                    proxy_runner.stop()
             for tab in self.tabbar.tabs:
                 tab._hover_timer.stop()
-            proxy_runner = self.proxy_panel.proxyWidget.proxy
-            if proxy_runner.started and proxy_runner.server is not None:
-                proxy_runner.stop()
         except (AttributeError, OSError, RuntimeError):
             logger.exception("Error while shutting down browser services")
         finally:
