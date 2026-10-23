@@ -466,6 +466,49 @@ QFrame#downloadsGlassMaterial {
 }
 QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
 QWidget#downloadsListHost { background: transparent; border: none; }
+
+/* Precision tab strip: quiet idle tabs, clear active surface, compact controls. */
+QFrame#browserTabBar {
+    background: rgba(235,241,249,250);
+    border: 1px solid rgba(196,211,232,215);
+    border-radius: 14px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 9px;
+}
+QFrame#browserTab:hover {
+    background: rgba(255,255,255,185);
+    border-color: rgba(201,216,238,220);
+}
+QFrame#browserTab[active="true"] {
+    background: #ffffff;
+    border: 1px solid #d5e1f2;
+    border-bottom: 2px solid #3979d6;
+}
+QLabel#tabFavicon { background: transparent; }
+QLabel#tabTitle { color: #66758a; font-size: 12px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #202c40; font-weight: 650; }
+QPushButton#tabCloseButton {
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    padding: 0; background: transparent; border: none; border-radius: 7px;
+}
+QPushButton#tabCloseButton:hover { background: #dfeafa; border: 1px solid #cadaf2; }
+QFrame#browserTab[active="true"] QPushButton#tabCloseButton:hover { background: #e6edf7; }
+QPushButton#tabScrollButton {
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px;
+}
+QPushButton#tabScrollButton:hover { background: #e1eaf6; border-color: #ccdaed; }
+QPushButton#tabPlusButton {
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 9px;
+}
+QPushButton#tabPlusButton:hover { background: #ffffff; border-color: #cbdcf2; }
+
 """
 
 
@@ -933,6 +976,49 @@ QFrame#downloadsGlassMaterial {
 }
 QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
 QWidget#downloadsListHost { background: transparent; border: none; }
+
+/* Precision tab strip: restrained graphite surfaces with an unmistakable active tab. */
+QFrame#browserTabBar {
+    background: rgba(28,34,43,250);
+    border: 1px solid rgba(98,116,142,125);
+    border-radius: 14px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 9px;
+}
+QFrame#browserTab:hover {
+    background: rgba(69,81,99,130);
+    border-color: rgba(124,147,179,95);
+}
+QFrame#browserTab[active="true"] {
+    background: #303a49;
+    border: 1px solid #53647b;
+    border-bottom: 2px solid #82aff4;
+}
+QLabel#tabFavicon { background: transparent; }
+QLabel#tabTitle { color: #aab6c7; font-size: 12px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #f0f5fc; font-weight: 650; }
+QPushButton#tabCloseButton {
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    padding: 0; background: transparent; border: none; border-radius: 7px;
+}
+QPushButton#tabCloseButton:hover { background: rgba(127,151,181,35); border: 1px solid rgba(137,164,199,90); }
+QFrame#browserTab[active="true"] QPushButton#tabCloseButton:hover { background: #414e61; }
+QPushButton#tabScrollButton {
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px;
+}
+QPushButton#tabScrollButton:hover { background: #303a49; border-color: #465871; }
+QPushButton#tabPlusButton {
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 9px;
+}
+QPushButton#tabPlusButton:hover { background: #303a49; border-color: #4c607b; }
+
 """
 from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
 

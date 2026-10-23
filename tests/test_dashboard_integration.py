@@ -511,3 +511,39 @@ def test_page_progress_uses_a_reserved_slot_and_resets_without_hiding():
     progress_bar.setRange.assert_called_once_with(0, 100)
     progress_bar.setValue.assert_called_once_with(0)
     progress_bar.hide.assert_not_called()
+
+
+
+def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
+    from PySide6.QtWidgets import QApplication
+    from ui.browser_window import CustomTabBar
+
+    app = QApplication.instance() or QApplication([])
+    tabs = CustomTabBar()
+    tabs.resize(640, 50)
+    first = tabs.add_tab("First website", make_active=True)
+    second = tabs.add_tab("Second website", make_active=False)
+    third = tabs.add_tab("Third website", make_active=False)
+    tabs.show()
+    app.processEvents()
+
+    first_tab = tabs.tabs[first]
+    assert not first_tab.favicon.pixmap().isNull()
+    assert first_tab.close_btn.isHidden()
+    assert first_tab.height() == 36
+
+    tabs.set_loading(first, True)
+    assert first_tab._loading is True
+    tabs.set_loading(first, False)
+    assert first_tab._loading is False
+
+    reordered = []
+    tabs.tab_reordered.connect(lambda old, new: reordered.append((old, new)))
+    tabs._move_tab_to(tabs.tabs[first], 2)
+    assert [tab._title for tab in tabs.tabs] == [
+        "Second website", "Third website", "First website"
+    ]
+    assert reordered == [(0, 2)]
+    tabs.close()
+    tabs.deleteLater()
+    app.processEvents()

@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
-from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -82,12 +82,12 @@ except ModuleNotFoundError as exc:
         raise
     BookmarksDialog = None
 
-TAB_WIDTH = 160
-MIN_TAB_WIDTH = 112
-MAX_TAB_WIDTH = 220
-TAB_HEIGHT = 34
-TAB_SPACING = 4
-SCROLL_STEP = 140
+TAB_WIDTH = 170
+MIN_TAB_WIDTH = 126
+MAX_TAB_WIDTH = 238
+TAB_HEIGHT = 38
+TAB_SPACING = 6
+SCROLL_STEP = 180
 logger = logging.getLogger(__name__)
 register_dashboard_scheme()
 
@@ -142,114 +142,193 @@ class _ProxyPanelHost(QFrame):
 
 
 class TabButton(QFrame):
+    """A compact, draggable browser tab with favicon, loading state and hover close."""
+
     clicked = Signal()
     closed = Signal()
     requested_preview = Signal()
     context_requested = Signal(QPoint)
+    drag_moved = Signal(QPoint)
 
     def __init__(self, title: str = "New Tab"):
         super().__init__()
         self.setObjectName("browserTab")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(MIN_TAB_WIDTH)
         self.setMaximumWidth(MAX_TAB_WIDTH)
-        self.setFixedHeight(TAB_HEIGHT)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(TAB_HEIGHT - 2)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._title = title or "New Tab"
-
         self._active = False
+        self._dark_mode = False
+        self._loading = False
+        self._site_icon: QIcon | None = None
+        self._press_pos = QPoint()
+        self._dragging = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(6)
+        layout.setContentsMargins(9, 3, 6, 3)
+        layout.setSpacing(7)
 
-        self.label = QLabel(self._title)
-        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.favicon = QLabel(self)
+        self.favicon.setObjectName("tabFavicon")
+        self.favicon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.favicon.setFixedSize(18, 18)
+        self.favicon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self.label = QLabel(self._title, self)
+        self.label.setObjectName("tabTitle")
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.label.setMinimumWidth(0)
-        self.label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
-        self.close_btn = QPushButton()
+        self.close_btn = QPushButton(self)
         self.close_btn.setObjectName("tabCloseButton")
-        self.close_btn.setIcon(qta.icon("fa5s.times", color="#8592a5"))
-        self.close_btn.setIconSize(QSize(12, 12))
-        self.close_btn.setFixedSize(22, 22)
+        self.close_btn.setIconSize(QSize(13, 13))
+        self.close_btn.setFixedSize(24, 24)
         self.close_btn.hide()
-        self.close_btn.setFocusPolicy(Qt.NoFocus)
+        self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.close_btn.setToolTip("Close tab")
-        self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.installEventFilter(self)
-        self.close_btn.installEventFilter(self)
+        self.close_btn.setAccessibleName("Close tab")
+        self.close_btn.clicked.connect(self.closed.emit)
 
-        layout.addWidget(self.label)
+        layout.addWidget(self.favicon)
+        layout.addWidget(self.label, 1)
         layout.addWidget(self.close_btn)
-        self.close_btn.clicked.connect(lambda: self.closed.emit())
 
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(500)
+        self._hover_timer.setInterval(520)
         self._hover_timer.timeout.connect(self._emit_preview)
-
+        self.installEventFilter(self)
+        self.close_btn.installEventFilter(self)
+        self.set_title(title)
+        self.apply_icon_theme(False)
         self.set_active(False)
 
     def apply_icon_theme(self, dark: bool) -> None:
-        color = "#a9b7c9" if dark else "#68778b"
-        self.close_btn.setIcon(qta.icon("fa5s.times", color=color))
+        self._dark_mode = bool(dark)
+        close_color = "#a8b6c9" if self._dark_mode else "#6a788d"
+        self.close_btn.setIcon(qta.icon("fa5s.times", color=close_color))
+        self._refresh_favicon()
 
-    def _emit_preview(self):
-        self.requested_preview.emit()
+    def set_site_icon(self, icon: QIcon | None) -> None:
+        self._site_icon = icon if isinstance(icon, QIcon) and not icon.isNull() else None
+        self._refresh_favicon()
 
-    def enterEvent(self, event):
+    def set_loading(self, loading: bool) -> None:
+        self._loading = bool(loading)
+        self._refresh_favicon()
+
+    def _refresh_favicon(self) -> None:
+        accent = "#82aff4" if self._dark_mode else "#3477d4"
+        if self._loading:
+            icon = qta.icon("fa5s.sync-alt", color=accent)
+        elif self._site_icon is not None:
+            icon = self._site_icon
+        else:
+            icon = qta.icon("fa5s.globe", color=accent if self._active else (
+                "#a4b0c0" if self._dark_mode else "#8795a8"
+            ))
+        self.favicon.setPixmap(icon.pixmap(QSize(16, 16)))
+        self.favicon.setToolTip("Loading page…" if self._loading else "Site icon")
+
+    def _emit_preview(self) -> None:
+        if not self._dragging:
+            self.requested_preview.emit()
+
+    def enterEvent(self, event) -> None:
         self.close_btn.show()
-        self._hover_timer.start()
+        if not self._dragging:
+            self._hover_timer.start()
         super().enterEvent(event)
 
-    def leaveEvent(self, event):
+    def leaveEvent(self, event) -> None:
         self._hover_timer.stop()
-        self.close_btn.hide()
+        if not self._dragging:
+            self.close_btn.hide()
         super().leaveEvent(event)
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            if not self.close_btn.underMouse():
-                self.clicked.emit()
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position().toPoint()
+            self._dragging = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            current = event.position().toPoint()
+            if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
+                self._dragging = True
+                self._hover_timer.stop()
+                self.close_btn.hide()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if self._dragging:
+                self.drag_moved.emit(event.globalPosition().toPoint())
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            if self.underMouse():
+                self.close_btn.show()
+            else:
+                self.close_btn.hide()
+            event.accept()
+            return
+        if event.button() == Qt.MouseButton.LeftButton and not self.close_btn.underMouse():
+            self.clicked.emit()
         super().mouseReleaseEvent(event)
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.ContextMenu:
+    def eventFilter(self, obj, event) -> bool:
+        if event.type() == QEvent.Type.ContextMenu:
             self.context_requested.emit(event.globalPos())
             return True
         return super().eventFilter(obj, event)
 
-    def set_active(self, active: bool):
-        self._active = active
-        self.setProperty("active", bool(active))
-        style = self.style()
-        style.unpolish(self)
-        style.polish(self)
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self.setProperty("active", self._active)
+        self.setAccessibleName(self._title if not self._loading else f"{self._title}, loading")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._refresh_favicon()
         self.update()
 
-    def set_title(self, title: str):
-        self._title = title or "New Tab"
+    def set_title(self, title: str) -> None:
+        self._title = str(title or "New Tab")
         self.setToolTip(self._title)
+        self.setAccessibleName(self._title)
         self._update_elided_title()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_elided_title()
 
-    def _update_elided_title(self):
+    def _update_elided_title(self) -> None:
         metrics = QFontMetrics(self.label.font())
-        self.label.setText(metrics.elidedText(self._title, Qt.ElideRight, max(0, self.label.width())))
+        self.label.setText(
+            metrics.elidedText(self._title, Qt.TextElideMode.ElideRight, max(0, self.label.width()))
+        )
 
 
 class CustomTabBar(QFrame):
+    """Responsive tab strip with favicon updates, scrolling and drag reordering."""
+
     tab_changed = Signal(int)
     tab_closed = Signal(int)
+    tab_reordered = Signal(int, int)
     new_tab_requested = Signal()
     tab_preview_requested = Signal(int)
     tab_context_requested = Signal(int, QPoint)
 
     def __init__(self):
         super().__init__()
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(TAB_HEIGHT + 6)
         self.tabs: List[TabButton] = []
         self.active_index: int = -1
@@ -257,76 +336,79 @@ class CustomTabBar(QFrame):
         self._updating = False
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(4, 2, 4, 2)
-        root.setSpacing(0)
+        root.setContentsMargins(8, 3, 8, 3)
+        root.setSpacing(5)
 
         self._dark_mode = False
-        self.btn_left = QPushButton()
+        self.btn_left = QPushButton(self)
         self.btn_left.setObjectName("tabScrollButton")
-        self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color="#68778b"))
         self.btn_left.setIconSize(QSize(11, 11))
-        self.btn_left.setFixedSize(24, TAB_HEIGHT - 4)
-        self.btn_left.setFocusPolicy(Qt.NoFocus)
+        self.btn_left.setFixedSize(25, TAB_HEIGHT - 4)
+        self.btn_left.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_left.setToolTip("Scroll tabs left")
         self.btn_left.clicked.connect(lambda: self._scroll(-SCROLL_STEP))
         self.btn_left.hide()
 
-        self.btn_right = QPushButton()
+        self.btn_right = QPushButton(self)
         self.btn_right.setObjectName("tabScrollButton")
-        self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color="#68778b"))
         self.btn_right.setIconSize(QSize(11, 11))
-        self.btn_right.setFixedSize(24, TAB_HEIGHT - 4)
-        self.btn_right.setFocusPolicy(Qt.NoFocus)
+        self.btn_right.setFixedSize(25, TAB_HEIGHT - 4)
+        self.btn_right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_right.setToolTip("Scroll tabs right")
         self.btn_right.clicked.connect(lambda: self._scroll(SCROLL_STEP))
         self.btn_right.hide()
 
         self.holder = QWidget()
+        self.holder.setObjectName("tabStripHolder")
         self.holder_layout = QHBoxLayout(self.holder)
         self.holder_layout.setContentsMargins(0, 0, 0, 0)
         self.holder_layout.setSpacing(TAB_SPACING)
-        self.holder_layout.setAlignment(Qt.AlignLeft)
+        self.holder_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        self.scroll = QScrollArea()
+        self.scroll = QScrollArea(self)
+        self.scroll.setObjectName("tabStripScroll")
         self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(self.holder)
         self.scroll.setFixedHeight(TAB_HEIGHT)
-        self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.scroll.installEventFilter(self)
+        self.scroll.viewport().installEventFilter(self)
 
-        self.plus_tab = QPushButton()
+        self.plus_tab = QPushButton(self)
         self.plus_tab.setObjectName("tabPlusButton")
-        self.plus_tab.setIcon(qta.icon("fa5s.plus", color="#536782"))
         self.plus_tab.setIconSize(QSize(13, 13))
-        self.plus_tab.setFixedSize(28, TAB_HEIGHT - 4)
+        self.plus_tab.setFixedSize(30, TAB_HEIGHT - 8)
         self.plus_tab.setToolTip("New tab")
-        self.plus_tab.setFocusPolicy(Qt.NoFocus)
-        self.plus_tab.setToolTip("New tab")
-        self.plus_tab.clicked.connect(lambda: self.new_tab_requested.emit())
+        self.plus_tab.setAccessibleName("New tab")
+        self.plus_tab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.plus_tab.clicked.connect(self.new_tab_requested.emit)
 
-        self.external_plus = QPushButton()
+        self.external_plus = QPushButton(self)
         self.external_plus.setObjectName("tabPlusButton")
-        self.external_plus.setIcon(qta.icon("fa5s.plus", color="#536782"))
         self.external_plus.setIconSize(QSize(13, 13))
-        self.external_plus.setFixedSize(28, TAB_HEIGHT - 4)
-        self.external_plus.setFocusPolicy(Qt.NoFocus)
+        self.external_plus.setFixedSize(30, TAB_HEIGHT - 8)
+        self.external_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.external_plus.setToolTip("New tab")
-        self.external_plus.clicked.connect(lambda: self.new_tab_requested.emit())
+        self.external_plus.setAccessibleName("New tab")
+        self.external_plus.clicked.connect(self.new_tab_requested.emit)
         self.external_plus.hide()
-
         self.holder_layout.addWidget(self.plus_tab)
 
         root.addWidget(self.btn_left)
         root.addWidget(self.scroll, 1)
         root.addWidget(self.btn_right)
         root.addWidget(self.external_plus)
+        self.apply_icon_theme(False)
 
     def apply_icon_theme(self, dark: bool) -> None:
         self._dark_mode = bool(dark)
         color = "#a9b7c9" if self._dark_mode else "#68778b"
+        plus_color = "#c2d0e4" if self._dark_mode else "#526985"
         self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color=color))
         self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color=color))
-        plus_color = "#a9b8cc" if self._dark_mode else "#536782"
         self.plus_tab.setIcon(qta.icon("fa5s.plus", color=plus_color))
         self.external_plus.setIcon(qta.icon("fa5s.plus", color=plus_color))
         for tab in self.tabs:
@@ -335,25 +417,26 @@ class CustomTabBar(QFrame):
     def add_tab(self, title: str = "New Tab", make_active: bool = True) -> int:
         tab = TabButton(title)
         tab.apply_icon_theme(self._dark_mode)
-        tab.clicked.connect(lambda t=tab: self._on_tab_clicked(t))
-        tab.closed.connect(lambda t=tab: self._on_tab_closed(t))
-        tab.requested_preview.connect(lambda t=tab: self._on_tab_preview_requested(t))
+        tab.clicked.connect(lambda target=tab: self._on_tab_clicked(target))
+        tab.closed.connect(lambda target=tab: self._on_tab_closed(target))
+        tab.requested_preview.connect(lambda target=tab: self._on_tab_preview_requested(target))
+        tab.drag_moved.connect(lambda pos, target=tab: self._on_tab_drag_moved(target, pos))
         tab.context_requested.connect(
-            lambda pos, t=tab: self.tab_context_requested.emit(self.tabs.index(t), pos)
-            if t in self.tabs else None
+            lambda pos, target=tab: self.tab_context_requested.emit(self.tabs.index(target), pos)
+            if target in self.tabs else None
         )
 
         insert_pos = max(0, self.holder_layout.count() - (1 if self.plus_inside else 0))
         self.holder_layout.insertWidget(insert_pos, tab)
         self.tabs.append(tab)
 
-        idx = len(self.tabs) - 1
+        index = len(self.tabs) - 1
         if make_active or self.active_index < 0:
-            self.set_active(idx)
+            self.set_active(index)
         QTimer.singleShot(0, self._update_overflow)
-        return idx
+        return index
 
-    def remove_tab(self, index: int, activate: bool = True):
+    def remove_tab(self, index: int, activate: bool = True) -> None:
         if index < 0 or index >= len(self.tabs):
             return
         old_active_index = self.active_index
@@ -362,7 +445,7 @@ class CustomTabBar(QFrame):
         tab.setParent(None)
         tab.deleteLater()
 
-        if len(self.tabs) == 0:
+        if not self.tabs:
             self.active_index = -1
             if activate and old_active_index != -1:
                 self.tab_changed.emit(-1)
@@ -373,13 +456,13 @@ class CustomTabBar(QFrame):
             self.active_index = min(index, len(self.tabs) - 1)
         elif self.active_index > index:
             self.active_index -= 1
-        for i, tab_button in enumerate(self.tabs):
-            tab_button.set_active(i == self.active_index)
+        for current, item in enumerate(self.tabs):
+            item.set_active(current == self.active_index)
         if activate and self.active_index != old_active_index:
             self.tab_changed.emit(self.active_index)
         QTimer.singleShot(0, self._update_overflow)
 
-    def set_active(self, index: int):
+    def set_active(self, index: int) -> None:
         if not self.tabs:
             self.active_index = -1
             self.tab_changed.emit(-1)
@@ -387,47 +470,93 @@ class CustomTabBar(QFrame):
         index = max(0, min(index, len(self.tabs) - 1))
         changed = index != self.active_index
         self.active_index = index
-        for i, t in enumerate(self.tabs):
-            t.set_active(i == index)
+        for current, tab in enumerate(self.tabs):
+            tab.set_active(current == index)
         if changed:
             self.tab_changed.emit(index)
-        QTimer.singleShot(0, lambda: self.ensure_tab_visible(index))
+        QTimer.singleShot(0, lambda target=index: self.ensure_tab_visible(target))
 
-    def set_title(self, index: int, title: str):
+    def set_title(self, index: int, title: str) -> None:
         if 0 <= index < len(self.tabs):
             self.tabs[index].set_title(title)
 
-    def ensure_tab_visible(self, index: int):
+    def set_icon(self, index: int, icon: QIcon | None) -> None:
+        if 0 <= index < len(self.tabs):
+            self.tabs[index].set_site_icon(icon)
+
+    def set_loading(self, index: int, loading: bool) -> None:
+        if 0 <= index < len(self.tabs):
+            self.tabs[index].set_loading(loading)
+
+    def ensure_tab_visible(self, index: int) -> None:
         if index < 0 or index >= len(self.tabs):
             return
         tab = self.tabs[index]
         try:
             local_x = tab.mapTo(self.holder, tab.rect().topLeft()).x()
-            tab_w = tab.width()
-            view_w = self.scroll.viewport().width()
-            cur = self.scroll.horizontalScrollBar().value()
-            if local_x < cur:
+            tab_width = tab.width()
+            visible_width = self.scroll.viewport().width()
+            current = self.scroll.horizontalScrollBar().value()
+            if local_x < current:
                 self.scroll.horizontalScrollBar().setValue(local_x)
-            elif local_x + tab_w > cur + view_w:
-                self.scroll.horizontalScrollBar().setValue(local_x + tab_w - view_w)
+            elif local_x + tab_width > current + visible_width:
+                self.scroll.horizontalScrollBar().setValue(local_x + tab_width - visible_width)
         except RuntimeError:
             logger.debug("Skipped tab visibility update for a widget being destroyed", exc_info=True)
 
-    def _scroll(self, delta: int):
+    def _scroll(self, delta: int) -> None:
         bar = self.scroll.horizontalScrollBar()
-        bar.setValue(max(0, bar.value() + delta))
+        bar.setValue(max(bar.minimum(), min(bar.maximum(), bar.value() + int(delta))))
 
-    def _update_overflow(self):
+    def _move_tab_to(self, tab: TabButton, target_index: int) -> None:
+        if tab not in self.tabs:
+            return
+        old_index = self.tabs.index(tab)
+        target_index = max(0, min(int(target_index), len(self.tabs) - 1))
+        if old_index == target_index:
+            return
+
+        active = self.active_index
+        self.tabs.pop(old_index)
+        self.tabs.insert(target_index, tab)
+        self.holder_layout.removeWidget(tab)
+        self.holder_layout.insertWidget(target_index, tab)
+
+        if active == old_index:
+            self.active_index = target_index
+        elif old_index < active <= target_index:
+            self.active_index = active - 1
+        elif target_index <= active < old_index:
+            self.active_index = active + 1
+
+        for index, current in enumerate(self.tabs):
+            current.set_active(index == self.active_index)
+        self.tab_reordered.emit(old_index, target_index)
+        QTimer.singleShot(0, self._update_overflow)
+        if self.active_index >= 0:
+            QTimer.singleShot(0, lambda index=self.active_index: self.ensure_tab_visible(index))
+
+    def _on_tab_drag_moved(self, tab: TabButton, global_position: QPoint) -> None:
+        if tab not in self.tabs or len(self.tabs) < 2:
+            return
+        pointer_x = self.holder.mapFromGlobal(global_position).x()
+        target_index = sum(
+            1 for other in self.tabs
+            if other is not tab and pointer_x > other.geometry().center().x()
+        )
+        self._move_tab_to(tab, target_index)
+
+    def _update_overflow(self) -> None:
         if self._updating:
             return
         self._updating = True
         try:
             count = len(self.tabs)
-            available = max(0, self.width() - 8)
-            target_width = (
-                available - self.plus_tab.width() - TAB_SPACING * count
+            width_without_controls = max(0, self.width() - 16)
+            preferred_tab_width = (
+                width_without_controls - self.plus_tab.width() - TAB_SPACING * count
             ) // max(1, count)
-            overflow = bool(count and target_width < MIN_TAB_WIDTH)
+            overflow = bool(count and preferred_tab_width < MIN_TAB_WIDTH)
 
             self.btn_left.setVisible(overflow)
             self.btn_right.setVisible(overflow)
@@ -441,42 +570,54 @@ class CustomTabBar(QFrame):
                 self.plus_tab.setParent(self.holder)
                 self.external_plus.hide()
                 self.plus_inside = True
-            width = MIN_TAB_WIDTH if overflow else min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, target_width))
+
+            if overflow:
+                tab_width = MIN_TAB_WIDTH
+            else:
+                available = max(0, self.width() - 16 - self.plus_tab.width() - TAB_SPACING * count)
+                tab_width = min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, available // max(1, count)))
             for tab in self.tabs:
-                tab.setFixedWidth(width)
-            content_width = count * width + TAB_SPACING * max(0, count - 1)
+                tab.setFixedWidth(tab_width)
+
+            content_width = count * tab_width + TAB_SPACING * max(0, count - 1)
             if self.plus_inside:
                 content_width += self.plus_tab.width() + (TAB_SPACING if count else 0)
             self.holder.setMinimumWidth(content_width)
             if overflow:
                 self.scroll.horizontalScrollBar().setPageStep(max(1, self.scroll.viewport().width()))
                 if self.active_index >= 0:
-                    QTimer.singleShot(
-                        0,
-                        lambda index=self.active_index: self.ensure_tab_visible(index),
-                    )
+                    QTimer.singleShot(0, lambda index=self.active_index: self.ensure_tab_visible(index))
         finally:
             self._updating = False
 
-    def resizeEvent(self, event):
+    def eventFilter(self, watched, event) -> bool:
+        if watched in (getattr(self, "scroll", None), getattr(getattr(self, "scroll", None), "viewport", lambda: None)()) and event.type() == QEvent.Type.Wheel:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if delta:
+                self._scroll(-int(delta / 120 * SCROLL_STEP))
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         QTimer.singleShot(0, self._update_overflow)
 
-    def _on_tab_clicked(self, tab: TabButton):
+    def _on_tab_clicked(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.set_active(self.tabs.index(tab))
 
-    def _on_tab_closed(self, tab: TabButton):
+    def _on_tab_closed(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.tab_closed.emit(self.tabs.index(tab))
 
-    def _on_tab_preview_requested(self, tab: TabButton):
+    def _on_tab_preview_requested(self, tab: TabButton) -> None:
         try:
-            idx = self.tabs.index(tab)
+            index = self.tabs.index(tab)
         except ValueError:
             return
-        if idx != self.active_index:
-            self.tab_preview_requested.emit(idx)
+        if index != self.active_index:
+            self.tab_preview_requested.emit(index)
 
 
 class BrowserPage(QWebEnginePage):
@@ -659,6 +800,7 @@ class BrowserWindow(QMainWindow):
         self.tabbar.tab_closed.connect(self.request_close_tab)
         self.tabbar.tab_preview_requested.connect(self._show_tab_preview)
         self.tabbar.tab_context_requested.connect(self._show_tab_context_menu)
+        self.tabbar.tab_reordered.connect(self._move_tab)
 
         self.views: List[QWebEngineView] = []
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
@@ -2565,6 +2707,10 @@ class BrowserWindow(QMainWindow):
             lambda title, v=view, p=page: self._on_title_changed(title, v)
             if self._page_is_current(v, p) else None
         )
+        page.iconChanged.connect(
+            lambda icon, v=view, p=page: self._on_icon_changed(icon, v)
+            if self._page_is_current(v, p) else None
+        )
         page.urlChanged.connect(
             lambda url, v=view, p=page: self._on_view_url_changed(url, v)
             if self._page_is_current(v, p) else None
@@ -2676,6 +2822,24 @@ class BrowserWindow(QMainWindow):
         if index >= 0 and index != self.current_index:
             self._activate(index)
 
+    def _move_tab(self, from_index: int, to_index: int) -> None:
+        """Keep the view order aligned with the visual tab order during drag."""
+        if (
+            from_index < 0 or to_index < 0
+            or from_index >= len(self.views) or to_index >= len(self.views)
+            or from_index == to_index
+        ):
+            return
+        active_view = self.current_view()
+        moved_view = self.views.pop(from_index)
+        self.views.insert(to_index, moved_view)
+        if active_view in self.views:
+            self.current_index = self.views.index(active_view)
+
+    def _on_icon_changed(self, icon: QIcon, view: QWebEngineView) -> None:
+        if view in self.views:
+            self.tabbar.set_icon(self.views.index(view), icon)
+
     def _on_title_changed(self, title: str, view: QWebEngineView):
         if view not in self.views:
             return
@@ -2697,6 +2861,7 @@ class BrowserWindow(QMainWindow):
     def _on_load_started(self, view: QWebEngineView):
         if view not in self.views:
             return
+        self.tabbar.set_loading(self.views.index(view), True)
         placeholder = self._placeholders.get(view)
         if placeholder is not None:
             placeholder._load_error = False
@@ -2728,6 +2893,8 @@ class BrowserWindow(QMainWindow):
             message = (info.errorString() or "").strip()
             if not message:
                 message = "The website could not be reached. Check the connection and try again."
+            if view in self.views:
+                self.tabbar.set_loading(self.views.index(view), False)
             placeholder = self._placeholders.get(view)
             if placeholder is None and view in self.views:
                 # A page can fail after an earlier successful load removed its placeholder.
@@ -2763,6 +2930,8 @@ class BrowserWindow(QMainWindow):
     def _on_load_finished_with_swap(self, ok: bool, view: QWebEngineView, page: QWebEnginePage):
         if not self._page_is_current(view, page):
             return
+        if view in self.views:
+            self.tabbar.set_loading(self.views.index(view), False)
 
         if ok and self._is_dashboard_address(view.url()):
             page.runJavaScript(
