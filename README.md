@@ -11,6 +11,8 @@ This README documents the features present in the source today, how to run them,
 - Navigate with Back, Forward, Reload, Home, and the combined address and search bar.
 - Enter a URL or search phrase in the address bar. Suggestions can use the current profile's browsing history.
 - Open multiple pages in tabs, create a tab with the **+** control in the tab strip, and switch tabs with the mouse or keyboard.
+- Open the customizable ARMA start page at startup and in new tabs by default. It includes a live clock, URL/search field, reorderable shortcuts, bookmarks, recent pages, recently closed tabs, quick notes, and a focus timer.
+- Choose a built-in gradient or import a local dashboard wallpaper. Dashboard appearance, shortcuts, notes, widgets, and timer settings are kept separately for each profile.
 - Hover over an inactive tab to preview it. Resize tab widths to fit the window, then use the tab-strip scroll controls when the window has more tabs than can fit.
 - Right-click a tab to open, reload, duplicate, copy its address, close it, close other tabs, close tabs to its right, or reopen a recently closed tab.
 - Closing the final tab exits the browser when the Downloads panel is closed. ARMA Browser does not restore the previous set of tabs at startup.
@@ -36,6 +38,7 @@ This README documents the features present in the source today, how to run them,
 Settings are scoped to the selected profile. The Settings window includes:
 
 - Homepage, default search URL, and download location.
+- Startup and new-tab page behavior, plus dashboard clock, wallpaper, glass, accent, animation, and widget preferences.
 - Light or dark appearance.
 - History saving, cookie persistence, and private browsing controls.
 - Website compatibility mode, which adjusts the browser user-agent string.
