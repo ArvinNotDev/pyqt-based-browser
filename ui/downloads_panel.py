@@ -32,6 +32,7 @@ class DownloadsPanel(QFrame):
     """A left-side download drawer that keeps its actions beside each item."""
 
     close_requested = Signal()
+    mode_toggle_requested = Signal()
     PANEL_WIDTH = 368
 
     def __init__(self, manager=None, parent=None):
@@ -62,6 +63,13 @@ class DownloadsPanel(QFrame):
         self.close_button.setText("×")
         self.close_button.setToolTip("Close downloads panel")
         self.close_button.setAccessibleName("Close downloads panel")
+        self.mode_button = QToolButton(self)
+        self.mode_button.setObjectName("downloadsModeButton")
+        self.mode_button.setText("Dock")
+        self.mode_button.setToolTip("Keep downloads pinned beside the page")
+        self.mode_button.setAccessibleName("Change downloads panel layout")
+        self.mode_button.clicked.connect(self.mode_toggle_requested.emit)
+        header.addWidget(self.mode_button)
         self.close_button.clicked.connect(self.close_requested.emit)
         header.addWidget(self.close_button)
         root.addLayout(header)
@@ -129,6 +137,14 @@ class DownloadsPanel(QFrame):
 
     def close_panel(self) -> None:
         self._is_open = False
+
+    def set_docked(self, docked: bool) -> None:
+        """Label the one-click action that switches between overlay and split layouts."""
+        self.mode_button.setText("Overlay" if docked else "Dock")
+        self.mode_button.setToolTip(
+            "Show downloads over the page without resizing it"
+            if docked else "Keep downloads pinned beside the page and reserve its width"
+        )
 
     def refresh(self, *_args) -> None:
         while self.list_layout.count() > 0:
@@ -230,7 +246,9 @@ class DownloadsPanel(QFrame):
         actions.addStretch(1)
         primary = QPushButton("Open file" if state == "completed" else "Cancel" if state in _ACTIVE else "Actions", card)
         primary.setObjectName("downloadsPrimaryButton")
-        primary.setEnabled(state == "completed" or state in _ACTIVE)
+        # Terminal records still need the Actions menu (copy URL, show folder,
+        # remove from list, and delete a completed file where applicable).
+        primary.setEnabled(True)
         download_id = download.get("id")
         if state == "completed":
             primary.clicked.connect(lambda _checked=False, current_id=download_id: self._open_file(current_id))
