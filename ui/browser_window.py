@@ -163,6 +163,17 @@ def _is_snap_aligned_geometry(frame: QRect, available: QRect) -> bool:
     return bool(x_aligned and y_aligned and large_enough)
 
 
+class _DownloadsOverlayDismissArea(QFrame):
+    """Transparent click target that dismisses the drawer without obscuring the page."""
+
+    dismissed = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.dismissed.emit()
+        event.accept()
+
+
 class _PageLoadOverlay(QFrame):
     """A small, non-blocking loading HUD attached to its own web page."""
 
