@@ -9,7 +9,7 @@ class CustomTitleBar(QWidget):
         super().__init__(window)
         self.host = window
         self.setObjectName("customTitleBar")
-        self.setFixedHeight(40)
+        self.setFixedHeight(34)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 0, 10, 0)

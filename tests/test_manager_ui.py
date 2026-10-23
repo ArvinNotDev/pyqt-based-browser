@@ -196,42 +196,36 @@ def test_bookmark_activation_is_explicit_and_emits_once_for_keyboard_and_button(
     assert emitted == ["https://example.com"]
 
 
-def test_bookmark_bar_replaces_records_overflows_resizes_and_activates_by_keyboard(qapp):
+def test_bookmark_bar_uses_compact_dropdown_and_activates_saved_bookmarks(qapp):
     bar = BookmarksBar()
-    bar.resize(260, 38)
     bar.show()
+    records = [
+        bookmark(f"id-{i}", f"Bookmark {i}", f"https://example.com/{i}")
+        for i in range(8)
+    ]
+    bar.set_bookmarks(records)
     qapp.processEvents()
-    long_records = [bookmark(f"id-{i}", f"A long bookmark title number {i}", f"https://example.com/{i}") for i in range(8)]
-    bar.set_bookmarks(long_records)
-    qapp.processEvents()
-    assert bar.more_button.isVisible()
-    assert bar._more_menu.actions()
+
+    assert bar.objectName() == "bookmarkMenuButton"
+    assert bar.menu() is bar._more_menu
+    assert len(bar.bookmark_actions) == len(records)
+    assert bar._more_menu.actions()[-1].text() == "Manage bookmarks…"
 
     emitted = []
     bar.url_activated.connect(emitted.append)
-    overflow_action = bar._more_menu.actions()[0]
-    overflow_action.trigger()
-    overflow_url = overflow_action.toolTip()
-    assert emitted == [overflow_url]
-
-    bar.resize(2200, 38)
-    qapp.processEvents()
-    assert not bar.more_button.isVisible()
-    mouse_url = bar._bookmarks[0]["url"]
-    QTest.mouseClick(bar._buttons[0], Qt.LeftButton)
-    assert emitted == [overflow_url, mouse_url]
+    first_action = bar.bookmark_actions[0]
+    first_action.trigger()
+    assert emitted == ["https://example.com/0"]
 
     manage_requests = []
     bar.manage_requested.connect(lambda: manage_requests.append(True))
-    QTest.mouseClick(bar.manage_button, Qt.LeftButton)
+    bar._manage_action.trigger()
     assert manage_requests == [True]
 
     bar.set_bookmarks([bookmark("new", "Updated", "https://updated.example")])
-    qapp.processEvents()
-    assert len(bar._buttons) == 1
-    bar._buttons[0].setFocus()
-    QTest.keyClick(bar._buttons[0], Qt.Key_Space)
-    assert emitted == [overflow_url, mouse_url, "https://updated.example"]
+    assert len(bar.bookmark_actions) == 1
+    bar.bookmark_actions[0].trigger()
+    assert emitted == ["https://example.com/0", "https://updated.example"]
 
     bar.set_bookmarks([])
     assert bar.empty_label.isVisible()
@@ -388,6 +382,6 @@ def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreg
     assert QColor(foreground).isValid() and QColor(background).isValid()
     assert _contrast(foreground, background) >= 4.5
     assert dialog.table.rowCount() == 1
-    assert bar._buttons[0].accessibleName() == "Open bookmark: Example"
+    assert bar.bookmark_actions[0].text() == "Example"
     dialog.close()
     qapp.setStyleSheet("")

@@ -445,19 +445,14 @@ def test_download_toast_keeps_its_own_opacity_animation():
     harness.deleteLater()
     app.processEvents()
 
-def test_bookmarks_bar_visibility_is_scoped_to_dashboard_tabs():
+def test_bookmarks_menu_stays_available_on_every_page():
     bar = Mock()
-    browser = SimpleNamespace(
-        bookmarks_bar=bar,
-        _is_dashboard_address=BrowserWindow._is_dashboard_address,
-        current_view=Mock(return_value=None),
-    )
+    browser = SimpleNamespace(bookmarks_bar=bar)
 
     BrowserWindow._update_bookmarks_bar_visibility(browser, DASHBOARD_URL)
-    bar.setVisible.assert_called_once_with(True)
-
     BrowserWindow._update_bookmarks_bar_visibility(browser, "https://example.test/")
-    assert bar.setVisible.call_args.args == (False,)
+    assert bar.setVisible.call_count == 2
+    assert all(call.args == (True,) for call in bar.setVisible.call_args_list)
 
 
 def test_cache_bypass_reload_is_limited_to_web_pages():

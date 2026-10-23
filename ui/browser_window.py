@@ -78,7 +78,7 @@ except ModuleNotFoundError as exc:
 TAB_WIDTH = 160
 MIN_TAB_WIDTH = 112
 MAX_TAB_WIDTH = 220
-TAB_HEIGHT = 38
+TAB_HEIGHT = 34
 TAB_SPACING = 4
 SCROLL_STEP = 140
 logger = logging.getLogger(__name__)
@@ -554,6 +554,9 @@ class BrowserWindow(QMainWindow):
         self._setup_feature_managers()
 
         self.navbar = NavigationBar(self.settings.profiles_list, settings=self.settings)
+        if self.bookmarks_bar is not None:
+            # Keep bookmarks one click away without reserving a dedicated header row.
+            self.navbar.insertWidget(self.navbar.profile_btn, self.bookmarks_bar)
         self.navbar.history = self.history.history if self.history else {}
         self.navbar.profile_selected.connect(self.on_profile_selected)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
@@ -608,10 +611,6 @@ class BrowserWindow(QMainWindow):
         self.title_bar = CustomTitleBar(self)
         shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self.navbar)
-        if self.bookmarks_bar is not None:
-            # The bookmark strip belongs to the start page, not every website.
-            self.bookmarks_bar.hide()
-            shell_layout.addWidget(self.bookmarks_bar)
         shell_layout.addWidget(self.tabbar)
         shell_layout.addWidget(self.progress_bar)
         self.content_row = QWidget(root)
@@ -1232,17 +1231,13 @@ class BrowserWindow(QMainWindow):
         self._sync_dashboard_tabs()
 
     def _update_bookmarks_bar_visibility(self, value=None) -> None:
-        """Show the compact bookmark strip only while the active tab is the dashboard."""
+        """Keep the bookmark menu available from the browser toolbar on every page."""
         bar = getattr(self, "bookmarks_bar", None)
-        if bar is None:
-            return
-        if value is None:
-            view = self.current_view() if hasattr(self, "current_view") else None
-            value = view.url() if view is not None else None
-        bar.setVisible(self._is_dashboard_address(value))
+        if bar is not None:
+            bar.setVisible(True)
 
     def _show_bookmark_context_menu(self, bookmark: dict, global_pos: QPoint) -> None:
-        """Show bookmark actions for both visible and overflow entries."""
+        """Show actions for a bookmark selected from the toolbar menu."""
         if self.bookmarks_manager is None:
             return
         menu = QMenu(self)

@@ -58,16 +58,16 @@ QToolBar#NavigationBar {
         stop:0 rgba(250,252,255,255), stop:1 rgba(235,241,249,255));
     border: 1px solid rgba(255,255,255,235);
     border-bottom-color: rgba(190,204,224,235);
-    border-radius: 15px;
-    spacing: 5px;
-    padding: 3px 10px;
+    border-radius: 12px;
+    spacing: 4px;
+    padding: 1px 8px;
 }
 QToolBar::separator {
     background: rgba(150,166,190,115);
     width: 1px;
     margin: 8px 5px;
 }
-QToolButton#navigationToolButton, QToolButton#utilityToolButton {
+QToolButton#navigationToolButton, QToolButton#utilityToolButton, QToolButton#bookmarkMenuButton {
     color: #55647a;
     background: transparent;
     border: 1px solid transparent;
@@ -76,16 +76,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
     min-width: 30px;
     min-height: 32px;
 }
-QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover {
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover, QToolButton#bookmarkMenuButton:hover {
     color: #243852;
     background: rgba(207,222,244,190);
     border-color: rgba(177,199,230,185);
 }
-QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed {
+QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed, QToolButton#bookmarkMenuButton:pressed {
     background: rgba(190,211,240,225);
     border-color: rgba(151,180,221,220);
 }
-QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus {
+QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus, QToolButton#bookmarkMenuButton:focus {
     border-color: #6b9ce4;
 }
 QToolButton#navigationToolButton:disabled, QToolButton#utilityToolButton:disabled {
@@ -97,7 +97,7 @@ QLineEdit#urlBar {
     color: #26364c;
     background: rgba(255,255,255,250);
     border: 1px solid rgba(202,214,232,245);
-    border-radius: 19px;
+    border-radius: 10px;
     padding: 4px 15px;
     min-height: 30px;
     selection-color: #ffffff;
@@ -180,17 +180,16 @@ QListWidget#suggestionList::item:selected {
     background: rgba(207,226,252,245);
 }
 QFrame#browserTabBar {
-    background: rgba(220,228,240,220);
-    border: 1px solid rgba(255,255,255,175);
-    border-bottom-color: rgba(195,207,225,220);
-    border-radius: 13px;
+    background: rgba(18,23,31,150);
+    border: 1px solid rgba(255,255,255,32);
+    border-bottom-color: rgba(255,255,255,22);
+    border-radius: 11px;
 }
 QFrame#browserTab {
-    color: #68778b;
-    background: rgba(255,255,255,86);
-    border: 1px solid transparent;
-    border-top: 2px solid transparent;
-    border-radius: 10px;
+    color: #a9b7c9;
+    background: rgba(50,60,75,75);
+    border: 1px solid rgba(255,255,255,24);
+    border-radius: 9px;
 }
 QFrame#browserTab:hover {
     color: #344761;
@@ -198,11 +197,10 @@ QFrame#browserTab:hover {
     border-color: rgba(190,207,232,165);
 }
 QFrame#browserTab[active="true"] {
-    color: #253a56;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(255,255,255,255), stop:1 rgba(247,250,255,255));
-    border: 1px solid rgba(187,205,231,235);
-    border-top: 2px solid #5c94e5;
+    color: #edf4ff;
+    background: rgba(55,66,83,235);
+    border: 1px solid rgba(152,178,214,110);
+    border-top: 2px solid #80b3fb;
 }
 QPushButton#tabPlusButton {
     color: #536782;
@@ -333,16 +331,16 @@ QToolBar#NavigationBar {
         stop:0 rgba(37,45,58,255), stop:1 rgba(27,34,45,255));
     border: 1px solid rgba(255,255,255,38);
     border-bottom-color: rgba(255,255,255,24);
-    border-radius: 15px;
-    spacing: 5px;
-    padding: 3px 10px;
+    border-radius: 12px;
+    spacing: 4px;
+    padding: 1px 8px;
 }
 QToolBar::separator {
     background: rgba(170,184,205,58);
     width: 1px;
     margin: 8px 5px;
 }
-QToolButton#navigationToolButton, QToolButton#utilityToolButton {
+QToolButton#navigationToolButton, QToolButton#utilityToolButton, QToolButton#bookmarkMenuButton {
     color: #bbc7d8;
     background: transparent;
     border: 1px solid transparent;
@@ -351,16 +349,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
     min-width: 30px;
     min-height: 32px;
 }
-QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover {
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover, QToolButton#bookmarkMenuButton:hover {
     color: #f0f5fc;
     background: rgba(100,121,151,92);
     border-color: rgba(155,178,211,72);
 }
-QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed {
+QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed, QToolButton#bookmarkMenuButton:pressed {
     background: rgba(115,143,184,115);
     border-color: rgba(152,182,225,95);
 }
-QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus {
+QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus, QToolButton#bookmarkMenuButton:focus {
     border-color: #7eb1fa;
 }
 QToolButton#navigationToolButton:disabled, QToolButton#utilityToolButton:disabled {
@@ -372,7 +370,7 @@ QLineEdit#urlBar {
     color: #e7edf6;
     background: rgba(15,20,28,248);
     border: 1px solid rgba(112,129,153,135);
-    border-radius: 19px;
+    border-radius: 10px;
     padding: 4px 15px;
     min-height: 30px;
     selection-color: #ffffff;
@@ -456,17 +454,16 @@ QListWidget#suggestionList::item:selected {
     background: rgba(67,102,154,180);
 }
 QFrame#browserTabBar {
-    background: rgba(18,23,31,220);
-    border: 1px solid rgba(255,255,255,25);
-    border-bottom-color: rgba(255,255,255,18);
-    border-radius: 13px;
+    background: rgba(18,23,31,150);
+    border: 1px solid rgba(255,255,255,32);
+    border-bottom-color: rgba(255,255,255,22);
+    border-radius: 11px;
 }
 QFrame#browserTab {
-    color: #99a7ba;
-    background: rgba(50,60,75,88);
-    border: 1px solid transparent;
-    border-top: 2px solid transparent;
-    border-radius: 10px;
+    color: #a9b7c9;
+    background: rgba(50,60,75,75);
+    border: 1px solid rgba(255,255,255,24);
+    border-radius: 9px;
 }
 QFrame#browserTab:hover {
     color: #dbe5f2;
@@ -475,9 +472,8 @@ QFrame#browserTab:hover {
 }
 QFrame#browserTab[active="true"] {
     color: #edf4ff;
-    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-        stop:0 rgba(55,66,83,255), stop:1 rgba(40,50,65,255));
-    border: 1px solid rgba(152,178,214,102);
+    background: rgba(55,66,83,235);
+    border: 1px solid rgba(152,178,214,110);
     border-top: 2px solid #80b3fb;
 }
 QPushButton#tabPlusButton {
@@ -558,3 +554,25 @@ QToolTip {
 """
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]
+
+
+/* Compact toolbar bookmarks popover, instead of a second full-width strip. */
+QToolButton#bookmarkMenuButton {
+    color: #53647c;
+    background: rgba(255,255,255,92);
+    border: 1px solid rgba(255,255,255,120);
+    border-radius: 9px;
+    padding: 3px 8px;
+    min-width: 76px;
+    min-height: 26px;
+}
+QToolButton#bookmarkMenuButton:hover {
+    background: rgba(255,255,255,205);
+    border-color: rgba(192,210,237,190);
+}
+QToolButton#bookmarkMenuButton:pressed { background: rgba(207,226,252,210); }
+QMenu#bookmarksPopupMenu { padding: 6px; }
+QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
+
+QToolButton#bookmarkMenuButton { color: #c7d4e6; background: rgba(50,60,75,145); border-color: rgba(255,255,255,32); }
+QToolButton#bookmarkMenuButton:hover { color: #edf4ff; background: rgba(75,94,123,205); border-color: rgba(130,175,244,110); }
