@@ -4,7 +4,13 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from main import _consume_session, _load_startup_settings, _runtime_arguments, _wait_for_parent_exit
+from main import (
+    _consume_session,
+    _load_startup_settings,
+    _normalize_application_font,
+    _runtime_arguments,
+    _wait_for_parent_exit,
+)
 from managers.profile_manager import Profile
 from ui.settings import Settings
 
@@ -126,6 +132,28 @@ class StartupConfigurationTests(unittest.TestCase):
         self.assertTrue(dialogs[0].executed)
         self.assertEqual(navigation, ["https://saved.example/"])
         self.assertEqual(refreshes, [True])
+
+
+    def test_application_font_normalizer_repairs_unspecified_point_size(self):
+        from PySide6.QtGui import QFont
+
+        class FakeApplication:
+            def __init__(self):
+                self.current_font = QFont()
+
+            def font(self):
+                return self.current_font
+
+            def setFont(self, font):
+                self.current_font = font
+
+        app = FakeApplication()
+        self.assertLessEqual(app.font().pointSize(), 0)
+
+        normalized = _normalize_application_font(app)
+
+        self.assertEqual(normalized.pointSize(), 10)
+        self.assertEqual(app.font().pointSize(), 10)
 
 
 if __name__ == "__main__":
