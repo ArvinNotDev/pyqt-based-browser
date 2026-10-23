@@ -289,6 +289,10 @@ class DownloadsPanel(QFrame):
                 all_records = self._manager.get_downloads()
             except Exception:
                 all_records = []
+        known_ids = {item.get("id") for item in all_records}
+        if self._selected_download_id not in known_ids:
+            self._selected_download_id = all_records[-1].get("id") if all_records else None
+
         records = all_records
         query = self.search.text().strip().casefold()
         if query:
@@ -346,11 +350,6 @@ class DownloadsPanel(QFrame):
         name.setObjectName("downloadFileName")
         name.setFlat(True)
         name.setCursor(Qt.CursorShape.PointingHandCursor)
-        name.setStyleSheet(
-            "QPushButton#downloadFileName { color: palette(text); background: transparent; "
-            "border: none; padding: 0; text-align: left; font-weight: 600; } "
-            "QPushButton#downloadFileName:hover { color: #3984f4; }"
-        )
         name.setToolTip(str(download.get("path", "")))
         name.clicked.connect(lambda _checked=False, current=download: self.select_download(current))
         top.addWidget(name, 1)
