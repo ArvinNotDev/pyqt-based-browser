@@ -582,8 +582,14 @@ class SettingsWindow(QDialog):
         self.hw_accel_checkbox = QCheckBox("Use hardware acceleration (restart required)")
         self.hw_accel_checkbox.setChecked(self.settings.hardware_acceleration)
         card_layout.addWidget(self.hw_accel_checkbox)
+        self.webgpu_checkbox = QCheckBox("Enable WebGPU (restart required)")
+        self.webgpu_checkbox.setChecked(self.settings.webgpu_enabled)
+        self.webgpu_checkbox.setToolTip(
+            "Enable Chromium WebGPU only if your graphics driver can create a WebGPU context."
+        )
+        card_layout.addWidget(self.webgpu_checkbox)
         card_layout.addWidget(
-            self._note("This setting takes effect after the browser restarts. Gaming mode temporarily pauses browser keyboard shortcuts.")
+            self._note("Graphics startup settings take effect after restarting the browser. Disable WebGPU to avoid repeated context-provider errors.")
         )
         card_layout.addStretch(1)
 
@@ -679,6 +685,7 @@ class SettingsWindow(QDialog):
             return
 
         old_hardware_acceleration = self.settings.hardware_acceleration
+        old_webgpu_enabled = self.settings.webgpu_enabled
         candidate = copy.copy(self.settings)
         candidate.homepage = homepage
         candidate.startup_page = str(self.startup_combo.currentData())
@@ -692,6 +699,7 @@ class SettingsWindow(QDialog):
         candidate.save_cookies = self.save_cookies_checkbox.isChecked()
         candidate.private_mode = self.private_mode_checkbox.isChecked()
         candidate.hardware_acceleration = self.hw_accel_checkbox.isChecked()
+        candidate.webgpu_enabled = self.webgpu_checkbox.isChecked()
 
         dashboard_values = None
         if self.dashboard is not None:
@@ -734,12 +742,15 @@ class SettingsWindow(QDialog):
         for name in (
             "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder", "site_compatibility_mode",
             "proxy_panel_visible", "dark_mode",
-            "save_history", "save_cookies", "private_mode", "hardware_acceleration",
+            "save_history", "save_cookies", "private_mode", "hardware_acceleration", "webgpu_enabled",
         ):
             setattr(self.settings, name, getattr(candidate, name))
 
         if old_hardware_acceleration != candidate.hardware_acceleration:
             Settings.configure_hardware_acceleration(candidate.hardware_acceleration)
+            self.restart_required = True
+        if old_webgpu_enabled != candidate.webgpu_enabled:
+            Settings.configure_webgpu(candidate.webgpu_enabled)
             self.restart_required = True
 
         self.accept()

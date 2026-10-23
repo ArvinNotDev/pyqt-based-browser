@@ -2149,8 +2149,8 @@ class BrowserWindow(QMainWindow):
                 allowed_setting_names = {
                     "homepage", "startup_page", "new_tab_page", "default_search_engine",
                     "download_folder", "dark_mode", "private_mode", "save_history",
-                    "save_cookies", "hardware_acceleration", "site_compatibility_mode",
-                    "proxy_panel_visible",
+                    "save_cookies", "hardware_acceleration", "webgpu_enabled",
+                    "site_compatibility_mode", "proxy_panel_visible",
                 }
                 if not isinstance(setting_name, str) or setting_name not in allowed_setting_names:
                     raise ValueError("That browser setting is not supported.")
@@ -2165,6 +2165,7 @@ class BrowserWindow(QMainWindow):
                     "save_history": bool(self.settings.save_history),
                     "save_cookies": bool(self.settings.save_cookies),
                     "hardware_acceleration": bool(self.settings.hardware_acceleration),
+                    "webgpu_enabled": bool(self.settings.webgpu_enabled),
                     "site_compatibility_mode": bool(self.settings.site_compatibility_mode),
                     "proxy_panel_visible": bool(self.settings.proxy_panel_visible),
                 }
@@ -2210,7 +2211,8 @@ class BrowserWindow(QMainWindow):
                 folder = os.path.abspath(os.path.expanduser(folder.strip()))
                 boolean_fields = (
                     "dark_mode", "private_mode", "save_history", "save_cookies",
-                    "hardware_acceleration", "site_compatibility_mode", "proxy_panel_visible",
+                    "hardware_acceleration", "webgpu_enabled",
+                    "site_compatibility_mode", "proxy_panel_visible",
                 )
                 for name in boolean_fields:
                     if type(payload.get(name)) is not bool:
@@ -2241,6 +2243,8 @@ class BrowserWindow(QMainWindow):
 
                 if "hardware_acceleration" in changed_fields:
                     Settings.configure_hardware_acceleration(bool(self.settings.hardware_acceleration))
+                if "webgpu_enabled" in changed_fields:
+                    Settings.configure_webgpu(bool(self.settings.webgpu_enabled))
                 if old_private != bool(self.settings.private_mode):
                     # Private mode changes the QWebEngine profile and its owned managers.
                     # A profile switch is the only preference edit that requires rebuilding them.
@@ -2262,8 +2266,18 @@ class BrowserWindow(QMainWindow):
                     self.apply_theme()
                 elif changed_fields & {"save_history", "private_mode"}:
                     self._sync_dashboard_tabs()
-                if old_hardware != bool(self.settings.hardware_acceleration):
-                    message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
+                if changed_fields & {"hardware_acceleration", "webgpu_enabled"}:
+                    changed_graphics = changed_fields & {"hardware_acceleration", "webgpu_enabled"}
+                    if changed_graphics == {"hardware_acceleration", "webgpu_enabled"}:
+                        message = "Saved. Restart ARMA Browser to apply graphics settings."
+                    elif "webgpu_enabled" in changed_graphics:
+                        message = (
+                            "Saved. Restart ARMA Browser to disable WebGPU context creation."
+                            if not self.settings.webgpu_enabled else
+                            "Saved. Restart ARMA Browser to enable WebGPU."
+                        )
+                    else:
+                        message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
                     self.statusBar().showMessage(message, 6500)
                 else:
                     message = "Setting saved." if incremental_setting else "Browser settings saved."
