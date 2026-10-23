@@ -108,6 +108,8 @@ class TorRunner:
             if is_archive and not os.path.isdir(bundle_dir):
                 try:
                     extract_tar_gz_file(archive, bundle_dir, cancel_event=cancel_event)
+                except InterruptedError:
+                    raise
                 except (OSError, ValueError, tarfile.TarError) as exc:
                     logger.warning("Could not extract Tor bundle (%s)", type(exc).__name__)
                     continue
