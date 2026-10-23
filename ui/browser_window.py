@@ -17,7 +17,7 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QGraphicsOpacityEffect, QGraphicsBlurEffect, QDockWidget, QInputDialog,
+    QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
@@ -83,17 +83,6 @@ TAB_SPACING = 4
 SCROLL_STEP = 140
 logger = logging.getLogger(__name__)
 register_dashboard_scheme()
-
-
-class _DownloadsOverlayTint(QFrame):
-    """Dismiss the downloads overlay when the user clicks outside its drawer."""
-
-    dismissed = Signal()
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.dismissed.emit()
-        event.accept()
 
 
 class TabButton(QFrame):
@@ -623,22 +612,7 @@ class BrowserWindow(QMainWindow):
         self.downloads_panel.mode_toggle_requested.connect(self._toggle_downloads_panel_mode)
         self.downloads_panel.hide()
         self._downloads_panel_mode = "overlay"
-        self._pending_downloads_panel_mode = None
-        self.downloads_overlay_snapshot = QLabel(self.content_row)
-        self.downloads_overlay_snapshot.setObjectName("downloadsOverlaySnapshot")
-        self.downloads_overlay_snapshot.setScaledContents(True)
-        self.downloads_overlay_snapshot.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.downloads_overlay_blur = QGraphicsBlurEffect(self.downloads_overlay_snapshot)
-        self.downloads_overlay_blur.setBlurRadius(10)
-        self.downloads_overlay_snapshot.setGraphicsEffect(self.downloads_overlay_blur)
-        self.downloads_overlay_snapshot.hide()
-        self.downloads_overlay_tint = _DownloadsOverlayTint(self.content_row)
-        self.downloads_overlay_tint.setObjectName("downloadsOverlayTint")
-        self.downloads_overlay_tint.setStyleSheet(
-            "QFrame#downloadsOverlayTint { background: rgba(12, 18, 30, 42); border: none; }"
-        )
-        self.downloads_overlay_tint.dismissed.connect(self._close_downloads_panel)
-        self.downloads_overlay_tint.hide()
+        self._downloads_mode_transitioning = False
         self.downloads_splitter = QSplitter(Qt.Horizontal, self.content_row)
         self.downloads_splitter.setObjectName("downloadsSplitter")
         self.downloads_splitter.setHandleWidth(10)
@@ -874,8 +848,6 @@ class BrowserWindow(QMainWindow):
         self._position_download_toast()
         if getattr(self, "_downloads_panel_mode", "split") == "overlay":
             if getattr(self.downloads_panel, "is_open", False):
-                self.downloads_overlay_snapshot.setGeometry(self.content_row.rect())
-                self.downloads_overlay_tint.setGeometry(self.content_row.rect())
                 self.downloads_panel.setGeometry(
                     self.downloads_panel.x(), 0, self.downloads_panel.width(),
                     max(1, self.content_row.height())
@@ -1385,116 +1357,230 @@ class BrowserWindow(QMainWindow):
             self.new_tab(DASHBOARD_URL)
 
     def _collapse_downloads_splitter(self) -> None:
+        """Give the full content width back to the active website."""
         if not hasattr(self, "downloads_splitter"):
             return
         total = max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())
         self.downloads_splitter.setSizes([0, total])
 
+    def _stop_downloads_panel_animation(self) -> None:
+        animation = self._downloads_splitter_animation
+        if animation is not None:
+            animation.stop()
+            animation.deleteLater()
+            self._downloads_splitter_animation = None
+        self._downloads_splitter_animating = False
+
+    def _downloads_split_target_width(self, available: int) -> int:
+        """Keep the panel useful while preserving as much page width as possible."""
+        available = max(1, int(available))
+        preferred = min(
+            self.downloads_panel.maximumWidth(),
+            max(245, int(self._downloads_panel_width)),
+        )
+        page_reserve = min(280, max(140, available // 3))
+        return max(1, min(preferred, available - 1, available - page_reserve))
+
+    def _animate_downloads_split_width(self, start_width: int, end_width: int, on_finished) -> None:
+        """Animate splitter width without recreating or navigating the active page."""
+        splitter = self.downloads_splitter
+        available = max(2, splitter.width() - splitter.handleWidth())
+        start = max(0, min(int(start_width), available - 1))
+        end = max(0, min(int(end_width), available - 1))
+        self._stop_downloads_panel_animation()
+        self._downloads_splitter_animating = True
+
+        animation = QVariantAnimation(self)
+        animation.setDuration(240)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(start)
+        animation.setEndValue(end)
+
+        def apply_width(value) -> None:
+            width = max(0, min(int(value), available - 1))
+            splitter.setSizes([width, max(1, available - width)])
+
+        def finish() -> None:
+            apply_width(end)
+            self._downloads_splitter_animation = None
+            self._downloads_splitter_animating = False
+            animation.deleteLater()
+            on_finished()
+
+        animation.valueChanged.connect(apply_width)
+        animation.finished.connect(finish)
+        self._downloads_splitter_animation = animation
+        animation.start()
+
+    def _animate_downloads_panel_geometry(self, start_rect: QRect, end_rect: QRect, on_finished) -> None:
+        panel = self.downloads_panel
+        self._stop_downloads_panel_animation()
+        self._downloads_splitter_animating = True
+        animation = QPropertyAnimation(panel, b"geometry", self)
+        animation.setDuration(240)
+        animation.setEasingCurve(QEasingCurve.OutCubic)
+        animation.setStartValue(start_rect)
+        animation.setEndValue(end_rect)
+
+        def finish() -> None:
+            panel.setGeometry(end_rect)
+            self._downloads_splitter_animation = None
+            self._downloads_splitter_animating = False
+            animation.deleteLater()
+            on_finished()
+
+        animation.finished.connect(finish)
+        self._downloads_splitter_animation = animation
+        animation.start()
+
+    def _finish_downloads_mode_transition(self) -> None:
+        self._downloads_mode_transitioning = False
+        self.downloads_panel.mode_button.setEnabled(True)
+        self.downloads_panel.close_button.setEnabled(True)
+
+    def _finish_mode_switch_to_split(self, width: int) -> None:
+        panel = self.downloads_panel
+        panel.setMinimumWidth(245)
+        panel.open()
+        panel.show()
+        self._downloads_panel_width = max(245, int(width))
+        self._finish_downloads_mode_transition()
+
+    def _finish_mode_switch_to_overlay(self, width: int) -> None:
+        """Float the same panel above the full-width page after the split shrinks away."""
+        panel = self.downloads_panel
+        splitter = self.downloads_splitter
+        total = max(1, splitter.width() - splitter.handleWidth())
+        splitter.setSizes([0, total])
+
+        panel.hide()
+        panel.setMinimumWidth(245)
+        panel.setParent(self.content_row)
+        self._downloads_panel_mode = "overlay"
+        panel.set_docked(False)
+        row_height = max(1, self.content_row.height())
+        panel.setGeometry(QRect(-width, 0, width, row_height))
+        panel.open()
+        panel.raise_()
+        self._animate_downloads_panel_geometry(
+            panel.geometry(),
+            QRect(0, 0, width, row_height),
+            self._finish_mode_switch_overlay_animation,
+        )
+
+    def _finish_mode_switch_overlay_animation(self) -> None:
+        self.downloads_panel.raise_()
+        self._finish_downloads_mode_transition()
+
+    def _switch_downloads_panel_mode(self, next_mode: str) -> None:
+        """Switch drawer layout in-place; never close, reload, or replace a browser tab."""
+        if next_mode not in {"overlay", "split"} or next_mode == self._downloads_panel_mode:
+            return
+        if self._downloads_mode_transitioning:
+            return
+
+        panel = self.downloads_panel
+        splitter = self.downloads_splitter
+        self._downloads_mode_transitioning = True
+        panel.mode_button.setEnabled(False)
+        panel.close_button.setEnabled(False)
+        panel.set_docked(next_mode == "split")
+
+        if next_mode == "split":
+            # Reinsert the existing drawer next to the existing view container. The
+            # QWebEngineView and its page object are never touched by this transition.
+            panel.hide()
+            panel.setMinimumWidth(0)
+            if panel.parent() is not splitter:
+                panel.setParent(splitter)
+                splitter.insertWidget(0, panel)
+            self._downloads_panel_mode = "split"
+            available = max(2, splitter.width() - splitter.handleWidth())
+            splitter.setSizes([0, available])
+            panel.open()
+            target = self._downloads_split_target_width(available)
+            self._animate_downloads_split_width(
+                0, target, lambda target_width=target: self._finish_mode_switch_to_split(target_width)
+            )
+            return
+
+        sizes = splitter.sizes()
+        current_width = sizes[0] if sizes else panel.width()
+        available = max(2, splitter.width() - splitter.handleWidth())
+        overlay_width = min(
+            panel.maximumWidth(),
+            max(280, int(self._downloads_panel_width)),
+            max(280, self.content_row.width() - 96),
+        )
+        panel.setMinimumWidth(0)
+        self._animate_downloads_split_width(
+            min(max(0, current_width), available - 1),
+            0,
+            lambda width=overlay_width: self._finish_mode_switch_to_overlay(width),
+        )
+
     def _toggle_downloads_panel_mode(self) -> None:
         next_mode = "split" if self._downloads_panel_mode == "overlay" else "overlay"
         if self.downloads_panel.is_open:
-            self._pending_downloads_panel_mode = next_mode
-            self._animate_downloads_panel(False)
-            return
-        self._downloads_panel_mode = next_mode
-        self.downloads_panel.set_docked(next_mode == "split")
+            self._switch_downloads_panel_mode(next_mode)
+        else:
+            self._downloads_panel_mode = next_mode
+            self.downloads_panel.set_docked(next_mode == "split")
         self.statusBar().showMessage(
             "Downloads will now stay beside the page." if next_mode == "split"
             else "Downloads will now overlay the page.", 2500
         )
 
-    def _prepare_downloads_overlay(self) -> None:
-        row = self.content_row
-        self.downloads_overlay_snapshot.setGeometry(row.rect())
-        self.downloads_overlay_tint.setGeometry(row.rect())
-        view = self.current_view()
-        if view is not None:
-            try:
-                pixmap = view.grab()
-                if not pixmap.isNull():
-                    self.downloads_overlay_snapshot.setPixmap(pixmap)
-            except RuntimeError:
-                logger.debug("Could not capture the page for the downloads overlay", exc_info=True)
-        self.downloads_overlay_snapshot.show()
-        self.downloads_overlay_snapshot.raise_()
-        self.downloads_overlay_tint.show()
-        self.downloads_overlay_tint.raise_()
-
-    def _remove_downloads_overlay(self) -> None:
-        self.downloads_overlay_snapshot.hide()
-        self.downloads_overlay_snapshot.clear()
-        self.downloads_overlay_tint.hide()
-
     def _animate_downloads_overlay(self, opening: bool) -> None:
         panel = self.downloads_panel
         row = self.content_row
-        row_width = max(1, row.width())
         row_height = max(1, row.height())
         panel_width = min(
             panel.maximumWidth(),
-            max(280, self._downloads_panel_width),
-            max(280, row_width - 96),
+            max(280, int(self._downloads_panel_width)),
+            max(280, row.width() - 96),
         )
-
-        current_animation = self._downloads_splitter_animation
-        if current_animation is not None:
-            current_animation.stop()
-            current_animation.deleteLater()
 
         if opening:
             panel.setMinimumWidth(0)
-            # Collapse while the splitter still has both children. Moving the drawer
-            # out first would change its child count and make a two-size collapse
-            # capable of shrinking the lone remaining page view.
+            # Collapse while both splitter children still exist, then float the panel.
+            # The web page is neither captured nor blurred; only the panel's own glass
+            # material is softened.
             self._collapse_downloads_splitter()
             panel.setParent(row)
-            # The page remains full-width; this drawer is composited above a blurred
-            # snapshot, rather than inserted into the page's horizontal layout.
-            self._prepare_downloads_overlay()
             panel.setGeometry(QRect(-panel_width, 0, panel_width, row_height))
             panel.open()
             panel.raise_()
-            start_rect = panel.geometry()
-            end_rect = QRect(0, 0, panel_width, row_height)
+            self._animate_downloads_panel_geometry(
+                panel.geometry(),
+                QRect(0, 0, panel_width, row_height),
+                lambda width=panel_width: self._finish_downloads_panel_animation(True, width),
+            )
         else:
             panel.close_panel()
-            start_rect = panel.geometry()
-            end_rect = QRect(-max(1, start_rect.width()), 0, max(1, start_rect.width()), row_height)
-
-        self._downloads_splitter_animating = True
-        animation = QPropertyAnimation(panel, b"geometry", self)
-        animation.setDuration(250)
-        animation.setEasingCurve(QEasingCurve.OutCubic)
-        animation.setStartValue(start_rect)
-        animation.setEndValue(end_rect)
-        animation.finished.connect(
-            lambda opened=opening, width=panel_width: self._finish_downloads_panel_animation(opened, width)
-        )
-        self._downloads_splitter_animation = animation
-        animation.start()
+            self._animate_downloads_panel_geometry(
+                panel.geometry(),
+                QRect(-max(1, panel.width()), 0, max(1, panel.width()), row_height),
+                lambda width=panel_width: self._finish_downloads_panel_animation(False, width),
+            )
 
     def _animate_downloads_panel(self, opening: bool) -> None:
+        panel = self.downloads_panel
         if self._downloads_panel_mode == "overlay":
-            if opening and self.downloads_panel.is_open:
+            if opening and panel.is_open:
                 return
-            if not opening and not self.downloads_panel.is_open:
+            if not opening and not panel.is_open:
                 return
             self._animate_downloads_overlay(opening)
             return
 
         splitter = self.downloads_splitter
-        panel = self.downloads_panel
         if opening and panel.is_open:
             return
         if not opening and not panel.is_open and splitter.sizes()[0] == 0:
             return
 
-        current_animation = self._downloads_splitter_animation
-        if current_animation is not None:
-            current_animation.stop()
-            current_animation.deleteLater()
-
-        available = max(1, splitter.width() - splitter.handleWidth())
+        available = max(2, splitter.width() - splitter.handleWidth())
         if opening:
             panel.setMinimumWidth(0)
             if panel.parent() is not splitter:
@@ -1502,67 +1588,41 @@ class BrowserWindow(QMainWindow):
                 splitter.insertWidget(0, panel)
             panel.open()
             splitter.setSizes([0, available])
-            start_width = 0
-            target_width = min(
-                panel.maximumWidth(),
-                self._downloads_panel_width,
-                max(245, available - 280),
+            target_width = self._downloads_split_target_width(available)
+            self._animate_downloads_split_width(
+                0, target_width,
+                lambda width=target_width: self._finish_downloads_panel_animation(True, width),
             )
         else:
             panel.close_panel()
             panel.setMinimumWidth(0)
-            start_width = max(0, splitter.sizes()[0])
-            target_width = 0
-
-        self._downloads_splitter_animating = True
-        animation = QVariantAnimation(self)
-        animation.setDuration(250)
-        animation.setEasingCurve(QEasingCurve.OutCubic)
-        animation.setStartValue(start_width)
-        animation.setEndValue(target_width)
-        animation.valueChanged.connect(
-            lambda value: splitter.setSizes([int(value), max(1, available - int(value))])
-        )
-        animation.finished.connect(
-            lambda opened=opening, width=target_width: self._finish_downloads_panel_animation(opened, width)
-        )
-        self._downloads_splitter_animation = animation
-        animation.start()
+            sizes = splitter.sizes()
+            start_width = sizes[0] if sizes else panel.width()
+            self._animate_downloads_split_width(
+                start_width, 0, lambda: self._finish_downloads_panel_animation(False, 0)
+            )
 
     def _finish_downloads_panel_animation(self, opened: bool, width: int) -> None:
-        self._downloads_splitter_animating = False
         panel = self.downloads_panel
         if opened:
             panel.setMinimumWidth(245)
+            panel.open()
             panel.show()
-            self._downloads_panel_width = width
+            self._downloads_panel_width = max(245, int(width))
             if self._downloads_panel_mode == "overlay":
                 panel.setGeometry(QRect(0, 0, width, max(1, self.content_row.height())))
                 panel.raise_()
-            else:
-                self._remove_downloads_overlay()
         else:
             panel.hide()
             if self._downloads_panel_mode == "overlay":
-                self._remove_downloads_overlay()
                 panel.setParent(self.downloads_splitter)
                 self.downloads_splitter.insertWidget(0, panel)
                 panel.setMinimumWidth(0)
-                self.downloads_splitter.setSizes(
-                    [0, max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())]
-                )
-            else:
-                self.downloads_splitter.setSizes(
-                    [0, max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())]
-                )
+            total = max(1, self.downloads_splitter.width() - self.downloads_splitter.handleWidth())
+            self.downloads_splitter.setSizes([0, total])
             panel.setMinimumWidth(245)
         self._downloads_splitter_animation = None
-        pending_mode = self._pending_downloads_panel_mode if not opened else None
-        if pending_mode is not None:
-            self._pending_downloads_panel_mode = None
-            self._downloads_panel_mode = pending_mode
-            panel.set_docked(pending_mode == "split")
-            QTimer.singleShot(0, lambda: self._animate_downloads_panel(True))
+        self._downloads_splitter_animating = False
 
     def _on_downloads_splitter_moved(self, _position: int, _index: int) -> None:
         if self._downloads_splitter_animating:
