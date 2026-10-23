@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>ARMA Start</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <div class="wallpaper" aria-hidden="true"></div>
+  <div class="shade" aria-hidden="true"></div>
+  <main class="page">
+    <header class="topline">
+      <div><div id="greeting" class="greeting"></div><div id="date" class="date"></div></div>
+      <button id="customize" class="glass-icon" title="Customize dashboard" aria-label="Customize dashboard">⚙</button>
+    </header>
+
+    <section class="hero">
+      <div id="clock" class="clock" aria-live="off"></div>
+      <form id="search-form" class="search glass">
+        <span class="search-mark" aria-hidden="true">⌕</span>
+        <input id="search-input" type="search" placeholder="Search or enter an address" autocomplete="off" aria-label="Search or enter an address">
+        <select id="search-engine" aria-label="Search engine" title="Search engine"></select>
+        <button type="button" id="clear-search" class="clear-search" aria-label="Clear search">×</button>
+        <button class="search-submit" type="submit" aria-label="Search">↵</button>
+      </form>
+      <div class="hint">Press <kbd>Ctrl</kbd> + <kbd>K</kbd> to search</div>
+    </section>
+
+    <section class="section speed-section">
+      <div class="section-heading"><div><h2>Shortcuts</h2><p>Your favorite places, one click away.</p></div><button id="add-shortcut" class="text-button">＋ Add shortcut</button></div>
+      <div id="shortcuts" class="shortcut-grid"></div>
+    </section>
+
+    <section class="lower-grid">
+      <section id="bookmarks-widget" class="panel glass widget">
+        <div class="panel-heading"><div><h2>Bookmarks</h2><p>Saved for later</p></div><span class="panel-icon">✦</span></div>
+        <div id="bookmarks" class="link-list"></div>
+      </section>
+      <section id="recent-widget" class="panel glass widget">
+        <div class="panel-heading"><div><h2>Recently visited</h2><p>Pick up where you left off</p></div><span class="panel-icon">↗</span></div>
+        <div id="recent" class="link-list"></div>
+      </section>
+      <section id="closed-widget" class="panel glass widget">
+        <div class="panel-heading"><div><h2>Recently closed</h2><p>From this session</p></div><span class="panel-icon">◷</span></div>
+        <div id="closed" class="link-list"></div>
+      </section>
+      <section id="notes-widget" class="panel glass widget">
+        <div class="panel-heading"><div><h2>Quick notes</h2><p>Saved automatically</p></div><button id="add-note" class="text-button" type="button">＋ Add note</button></div>
+        <textarea id="notes" maxlength="10000" placeholder="A thought to keep…" aria-label="Quick notes"></textarea>
+        <div id="quick-notes" class="quick-notes" aria-label="Additional quick notes"></div>
+      </section>
+      <section id="focus-widget" class="panel glass widget focus-widget">
+        <div class="panel-heading"><div><h2>Focus</h2><p id="focus-mode">A little time, well spent.</p></div><span class="panel-icon">◉</span></div>
+        <div class="focus-row"><div id="focus-clock" class="focus-clock">25:00</div><div class="focus-actions"><button id="focus-minus" class="quiet-button" type="button" aria-label="Reduce focus duration by five minutes">−5</button><button id="focus-plus" class="quiet-button" type="button" aria-label="Add five minutes to focus duration">＋5</button><button id="focus-start" class="pill-button" type="button">Start</button><button id="focus-reset" class="quiet-button" type="button" title="Reset timer">↺</button></div></div>
+        <div id="focus-progress" class="focus-progress" role="progressbar" aria-label="Focus session progress" aria-valuemin="0" aria-valuemax="100"><span id="focus-progress-fill"></span></div>
+      </section>
+    </section>
+    <footer><span>ARMA Browser</span><span>Your start page, your space.</span></footer>
+  </main>
+
+  <dialog id="edit-dialog" class="modal glass">
+    <form id="shortcut-form" method="dialog">
+      <div class="modal-title"><div><h2 id="shortcut-dialog-title">Add shortcut</h2><p>Choose a name and website address.</p></div><button type="button" class="close-modal" data-close aria-label="Close">×</button></div>
+      <label>Title<input id="shortcut-title" maxlength="80" required autocomplete="off"></label>
+      <label>Website address<input id="shortcut-url" type="url" placeholder="https://example.com" required autocomplete="url"></label>
+      <div class="modal-actions"><button type="button" class="quiet-button" data-close>Cancel</button><button class="pill-button" type="submit">Save shortcut</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="customize-dialog" class="modal customize-modal glass">
+    <div class="modal-title"><div><h2>Make it yours</h2><p>Fine tune the feel of your start page.</p></div><button type="button" class="close-modal" data-close aria-label="Close">×</button></div>
+    <div class="customize-scroll">
+      <section class="custom-group"><h3>Wallpaper</h3><div id="wallpaper-options" class="wallpaper-options"></div><div class="custom-actions"><button id="import-wallpaper" class="quiet-button" type="button">＋ Choose an image…</button><button id="cycle-wallpaper" class="quiet-button" type="button">↻ Next wallpaper</button><button id="reset-wallpaper" class="quiet-button" type="button">Restore default</button></div><label class="range-label">Wallpaper dimming <input id="overlay-range" type="range" min="0" max="70" step="1"><output id="overlay-value"></output></label><label class="range-label">Soft focus <input id="blur-range" type="range" min="0" max="12" step="1"><output id="blur-value"></output></label></section>
+      <section class="custom-group"><h3>Glass &amp; accent</h3><label class="range-label">Glass intensity <input id="glass-range" type="range" min="20" max="90" step="1"><output id="glass-value"></output></label><div class="color-row"><span>Accent color</span><input id="accent-color" type="color" aria-label="Accent color"></div><label class="check-row"><input id="animations-check" type="checkbox"> Subtle motion</label><label class="check-row"><input id="compact-check" type="checkbox"> Compact shortcut layout</label></section>
+      <section class="custom-group"><h3>Dashboard widgets</h3><div class="widget-options"><label><input type="checkbox" data-widget="bookmarks"> Bookmarks</label><label><input type="checkbox" data-widget="recent"> Recently visited</label><label><input type="checkbox" data-widget="closed"> Recently closed</label><label><input type="checkbox" data-widget="notes"> Quick notes</label><label><input type="checkbox" data-widget="focus"> Focus timer</label></div></section>
+      <section class="custom-group"><h3>Clock</h3><div class="clock-options"><label><input name="clock-format" type="radio" value="24"> 24-hour</label><label><input name="clock-format" type="radio" value="12"> 12-hour</label></div><label class="check-row"><input id="seconds-check" type="checkbox"> Show seconds</label></section>
+      <section class="custom-group"><h3>Focus timer lengths</h3><label class="range-label">Focus minutes <input id="focus-range" type="range" min="1" max="180" step="1"><output id="focus-value"></output></label><label class="range-label">Break minutes <input id="break-range" type="range" min="1" max="60" step="1"><output id="break-value"></output></label><p class="custom-hint">Adjust a running or upcoming focus session with the −5 and +5 buttons.</p></section>
+    </div>
+    <div class="modal-actions"><button id="reset-preferences" type="button" class="quiet-button">Reset preferences</button><span class="spacer"></span><button type="button" class="pill-button" data-close>Done</button></div>
+  </dialog>
+  <div id="toast" role="status" class="toast"></div>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script>window.armaBootstrap = {{DASHBOARD_STATE}};</script>
+  <script src="dashboard.js"></script>
+</body>
+</html>
