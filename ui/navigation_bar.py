@@ -6,8 +6,10 @@ import json
 import logging
 import os
 
+import qtawesome as qta
+
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QObject, Signal
-from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QFont, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -25,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
-from app_paths import resource_path, user_data_path
+from app_paths import user_data_path
 
 from .profile_dialog import CustomizeProfile
 from .settings import Settings
@@ -124,19 +126,19 @@ class NavigationBar(QToolBar):
         self.suggestion_list: QListWidget | None = None
         self._popup_filter: _SuggestionPopupFilter | None = None
 
-        icon_path = resource_path("assets", "icons")
-        self.back_btn = self._action("Back", os.path.join(icon_path, "back.png"))
-        self.forward_btn = self._action("Forward", os.path.join(icon_path, "forward.png"))
-        self.reload_btn = self._action("Reload", os.path.join(icon_path, "reload.png"))
-        self.home_btn = self._action("Home", os.path.join(icon_path, "home.png"))
-        self.settings_btn = self._action("Settings", os.path.join(icon_path, "settings.png"))
-        self._navigation_icon_paths = {
-            self.back_btn: os.path.join(icon_path, "back.png"),
-            self.forward_btn: os.path.join(icon_path, "forward.png"),
-            self.reload_btn: os.path.join(icon_path, "reload.png"),
-            self.home_btn: os.path.join(icon_path, "home.png"),
-            self.settings_btn: os.path.join(icon_path, "settings.png"),
-        }
+        self._navigation_icon_names = {}
+        self.back_btn = self._action("Back", "fa5s.arrow-left")
+        self.forward_btn = self._action("Forward", "fa5s.arrow-right")
+        self.reload_btn = self._action("Reload", "fa5s.redo")
+        self.home_btn = self._action("Home", "fa5s.home")
+        self.settings_btn = self._action("Settings", "fa5s.cog")
+        self._navigation_icon_names.update({
+            self.back_btn: "fa5s.arrow-left",
+            self.forward_btn: "fa5s.arrow-right",
+            self.reload_btn: "fa5s.redo",
+            self.home_btn: "fa5s.home",
+            self.settings_btn: "fa5s.cog",
+        })
 
         for action in (self.back_btn, self.forward_btn, self.reload_btn, self.home_btn):
             self._add_styled_action(action)
@@ -163,13 +165,18 @@ class NavigationBar(QToolBar):
         self.url_bar.textEdited.connect(self._on_url_typed)
         self.url_bar.editingFinished.connect(self._close_suggestion_popup)
 
-        self.bookmark_btn = self._button("☆", "Bookmark this page", "utilityToolButton")
+        self._bookmark_active = False
+        self.bookmark_btn = self._button("", "Bookmark this page", "utilityToolButton")
+        self.bookmark_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.bookmark_btn.setIcon(self._awesome_icon("fa5.star"))
+        self.bookmark_btn.setIconSize(QSize(18, 18))
         self.bookmark_btn.setAccessibleName("Bookmark this page")
         self.bookmark_btn.clicked.connect(self.bookmark_requested.emit)
         self._add_widget(self.bookmark_btn)
 
         self.addSeparator()
-        self.profile_btn = self._action("Profiles", os.path.join(icon_path, "profile.png"))
+        self.profile_btn = self._action("Profiles", "fa5s.user-circle")
+        self._navigation_icon_names[self.profile_btn] = "fa5s.user-circle"
         self.profile_btn.setToolTip("Choose or customize a profile")
         self._add_styled_action(self.profile_btn)
         self.profile_menu = QMenu(self)
@@ -178,10 +185,10 @@ class NavigationBar(QToolBar):
         self._populate_profile_menu()
 
         self.browser_menu = QMenu(self)
-        self.new_tab_action = QAction("New tab", self)
+        self.new_tab_action = QAction(self._awesome_icon("fa5s.plus"), "New tab", self)
         self.new_tab_action.triggered.connect(self.new_tab_requested.emit)
         self.browser_menu.addAction(self.new_tab_action)
-        self.reload_bypass_cache_action = QAction("Reload without cache", self)
+        self.reload_bypass_cache_action = QAction(self._awesome_icon("fa5s.redo"), "Reload without cache", self)
         self.reload_bypass_cache_action.setToolTip(
             "Reload the current page while bypassing the local HTTP cache (Ctrl+Shift+R)"
         )
@@ -189,25 +196,25 @@ class NavigationBar(QToolBar):
         self.browser_menu.addAction(self.reload_bypass_cache_action)
         self.browser_menu.addSeparator()
 
-        self.bookmark_action = QAction("Bookmark this page", self)
+        self.bookmark_action = QAction(self._awesome_icon("fa5s.bookmark"), "Bookmark this page", self)
         self.bookmark_action.triggered.connect(self.bookmark_requested.emit)
         self.browser_menu.addAction(self.bookmark_action)
-        self.show_bookmarks_action = QAction("Bookmarks", self)
+        self.show_bookmarks_action = QAction(self._awesome_icon("fa5s.bookmark"), "Bookmarks", self)
         self.show_bookmarks_action.triggered.connect(self.show_bookmarks_requested.emit)
         self.browser_menu.addAction(self.show_bookmarks_action)
-        self.show_history_action = QAction("History", self)
+        self.show_history_action = QAction(self._awesome_icon("fa5s.history"), "History", self)
         self.show_history_action.triggered.connect(self.show_history_requested.emit)
         self.browser_menu.addAction(self.show_history_action)
-        self.show_downloads_action = QAction("Downloads", self)
+        self.show_downloads_action = QAction(self._awesome_icon("fa5s.download"), "Downloads", self)
         self.show_downloads_action.triggered.connect(self.show_downloads_requested.emit)
         self.browser_menu.addAction(self.show_downloads_action)
-        self.open_external_action = QAction("Open in default browser", self)
+        self.open_external_action = QAction(self._awesome_icon("fa5s.external-link-alt"), "Open in default browser", self)
         self.open_external_action.triggered.connect(self.open_external_requested.emit)
         self.browser_menu.addAction(self.open_external_action)
-        self.proxy_panel_action = QAction("Proxy panel", self)
+        self.proxy_panel_action = QAction(self._awesome_icon("fa5s.shield-alt"), "Proxy panel", self)
         self.proxy_panel_action.triggered.connect(self.proxy_panel_requested.emit)
         self.browser_menu.addAction(self.proxy_panel_action)
-        self.site_connection_action = QAction("Connect directly for this site", self)
+        self.site_connection_action = QAction(self._awesome_icon("fa5s.link"), "Connect directly for this site", self)
         self.site_connection_action.setCheckable(True)
         self.site_connection_action.setToolTip(
             "Bypass ARMA's Tor route for this host and reload without cache. "
@@ -216,13 +223,26 @@ class NavigationBar(QToolBar):
         self.site_connection_action.toggled.connect(self.site_connection_toggled.emit)
         self.browser_menu.addAction(self.site_connection_action)
         self.browser_menu.addSeparator()
-        self.gaming_mode_action = QAction("Gaming mode", self)
+        self.gaming_mode_action = QAction(self._awesome_icon("fa5s.gamepad"), "Gaming mode", self)
         self.gaming_mode_action.setCheckable(True)
         self.gaming_mode_action.toggled.connect(self.gaming_mode_toggled.emit)
         self.browser_menu.addAction(self.gaming_mode_action)
         self.browser_menu.addSeparator()
         self.settings_btn.triggered.connect(self._close_suggestion_popup)
         self.browser_menu.addAction(self.settings_btn)
+        self._browser_menu_icon_names = {
+            self.new_tab_action: "fa5s.plus",
+            self.reload_bypass_cache_action: "fa5s.redo",
+            self.bookmark_action: "fa5s.bookmark",
+            self.show_bookmarks_action: "fa5s.bookmark",
+            self.show_history_action: "fa5s.history",
+            self.show_downloads_action: "fa5s.download",
+            self.open_external_action: "fa5s.external-link-alt",
+            self.proxy_panel_action: "fa5s.shield-alt",
+            self.site_connection_action: "fa5s.link",
+            self.gaming_mode_action: "fa5s.gamepad",
+            self.settings_btn: "fa5s.cog",
+        }
 
         self.menu_button = QToolButton(self)
         self.menu_button.setObjectName("menuButton")
@@ -245,8 +265,11 @@ class NavigationBar(QToolBar):
         self._install_popup_event_filter()
 
     def set_bookmark_state(self, bookmarked: bool) -> None:
-        """Keep the star and menu label in sync with the current page."""
-        self.bookmark_btn.setText("★" if bookmarked else "☆")
+        """Keep the vector star and menu label in sync with the current page."""
+        self._bookmark_active = bool(bookmarked)
+        self.bookmark_btn.setIcon(
+            self._awesome_icon("fa5s.star" if self._bookmark_active else "fa5.star")
+        )
         label = "Remove bookmark" if bookmarked else "Bookmark this page"
         self.bookmark_btn.setToolTip(label)
         self.bookmark_btn.setAccessibleName(label)
@@ -260,8 +283,14 @@ class NavigationBar(QToolBar):
         action.setChecked(bool(direct))
         action.blockSignals(False)
 
-    def _action(self, label: str, icon_path: str) -> QAction:
-        action = QAction(QIcon(icon_path), label, self)
+    def _icon_color(self) -> str:
+        return "#c7d4e6" if getattr(self.settings, "dark_mode", False) else "#465366"
+
+    def _awesome_icon(self, name: str) -> QIcon:
+        return qta.icon(name, color=self._icon_color())
+
+    def _action(self, label: str, icon_name: str) -> QAction:
+        action = QAction(self._awesome_icon(icon_name), label, self)
         action.setToolTip(label)
         action.setStatusTip(label)
         return action
@@ -415,47 +444,20 @@ class NavigationBar(QToolBar):
         needle = (text or "").casefold()
         return [value for value in self.history if isinstance(value, str) and needle in value.casefold()]
 
-    @staticmethod
-    def _menu_dots_icon(color: str) -> QIcon:
-        """Draw the overflow glyph geometrically so its alignment is font-independent."""
-        pixmap = QPixmap(24, 24)
-        pixmap.fill(Qt.transparent)
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.Antialiasing, True)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(color))
-        for top in (4, 10, 16):
-            painter.drawEllipse(10, top, 4, 4)
-        painter.end()
-        return QIcon(pixmap)
-
     def apply_theme(self):
         dark = bool(getattr(self.settings, "dark_mode", False))
-        theme = dark_theme if dark else light_theme
-        self.setStyleSheet(theme)
-        self.menu_button.setIcon(
-            self._menu_dots_icon("#d6dfed" if dark else "#465366")
-        )
+        self.setStyleSheet(dark_theme if dark else light_theme)
+        self.menu_button.setIcon(self._awesome_icon("fa5s.ellipsis-v"))
         self.menu_button.setIconSize(QSize(18, 18))
-        if dark:
-            for action, path in self._navigation_icon_paths.items():
-                action.setIcon(self._tinted_icon(path, "#c7ced8"))
-        else:
-            for action, path in self._navigation_icon_paths.items():
-                action.setIcon(QIcon(path))
+        for action, icon_name in self._navigation_icon_names.items():
+            action.setIcon(self._awesome_icon(icon_name))
+        for action, icon_name in self._browser_menu_icon_names.items():
+            action.setIcon(self._awesome_icon(icon_name))
+        self.bookmark_btn.setIcon(
+            self._awesome_icon("fa5s.star" if self._bookmark_active else "fa5.star")
+        )
         self._refresh_profile_icon()
         self._close_suggestion_popup()
-
-    @staticmethod
-    def _tinted_icon(path: str, color: str) -> QIcon:
-        pixmap = QPixmap(path)
-        if pixmap.isNull():
-            return QIcon(path)
-        painter = QPainter(pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(pixmap.rect(), QColor(color))
-        painter.end()
-        return QIcon(pixmap)
 
     def set_dark_mode(self, dark: bool):
         self.settings.dark_mode = bool(dark)
@@ -498,19 +500,9 @@ class NavigationBar(QToolBar):
 
     def _refresh_profile_icon(self):
         image_path = self._profile_image_path(self.profile)
-        if os.path.isfile(image_path):
-            icon = QIcon(image_path)
-        elif getattr(self.settings, "dark_mode", False):
-            icon = self._tinted_icon(resource_path("assets", "icons", "profile.png"), "#c7ced8")
-        else:
-            icon = QIcon(resource_path("assets", "icons", "profile.png"))
+        icon = QIcon(image_path) if os.path.isfile(image_path) else QIcon()
         if icon.isNull():
-            default_path = resource_path("assets", "icons", "profile.png")
-            icon = (
-                self._tinted_icon(default_path, "#c7ced8")
-                if getattr(self.settings, "dark_mode", False)
-                else QIcon(default_path)
-            )
+            icon = self._awesome_icon("fa5s.user-circle")
         self.profile_btn.setIcon(icon)
 
     def _populate_profile_menu(self, selected_profile: str | None = None):
@@ -525,14 +517,15 @@ class NavigationBar(QToolBar):
             action = QAction(profile_name, self.profile_menu)
             action.setCheckable(True)
             action.setChecked(profile_name == self.profile)
+            action.setIcon(self._awesome_icon("fa5s.user"))
             action.triggered.connect(lambda checked=False, name=profile_name: self.profile_selected.emit(name))
             self.profile_menu.addAction(action)
 
         self.profile_menu.addSeparator()
-        customize = QAction("Customize profile…", self.profile_menu)
+        customize = QAction(self._awesome_icon("fa5s.user-cog"), "Customize profile…", self.profile_menu)
         customize.triggered.connect(self._customize_profile)
         self.profile_menu.addAction(customize)
-        add_profile = QAction("Add profile…", self.profile_menu)
+        add_profile = QAction(self._awesome_icon("fa5s.user-plus"), "Add profile…", self.profile_menu)
         add_profile.triggered.connect(self._add_new_profile)
         self.profile_menu.addAction(add_profile)
 

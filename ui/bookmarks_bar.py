@@ -2,8 +2,10 @@
 
 import logging
 
-from PySide6.QtCore import QPoint, Qt, Signal
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
 from PySide6.QtWidgets import QMenu, QToolButton
+
+import qtawesome as qta
 
 from ._manager_ui import normalize_bookmark
 
@@ -37,7 +39,9 @@ class BookmarksBar(QToolButton):
         super().__init__(parent)
         self.setObjectName("bookmarkMenuButton")
         self.setText("Bookmarks")
-        self.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(14, 14))
+        self.setIcon(qta.icon("fa5s.bookmark", color="#53647c"))
         self.setFixedHeight(30)
         self.setMinimumWidth(86)
         self.setMaximumWidth(112)
@@ -83,7 +87,7 @@ class BookmarksBar(QToolButton):
 
             normalized = dict(normalized)
             self._bookmarks.append(normalized)
-            action = self._more_menu.addAction(normalized["title"])
+            action = self._more_menu.addAction(qta.icon("fa5s.bookmark", color="#53647c"), normalized["title"])
             action.setToolTip(normalized["url"])
             action.setStatusTip(normalized["url"])
             action.setData(normalized)
@@ -93,11 +97,15 @@ class BookmarksBar(QToolButton):
             self._bookmark_actions.append(action)
 
         if not self._bookmarks:
-            empty_action = self._more_menu.addAction("No bookmarks yet")
+            empty_action = self._more_menu.addAction(
+                qta.icon("fa5s.bookmark", color="#8c99ab"), "No bookmarks yet"
+            )
             empty_action.setEnabled(False)
 
         self._more_menu.addSeparator()
-        self._manage_action = self._more_menu.addAction("Manage bookmarks…")
+        self._manage_action = self._more_menu.addAction(
+            qta.icon("fa5s.list", color="#53647c"), "Manage bookmarks…"
+        )
         self._manage_action.setToolTip("Open the bookmark manager")
         self._manage_action.triggered.connect(
             lambda checked=False: self.manage_requested.emit()
@@ -112,3 +120,15 @@ class BookmarksBar(QToolButton):
     def bookmark_actions(self):
         """Return current bookmark actions for accessibility and UI tests."""
         return tuple(self._bookmark_actions)
+
+    def apply_icon_theme(self, dark: bool) -> None:
+        """Tint menu icons to maintain contrast in either browser theme."""
+        color = "#c7d4e6" if dark else "#53647c"
+        self.setIcon(qta.icon("fa5s.bookmark", color=color))
+        for action in self._bookmark_actions:
+            action.setIcon(qta.icon("fa5s.bookmark", color=color))
+        if not self._bookmarks:
+            for action in self._more_menu.actions():
+                if action.text() == "No bookmarks yet":
+                    action.setIcon(qta.icon("fa5s.bookmark", color="#8492a6"))
+        self._manage_action.setIcon(qta.icon("fa5s.list", color=color))

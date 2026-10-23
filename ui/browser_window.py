@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QPropertyAnimation, QProcess,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QSize, QPropertyAnimation, QProcess,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
@@ -25,6 +25,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from PySide6.QtWebChannel import QWebChannel
+
+import qtawesome as qta
 
 from .settings import Settings
 from .navigation_bar import NavigationBar
@@ -122,8 +124,10 @@ class TabButton(QFrame):
         self.label.setMinimumWidth(0)
         self.label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
 
-        self.close_btn = QPushButton("×")
+        self.close_btn = QPushButton()
         self.close_btn.setObjectName("tabCloseButton")
+        self.close_btn.setIcon(qta.icon("fa5s.times", color="#8592a5"))
+        self.close_btn.setIconSize(QSize(10, 10))
         self.close_btn.setFixedSize(18, 18)
         self.close_btn.setFocusPolicy(Qt.NoFocus)
         self.close_btn.setToolTip("Close tab")
@@ -141,6 +145,10 @@ class TabButton(QFrame):
         self._hover_timer.timeout.connect(self._emit_preview)
 
         self.set_active(False)
+
+    def apply_icon_theme(self, dark: bool) -> None:
+        color = "#a9b7c9" if dark else "#68778b"
+        self.close_btn.setIcon(qta.icon("fa5s.times", color=color))
 
     def _emit_preview(self):
         self.requested_preview.emit()
@@ -206,13 +214,20 @@ class CustomTabBar(QFrame):
         root.setContentsMargins(4, 2, 4, 2)
         root.setSpacing(0)
 
-        self.btn_left = QPushButton("◀")
+        self._dark_mode = False
+        self.btn_left = QPushButton()
+        self.btn_left.setObjectName("tabScrollButton")
+        self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color="#68778b"))
+        self.btn_left.setIconSize(QSize(11, 11))
         self.btn_left.setFixedSize(26, TAB_HEIGHT)
         self.btn_left.setFocusPolicy(Qt.NoFocus)
         self.btn_left.clicked.connect(lambda: self._scroll(-SCROLL_STEP))
         self.btn_left.hide()
 
-        self.btn_right = QPushButton("▶")
+        self.btn_right = QPushButton()
+        self.btn_right.setObjectName("tabScrollButton")
+        self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color="#68778b"))
+        self.btn_right.setIconSize(QSize(11, 11))
         self.btn_right.setFixedSize(26, TAB_HEIGHT)
         self.btn_right.setFocusPolicy(Qt.NoFocus)
         self.btn_right.clicked.connect(lambda: self._scroll(SCROLL_STEP))
@@ -233,16 +248,20 @@ class CustomTabBar(QFrame):
         self.scroll.setFixedHeight(TAB_HEIGHT)
         self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        self.plus_tab = QPushButton("+")
+        self.plus_tab = QPushButton()
         self.plus_tab.setObjectName("tabPlusButton")
+        self.plus_tab.setIcon(qta.icon("fa5s.plus", color="#536782"))
+        self.plus_tab.setIconSize(QSize(13, 13))
         self.plus_tab.setFixedSize(38, TAB_HEIGHT)
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.setFocusPolicy(Qt.NoFocus)
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.clicked.connect(lambda: self.new_tab_requested.emit())
 
-        self.external_plus = QPushButton("+")
+        self.external_plus = QPushButton()
         self.external_plus.setObjectName("tabPlusButton")
+        self.external_plus.setIcon(qta.icon("fa5s.plus", color="#536782"))
+        self.external_plus.setIconSize(QSize(13, 13))
         self.external_plus.setFixedSize(38, TAB_HEIGHT)
         self.external_plus.setFocusPolicy(Qt.NoFocus)
         self.external_plus.setToolTip("New tab")
@@ -256,8 +275,20 @@ class CustomTabBar(QFrame):
         root.addWidget(self.btn_right)
         root.addWidget(self.external_plus)
 
+    def apply_icon_theme(self, dark: bool) -> None:
+        self._dark_mode = bool(dark)
+        color = "#a9b7c9" if self._dark_mode else "#68778b"
+        self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color=color))
+        self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color=color))
+        plus_color = "#a9b8cc" if self._dark_mode else "#536782"
+        self.plus_tab.setIcon(qta.icon("fa5s.plus", color=plus_color))
+        self.external_plus.setIcon(qta.icon("fa5s.plus", color=plus_color))
+        for tab in self.tabs:
+            tab.apply_icon_theme(self._dark_mode)
+
     def add_tab(self, title: str = "New Tab", make_active: bool = True) -> int:
         tab = TabButton(title)
+        tab.apply_icon_theme(self._dark_mode)
         tab.clicked.connect(lambda t=tab: self._on_tab_clicked(t))
         tab.closed.connect(lambda t=tab: self._on_tab_closed(t))
         tab.requested_preview.connect(lambda t=tab: self._on_tab_preview_requested(t))
@@ -2559,6 +2590,13 @@ class BrowserWindow(QMainWindow):
             self.setStyleSheet(theme)
             if hasattr(self.navbar, "apply_theme"):
                 self.navbar.apply_theme()
+            dark = bool(getattr(self.settings, "dark_mode", False))
+            if hasattr(self, "tabbar"):
+                self.tabbar.apply_icon_theme(dark)
+            if hasattr(self, "title_bar"):
+                self.title_bar.apply_icon_theme(dark)
+            if getattr(self, "bookmarks_bar", None) is not None:
+                self.bookmarks_bar.apply_icon_theme(dark)
             self._sync_dashboard_tabs()
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")

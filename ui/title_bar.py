@@ -1,7 +1,9 @@
 """Custom, draggable title bar for the frameless browser window."""
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
+
+import qtawesome as qta
 
 
 class CustomTitleBar(QWidget):
@@ -28,9 +30,9 @@ class CustomTitleBar(QWidget):
         layout.addWidget(self.title)
         layout.addStretch(1)
 
-        self.minimize_button = self._button("—", "Minimize", "windowMinimizeButton")
-        self.maximize_button = self._button("□", "Maximize", "windowMaximizeButton")
-        self.close_button = self._button("×", "Close", "windowCloseButton")
+        self.minimize_button = self._button("Minimize", "windowMinimizeButton", "fa5s.minus")
+        self.maximize_button = self._button("Maximize", "windowMaximizeButton", "fa5s.window-maximize")
+        self.close_button = self._button("Close", "windowCloseButton", "fa5s.times")
         layout.addWidget(self.minimize_button)
         layout.addWidget(self.maximize_button)
         layout.addWidget(self.close_button)
@@ -40,10 +42,12 @@ class CustomTitleBar(QWidget):
         self.close_button.clicked.connect(window.close)
         self.sync_maximize_button()
 
-    def _button(self, text, tooltip, object_name):
+    def _button(self, tooltip, object_name, icon_name):
         button = QToolButton(self)
         button.setObjectName(object_name)
-        button.setText(text)
+        button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        button.setIcon(qta.icon(icon_name, color="#68778c"))
+        button.setIconSize(QSize(13, 13))
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         button.setFixedSize(34, 28)
@@ -57,9 +61,20 @@ class CustomTitleBar(QWidget):
             self.host.showMaximized()
         self.sync_maximize_button()
 
-    def sync_maximize_button(self):
+    def apply_icon_theme(self, dark: bool) -> None:
+        color = "#c4cedd" if dark else "#68778c"
+        self.minimize_button.setIcon(qta.icon("fa5s.minus", color=color))
+        self.close_button.setIcon(qta.icon("fa5s.times", color=color))
+        self.sync_maximize_button(color)
+
+    def sync_maximize_button(self, color: str | None = None):
         maximized = self.host.isMaximized()
-        self.maximize_button.setText("❐" if maximized else "□")
+        if color is None:
+            dark = bool(getattr(getattr(self.host, "settings", None), "dark_mode", False))
+            color = "#c4cedd" if dark else "#68778c"
+        self.maximize_button.setIcon(
+            qta.icon("fa5s.window-restore" if maximized else "fa5s.window-maximize", color=color)
+        )
         self.maximize_button.setToolTip("Restore" if maximized else "Maximize")
         self.maximize_button.setAccessibleName(self.maximize_button.toolTip())
 
