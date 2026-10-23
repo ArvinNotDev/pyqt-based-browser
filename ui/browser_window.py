@@ -577,12 +577,13 @@ class BrowserWindow(QMainWindow):
         self.downloads_splitter.setObjectName("downloadsSplitter")
         self.downloads_splitter.setHandleWidth(10)
         self.downloads_splitter.setChildrenCollapsible(True)
-        self.downloads_splitter.setCollapsible(0, True)
-        self.downloads_splitter.setCollapsible(1, False)
         self.downloads_splitter.setStretchFactor(0, 0)
         self.downloads_splitter.setStretchFactor(1, 1)
+        # Splitter indices exist only after the child widgets have been inserted.
         self.downloads_splitter.addWidget(self.downloads_panel)
         self.downloads_splitter.addWidget(self.view_container)
+        self.downloads_splitter.setCollapsible(0, True)
+        self.downloads_splitter.setCollapsible(1, False)
         self.downloads_splitter.handle(1).setCursor(Qt.SplitHCursor)
         self.downloads_splitter.splitterMoved.connect(self._on_downloads_splitter_moved)
         self._downloads_panel_width = DownloadsPanel.PANEL_WIDTH
@@ -1740,7 +1741,8 @@ class BrowserWindow(QMainWindow):
 
         view = QWebEngineView(self.view_container)
         view.setVisible(False)
-        view.setAttribute(Qt.WA_TranslucentBackground, True)
+        # WebEngine owns a separate compositor surface; transparency and animated
+        # graphics effects can make that surface blink during its first paint.
         page = BrowserPage(self, self.profile, view)
         view.setPage(page)
         self._connect_page(view, page)
@@ -2006,35 +2008,15 @@ class BrowserWindow(QMainWindow):
             view.hide()
             return
 
-        view_effect = QGraphicsOpacityEffect(view)
-        view.setGraphicsEffect(view_effect)
-        view_effect.setOpacity(0.0)
-        placeholder_effect = QGraphicsOpacityEffect(placeholder)
-        placeholder.setGraphicsEffect(placeholder_effect)
-        placeholder_effect.setOpacity(1.0)
+        # Switch immediately once the page has a first usable frame. Applying
+        # QGraphicsOpacityEffect to QWebEngineView forces the Chromium compositor
+        # through an extra surface transition and can blank the whole page briefly.
+        view.setGraphicsEffect(None)
         view.setVisible(view is self.current_view())
-
-        anim_out = QPropertyAnimation(placeholder_effect, b"opacity", self)
-        anim_out.setDuration(220)
-        anim_out.setStartValue(1.0)
-        anim_out.setEndValue(0.0)
-        anim_in = QPropertyAnimation(view_effect, b"opacity", self)
-        anim_in.setDuration(260)
-        anim_in.setStartValue(0.0)
-        anim_in.setEndValue(1.0)
-
-        def finish_swap():
-            if self._placeholders.get(view) is not placeholder:
-                return
-            self._placeholders.pop(view, None)
-            self.view_layout.removeWidget(placeholder)
-            placeholder.deleteLater()
-            view.setGraphicsEffect(None)
-            self._set_tab_visibility()
-
-        anim_out.finished.connect(anim_in.start)
-        anim_in.finished.connect(finish_swap)
-        anim_out.start()
+        self._placeholders.pop(view, None)
+        self.view_layout.removeWidget(placeholder)
+        placeholder.deleteLater()
+        self._set_tab_visibility()
 
     def _hide_progress_if_current(self, view: QWebEngineView) -> None:
         if view in self.views and view is self.current_view() and not view.page().isLoading():
