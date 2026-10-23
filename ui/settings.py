@@ -17,7 +17,9 @@ _LEGACY_FLAT_KEY = "__pyqt_browser_legacy_flat_settings_v1__"
 
 @dataclass
 class Settings:
-    homepage: str = "https://www.google.com"
+    homepage: str = "arma://dashboard/"
+    startup_page: str = "dashboard"
+    new_tab_page: str = "dashboard"
     default_search_engine: str = "https://www.google.com/search?q="
     window_width: int = 1280
     window_height: int = 720
@@ -173,6 +175,7 @@ class Settings:
             return {}
         valid: dict[str, Any] = {}
         string_fields = {"homepage", "default_search_engine", "download_folder"}
+        string_fields.update({"startup_page", "new_tab_page"})
         boolean_fields = {
             "dark_mode", "save_history", "save_cookies", "private_mode",
             "show_dev_tools", "hardware_acceleration", "proxy_panel_visible",
@@ -182,6 +185,10 @@ class Settings:
             value = values.get(name)
             if isinstance(value, str):
                 valid[name] = value
+        if valid.get("startup_page") not in {"dashboard", "homepage"}:
+            valid.pop("startup_page", None)
+        if valid.get("new_tab_page") not in {"dashboard", "homepage"}:
+            valid.pop("new_tab_page", None)
         for name in boolean_fields:
             value = values.get(name)
             if isinstance(value, bool):
@@ -212,7 +219,9 @@ class Settings:
         """Load recognized values for a profile; missing or bad fields keep defaults."""
         profile_name = self._validate_profile_key(profile_name)
         defaults = {
-            "homepage": "https://www.google.com",
+            "homepage": "arma://dashboard/",
+            "startup_page": "dashboard",
+            "new_tab_page": "dashboard",
             "default_search_engine": "https://www.google.com/search?q=",
             "window_width": 1280,
             "window_height": 720,
@@ -239,7 +248,17 @@ class Settings:
         values = data.get(profile_name)
         if not isinstance(values, dict) and profile_name == "Guest":
             values = self._legacy_profile_settings(data)
-        for key, value in self._valid_settings_values(values).items():
+        valid_values = self._valid_settings_values(values)
+        # Older releases opened the homepage at startup and in new tabs. Move
+        # only the known old homepage default to the dashboard. Preserve a
+        # custom homepage as the startup choice for an unmigrated profile.
+        if isinstance(values, dict) and "startup_page" not in values:
+            if values.get("homepage") == "https://www.google.com":
+                valid_values["homepage"] = "arma://dashboard/"
+                valid_values["startup_page"] = "dashboard"
+            elif isinstance(values.get("homepage"), str) and values["homepage"].strip():
+                valid_values["startup_page"] = "homepage"
+        for key, value in valid_values.items():
             setattr(self, key, value)
 
     @classmethod
