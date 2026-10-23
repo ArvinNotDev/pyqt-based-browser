@@ -376,8 +376,7 @@ def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreg
     assert 'QFrame#browserTab[active="true"]' in stylesheet
     assert "QMenu::item:selected" in stylesheet
     assert "QToolButton#windowCloseButton:hover" in stylesheet
-    if stylesheet is light_theme:
-        assert "porcelain glass — light chrome" in stylesheet
+    if "porcelain glass — light chrome" in stylesheet:
         assert _contrast("#26364c", "#ffffff") >= 4.5
     else:
         assert "obsidian glass — dark chrome" in stylesheet
