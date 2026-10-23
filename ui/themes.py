@@ -413,6 +413,18 @@ QProgressBar::chunk { background: #3979d6; border-radius: 4px; }
 QDockWidget#proxyDock { background: rgba(240,246,254,220); border-color: rgba(255,255,255,220); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
 
+
+/* ARMA edge-to-edge drawer and balanced address-field spacing. */
+QToolBar#NavigationBar { padding: 2px 9px; spacing: 5px; }
+QLineEdit#urlBar { min-height: 26px; max-height: 32px; padding: 4px 13px; }
+QToolButton#downloadsModeButton {
+    color: #536071; background: rgba(255,255,255,118);
+    border: 1px solid rgba(191,207,229,180); border-radius: 8px;
+    padding: 5px 9px; min-height: 22px;
+}
+QToolButton#downloadsModeButton:hover { background: rgba(57,121,214,24); border-color: #8bb4ed; }
+QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+QFrame#downloadsOverlayTint { background: rgba(12,18,30,42); border: none; }
 """
 
 
@@ -827,4 +839,16 @@ QProgressBar::chunk { background: #82aff4; border-radius: 4px; }
 QDockWidget#proxyDock { background: rgba(26,32,41,232); border-color: rgba(255,255,255,38); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
 
+
+/* ARMA edge-to-edge drawer and balanced address-field spacing. */
+QToolBar#NavigationBar { padding: 2px 9px; spacing: 5px; }
+QLineEdit#urlBar { min-height: 26px; max-height: 32px; padding: 4px 13px; }
+QToolButton#downloadsModeButton {
+    color: #d8e1ef; background: rgba(55,65,81,155);
+    border: 1px solid rgba(255,255,255,35); border-radius: 8px;
+    padding: 5px 9px; min-height: 22px;
+}
+QToolButton#downloadsModeButton:hover { background: rgba(130,175,244,32); border-color: rgba(130,175,244,110); }
+QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+QFrame#downloadsOverlayTint { background: rgba(6,10,18,45); border: none; }
 """
