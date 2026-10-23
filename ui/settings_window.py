@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import copy
 import os
+import re
 import sys
 
-from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QTimer
+from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QVariantAnimation, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -22,6 +24,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QStackedWidget,
     QScrollArea,
+    QSlider,
     QVBoxLayout,
     QWidget,
     QGraphicsOpacityEffect,
@@ -31,10 +34,56 @@ from PySide6.QtWidgets import (
 from managers.history_manager import History
 from .history_window import HistoryWindow
 from .settings import Settings
+from managers.dashboard_manager import PRESETS, DashboardManager
+
+
+class SmoothScrollArea(QScrollArea):
+    """Animate wheel scrolling while keeping the dialog footer stationary."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._wheel_animation = QVariantAnimation(self)
+        self._wheel_animation.setDuration(150)
+        self._wheel_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._wheel_animation.valueChanged.connect(self._set_animated_scroll_value)
+
+    def _set_animated_scroll_value(self, value) -> None:
+        self.verticalScrollBar().setValue(round(value))
+
+    def wheelEvent(self, event) -> None:
+        delta = event.pixelDelta().y()
+        if delta:
+            scroll_delta = -delta
+        else:
+            angle = event.angleDelta().y()
+            if not angle:
+                super().wheelEvent(event)
+                return
+            scroll_delta = -(angle / 120) * self.verticalScrollBar().singleStep() * 3
+
+        bar = self.verticalScrollBar()
+        current_target = (
+            self._wheel_animation.endValue()
+            if self._wheel_animation.state() == QVariantAnimation.Running
+            else bar.value()
+        )
+        target = max(bar.minimum(), min(bar.maximum(), round(current_target + scroll_delta)))
+        self._wheel_animation.stop()
+        self._wheel_animation.setStartValue(bar.value())
+        self._wheel_animation.setEndValue(target)
+        self._wheel_animation.start()
+        event.accept()
 
 
 class SettingsWindow(QDialog):
-    def __init__(self, settings: Settings, selected_profile: str, history: History | None, parent=None):
+    def __init__(
+        self,
+        settings: Settings,
+        selected_profile: str,
+        history: History | None,
+        parent=None,
+        dashboard: DashboardManager | None = None,
+    ):
         super().__init__(parent)
         self.setObjectName("settingsDialog")
         self.setWindowTitle("Settings")
@@ -44,6 +93,8 @@ class SettingsWindow(QDialog):
         self.settings = settings
         self.selected_profile = selected_profile
         self.history = history
+        self.dashboard = dashboard
+        self._wallpaper_source: str | None = None
         self.restart_required = False
         self._animating_effect: QGraphicsOpacityEffect | None = None
 
@@ -75,7 +126,7 @@ class SettingsWindow(QDialog):
         self.pages.setObjectName("settingsPages")
         self.pages.setMinimumSize(0, 0)
         self.pages.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
-        self.pages_scroll = QScrollArea()
+        self.pages_scroll = SmoothScrollArea()
         self.pages_scroll.setObjectName("settingsScroll")
         self.pages_scroll.setWidgetResizable(False)
         self.pages_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
@@ -89,6 +140,7 @@ class SettingsWindow(QDialog):
 
         self._add_general_page()
         self._add_appearance_page()
+        self._add_dashboard_page()
         self._add_privacy_page()
         self._add_performance_page()
         self._add_shortcuts_page()
@@ -191,6 +243,18 @@ class SettingsWindow(QDialog):
         self.homepage_input.setClearButtonEnabled(True)
         form.addRow("Homepage", self.homepage_input)
 
+        self.startup_combo = QComboBox()
+        self.startup_combo.addItem("Dashboard", "dashboard")
+        self.startup_combo.addItem("Homepage", "homepage")
+        self.startup_combo.setCurrentIndex(max(0, self.startup_combo.findData(self.settings.startup_page)))
+        form.addRow("When browser opens", self.startup_combo)
+
+        self.new_tab_combo = QComboBox()
+        self.new_tab_combo.addItem("Dashboard", "dashboard")
+        self.new_tab_combo.addItem("Homepage", "homepage")
+        self.new_tab_combo.setCurrentIndex(max(0, self.new_tab_combo.findData(self.settings.new_tab_page)))
+        form.addRow("New tab page", self.new_tab_combo)
+
         self.search_input = QLineEdit(self.settings.default_search_engine)
         self.search_input.setObjectName("settingsInput")
         self.search_input.setPlaceholderText("https://search.example/?q=")
@@ -241,6 +305,108 @@ class SettingsWindow(QDialog):
         card_layout.addWidget(self.dark_mode_checkbox)
         card_layout.addWidget(self._note("The theme applies to the browser controls and its built-in dialogs."))
         card_layout.addStretch(1)
+
+    def _add_dashboard_page(self) -> None:
+        _, card_layout = self._make_page(
+            "Dashboard",
+            "Personalize the start page for this profile. Shortcut management is available directly on the dashboard.",
+        )
+        card_layout.setContentsMargins(18, 18, 18, 18)
+        data = self.dashboard.data if self.dashboard is not None else {}
+        self.dashboard_clock_combo = QComboBox()
+        self.dashboard_clock_combo.addItem("24-hour", True)
+        self.dashboard_clock_combo.addItem("12-hour", False)
+        self.dashboard_clock_combo.setCurrentIndex(
+            max(0, self.dashboard_clock_combo.findData(data.get("clock_24h", True)))
+        )
+        self.dashboard_seconds_checkbox = QCheckBox("Show seconds in the clock")
+        self.dashboard_seconds_checkbox.setChecked(bool(data.get("show_seconds", False)))
+        self.dashboard_animations_checkbox = QCheckBox("Use subtle dashboard motion")
+        self.dashboard_animations_checkbox.setChecked(bool(data.get("animations", True)))
+        card_layout.addWidget(QLabel("Clock format"))
+        card_layout.addWidget(self.dashboard_clock_combo)
+        card_layout.addWidget(self.dashboard_seconds_checkbox)
+        card_layout.addWidget(self.dashboard_animations_checkbox)
+
+        self.dashboard_overlay_slider = QSlider(Qt.Horizontal)
+        self.dashboard_overlay_slider.setRange(0, 70)
+        self.dashboard_overlay_slider.setValue(int(data.get("overlay", 20)))
+        self.dashboard_overlay_label = QLabel(f"Wallpaper dimming: {self.dashboard_overlay_slider.value()}%")
+        self.dashboard_overlay_slider.valueChanged.connect(
+            lambda value: self.dashboard_overlay_label.setText(f"Wallpaper dimming: {value}%")
+        )
+        card_layout.addWidget(self.dashboard_overlay_label)
+        card_layout.addWidget(self.dashboard_overlay_slider)
+
+        self.dashboard_glass_slider = QSlider(Qt.Horizontal)
+        self.dashboard_glass_slider.setRange(20, 90)
+        self.dashboard_glass_slider.setValue(int(data.get("glass", 58)))
+        self.dashboard_glass_label = QLabel(f"Glass intensity: {self.dashboard_glass_slider.value()}%")
+        self.dashboard_glass_slider.valueChanged.connect(
+            lambda value: self.dashboard_glass_label.setText(f"Glass intensity: {value}%")
+        )
+        card_layout.addWidget(self.dashboard_glass_label)
+        card_layout.addWidget(self.dashboard_glass_slider)
+
+        self.dashboard_blur_slider = QSlider(Qt.Horizontal)
+        self.dashboard_blur_slider.setRange(0, 12)
+        self.dashboard_blur_slider.setValue(int(data.get("blur", 0)))
+        self.dashboard_blur_label = QLabel(f"Wallpaper soft focus: {self.dashboard_blur_slider.value()} px")
+        self.dashboard_blur_slider.valueChanged.connect(
+            lambda value: self.dashboard_blur_label.setText(f"Wallpaper soft focus: {value} px")
+        )
+        card_layout.addWidget(self.dashboard_blur_label)
+        card_layout.addWidget(self.dashboard_blur_slider)
+
+        self.dashboard_accent_input = QLineEdit(str(data.get("accent", "#8db8ff")))
+        self.dashboard_accent_input.setObjectName("settingsInput")
+        self.dashboard_accent_input.setMaxLength(7)
+        card_layout.addWidget(QLabel("Accent color (hex)"))
+        card_layout.addWidget(self.dashboard_accent_input)
+
+        widgets = data.get("widgets", {})
+        self.dashboard_widget_checks = {}
+        for key, label in (
+            ("bookmarks", "Show bookmarks"),
+            ("recent", "Show recently visited"),
+            ("closed", "Show recently closed"),
+            ("notes", "Show quick notes"),
+            ("focus", "Show focus timer"),
+        ):
+            checkbox = QCheckBox(label)
+            checkbox.setChecked(bool(widgets.get(key, True)))
+            self.dashboard_widget_checks[key] = checkbox
+            card_layout.addWidget(checkbox)
+
+        wallpaper_row = QHBoxLayout()
+        self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(data.get("wallpaper", "aurora")))
+        self.dashboard_wallpaper_label.setWordWrap(True)
+        wallpaper_button = QPushButton("Choose image…")
+        wallpaper_button.clicked.connect(self._browse_dashboard_wallpaper)
+        wallpaper_row.addWidget(self.dashboard_wallpaper_label, 1)
+        wallpaper_row.addWidget(wallpaper_button)
+        card_layout.addLayout(wallpaper_row)
+        card_layout.addWidget(self._note("Supported images are copied into this profile's dashboard storage. Use the dashboard itself to add, edit, or reorder shortcuts."))
+        card_layout.addStretch(1)
+
+    @staticmethod
+    def _wallpaper_label(key: str) -> str:
+        if key in PRESETS:
+            return f"Current wallpaper: {PRESETS[key]['title']}"
+        if isinstance(key, str) and key.startswith("file:"):
+            return "Current wallpaper: Imported image"
+        return "Current wallpaper: Aurora"
+
+    def _browse_dashboard_wallpaper(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self,
+            "Choose dashboard wallpaper",
+            os.path.expanduser("~"),
+            "Images (*.jpg *.jpeg *.png *.webp)",
+        )
+        if selected:
+            self._wallpaper_source = selected
+            self.dashboard_wallpaper_label.setText(f"Selected image: {os.path.basename(selected)}")
 
     def _add_privacy_page(self) -> None:
         _, card_layout = self._make_page(
@@ -299,7 +465,7 @@ class SettingsWindow(QDialog):
             ("Ctrl + J", "Open downloads"),
             ("Ctrl + ,", "Open settings"),
         )
-        for shortcut, description in rows:
+        for shortcut, description in rows + (("F11", "Toggle fullscreen"),):
             row = QHBoxLayout()
             key = QLabel(shortcut)
             key.setObjectName("shortcutKey")
@@ -370,6 +536,8 @@ class SettingsWindow(QDialog):
         old_hardware_acceleration = self.settings.hardware_acceleration
         candidate = copy.copy(self.settings)
         candidate.homepage = homepage
+        candidate.startup_page = str(self.startup_combo.currentData())
+        candidate.new_tab_page = str(self.new_tab_combo.currentData())
         candidate.default_search_engine = search_engine
         candidate.download_folder = self.download_folder_input.text().strip() or "./downloads"
         candidate.site_compatibility_mode = self.site_compatibility_checkbox.isChecked()
@@ -380,14 +548,46 @@ class SettingsWindow(QDialog):
         candidate.private_mode = self.private_mode_checkbox.isChecked()
         candidate.hardware_acceleration = self.hw_accel_checkbox.isChecked()
 
+        dashboard_values = None
+        if self.dashboard is not None:
+            accent = self.dashboard_accent_input.text().strip()
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", accent):
+                QMessageBox.warning(self, "Invalid accent color", "Enter a hex color such as #8db8ff.")
+                self.section_list.setCurrentRow(2)
+                return
+            dashboard_values = {
+                "clock_24h": bool(self.dashboard_clock_combo.currentData()),
+                "show_seconds": self.dashboard_seconds_checkbox.isChecked(),
+                "animations": self.dashboard_animations_checkbox.isChecked(),
+                "overlay": self.dashboard_overlay_slider.value(),
+                "glass": self.dashboard_glass_slider.value(),
+                "blur": self.dashboard_blur_slider.value(),
+                "accent": accent,
+                "widgets": {
+                    key: checkbox.isChecked()
+                    for key, checkbox in self.dashboard_widget_checks.items()
+                },
+            }
+            if self._wallpaper_source:
+                try:
+                    dashboard_values["wallpaper"] = self.dashboard.import_wallpaper(
+                        self._wallpaper_source, activate=False
+                    )
+                except (OSError, ValueError) as exc:
+                    QMessageBox.warning(self, "Could not use wallpaper", str(exc))
+                    self.section_list.setCurrentRow(2)
+                    return
+
         try:
             candidate.save(self.selected_profile)
+            if self.dashboard is not None and dashboard_values is not None:
+                self.dashboard.update(dashboard_values)
         except (OSError, ValueError, TypeError) as exc:
             QMessageBox.critical(self, "Could not save settings", str(exc))
             return
 
         for name in (
-            "homepage", "default_search_engine", "download_folder", "site_compatibility_mode",
+            "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder", "site_compatibility_mode",
             "proxy_panel_visible", "dark_mode",
             "save_history", "save_cookies", "private_mode", "hardware_acceleration",
         ):
