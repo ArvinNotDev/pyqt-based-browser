@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from managers.bookmarks_manager import BookmarksManager
+from managers.dashboard_manager import DashboardManager
 from managers.download_manager import DownloadManager
 from managers.history_manager import History
 from managers.storage import validate_profile_name
@@ -120,6 +121,20 @@ class DataManagerTests(unittest.TestCase):
                 validate_profile_name(name)
         with self.assertRaises(ValueError):
             History("../outside", base_dir="profile_data")
+
+    def test_dashboard_widget_order_is_validated_and_persisted(self):
+        base_dir = Path(self.temp_dir.name) / "profile_data"
+        manager = DashboardManager("Guest", base_dir=base_dir)
+        manager.update({"widget_order": ["notes", "bookmarks", "recent", "notes"]})
+        expected = ["notes", "bookmarks", "recent", "closed", "focus"]
+        self.assertEqual(manager.export()["widget_order"], expected)
+
+        loaded = DashboardManager("Guest", base_dir=base_dir)
+        self.assertEqual(loaded.export()["widget_order"], expected)
+        with self.assertRaises(ValueError):
+            manager.update({"widget_order": ["recent", "recent"]})
+        with self.assertRaises(ValueError):
+            manager.update({"widget_order": ["unknown-widget"]})
 
     def test_settings_defaults_round_trip_and_partial_values(self):
         path = str(Path(self.temp_dir.name) / "settings.json")
