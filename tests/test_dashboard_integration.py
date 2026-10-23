@@ -508,6 +508,7 @@ def test_page_load_overlay_hides_after_the_active_navigation_finishes():
         views=[view],
         current_view=lambda: view,
         _page_load_overlays={view: overlay},
+        _page_load_overlay_for=lambda target: overlay,
     )
 
     BrowserWindow._hide_page_load_overlay_if_current(browser, view)
@@ -574,6 +575,7 @@ def test_activating_a_loading_tab_shows_its_page_overlay():
         views=[loading_view],
         _page_load_overlays={loading_view: overlay},
         _placeholders={loading_view: None},
+        _show_page_load_overlay=lambda target, progress=None: overlay.show_loading(progress),
         _set_tab_visibility=Mock(),
         _update_bookmarks_bar_visibility=Mock(),
         navbar=SimpleNamespace(

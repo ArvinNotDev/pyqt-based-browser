@@ -2981,7 +2981,7 @@ class BrowserWindow(QMainWindow):
             placeholder.deleteLater()
 
         self.view_layout.removeWidget(closing_view)
-        self._page_load_overlays.pop(closing_view, None)
+        getattr(self, "_page_load_overlays", {}).pop(closing_view, None)
         closing_view.stop()
         closing_view.hide()
         closing_view.deleteLater()
