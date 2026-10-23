@@ -33,7 +33,7 @@ from PySide6.QtWidgets import (
 
 from managers.history_manager import History
 from .history_window import HistoryWindow
-from .settings import Settings
+from .settings import Settings, default_download_directory
 from managers.dashboard_manager import PRESETS, DashboardManager
 
 
@@ -267,7 +267,7 @@ class SettingsWindow(QDialog):
         self.download_folder_input = QLineEdit(self.settings.download_folder)
         self.download_folder_input.setObjectName("settingsInput")
         self.download_folder_input.setClearButtonEnabled(True)
-        self.download_folder_input.setPlaceholderText("./downloads")
+        self.download_folder_input.setPlaceholderText(default_download_directory())
         browse_button = QPushButton("Browse…")
         browse_button.clicked.connect(self._browse_download_folder)
         download_row.addWidget(self.download_folder_input, 1)
@@ -503,7 +503,7 @@ class SettingsWindow(QDialog):
         self._page_animation.start()
 
     def _browse_download_folder(self) -> None:
-        current = self.download_folder_input.text().strip() or os.getcwd()
+        current = self.download_folder_input.text().strip() or default_download_directory()
         folder = QFileDialog.getExistingDirectory(self, "Choose download folder", current)
         if folder:
             self.download_folder_input.setText(folder)
@@ -539,7 +539,7 @@ class SettingsWindow(QDialog):
         candidate.startup_page = str(self.startup_combo.currentData())
         candidate.new_tab_page = str(self.new_tab_combo.currentData())
         candidate.default_search_engine = search_engine
-        candidate.download_folder = self.download_folder_input.text().strip() or "./downloads"
+        candidate.download_folder = self.download_folder_input.text().strip() or default_download_directory()
         candidate.site_compatibility_mode = self.site_compatibility_checkbox.isChecked()
         candidate.proxy_panel_visible = self.proxy_panel_checkbox.isChecked()
         candidate.dark_mode = self.dark_mode_checkbox.isChecked()
