@@ -423,3 +423,25 @@ def test_audio_decode_diagnostics_are_recognized_without_matching_unrelated_cons
     assert not BrowserPage._is_audio_decode_error("WebGL context restored")
     assert not BrowserPage._is_audio_decode_error("Uncaught ReferenceError: game is not defined")
 
+def test_download_toast_keeps_its_own_opacity_animation():
+    from PySide6.QtWidgets import QFrame, QWidget
+
+    app = QApplication.instance() or QApplication([])
+
+    class ToastHarness(QWidget):
+        _setup_download_toast = BrowserWindow._setup_download_toast
+        _finish_download_toast_animation = BrowserWindow._finish_download_toast_animation
+        _hide_download_toast = BrowserWindow._hide_download_toast
+
+        def show_downloads(self):
+            pass
+
+    harness = ToastHarness()
+    harness._setup_download_toast(harness)
+
+    assert isinstance(harness.download_toast, QFrame)
+    assert harness.download_toast_effect.opacity() == 0.0
+    assert harness.download_toast_animation.duration() == 180
+    harness.deleteLater()
+    app.processEvents()
+
