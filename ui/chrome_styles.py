@@ -27,7 +27,7 @@ QLabel#titleBarLogo {
     border: 1px solid rgba(255,255,255,210);
     border-radius: 8px;
     font-size: 13px;
-    font-weight: 750;
+    font-weight: 700;
 }
 QLabel#titleBarTitle {
     color: #3d4b60;
@@ -302,7 +302,7 @@ QLabel#titleBarLogo {
     border: 1px solid rgba(255,255,255,75);
     border-radius: 8px;
     font-size: 13px;
-    font-weight: 750;
+    font-weight: 700;
 }
 QLabel#titleBarTitle {
     color: #c2cbd9;
