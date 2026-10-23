@@ -653,17 +653,18 @@ def test_many_tabs_use_compact_scrolling_and_an_all_tabs_menu():
 
 
 
-def test_custom_tab_bar_constructs_its_all_tabs_button(qapp):
-    from PySide6.QtWidgets import QToolButton
+def test_custom_tab_bar_constructs_its_all_tabs_button():
+    from PySide6.QtWidgets import QApplication, QToolButton
     from ui.browser_window import CustomTabBar
 
+    app = QApplication.instance() or QApplication([])
     tabs = CustomTabBar()
     assert isinstance(tabs.tab_list_button, QToolButton)
     assert tabs.tab_list_button.objectName() == "tabListButton"
     assert not tabs.tab_list_button.icon().isNull()
     tabs.close()
     tabs.deleteLater()
-    qapp.processEvents()
+    app.processEvents()
 
 
 def test_native_frameless_style_preserves_resize_and_snap_capabilities():
