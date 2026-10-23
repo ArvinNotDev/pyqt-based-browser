@@ -2085,6 +2085,8 @@ class BrowserWindow(QMainWindow):
         self, page: BrowserPage, view: QWebEngineView, host: str, action: str, payload: dict
     ) -> None:
         """Handle an allowlisted internal-page intent after validating its payload."""
+        incremental_setting = action == "set_browser_setting"
+        setting_name = ""
         try:
             if action == "navigate_internal":
                 target_host = payload.get("host")
@@ -2101,6 +2103,34 @@ class BrowserWindow(QMainWindow):
                 if directory:
                     page.runJavaScript("window.setDownloadFolder && window.setDownloadFolder(" + json.dumps(directory) + ");")
                 return
+
+            if incremental_setting:
+                setting_name = payload.get("name")
+                setting_value = payload.get("value")
+                allowed_setting_names = {
+                    "homepage", "startup_page", "new_tab_page", "default_search_engine",
+                    "download_folder", "dark_mode", "private_mode", "save_history",
+                    "save_cookies", "hardware_acceleration", "site_compatibility_mode",
+                    "proxy_panel_visible",
+                }
+                if not isinstance(setting_name, str) or setting_name not in allowed_setting_names:
+                    raise ValueError("That browser setting is not supported.")
+                payload = {
+                    "homepage": self.settings.homepage,
+                    "startup_page": self.settings.startup_page,
+                    "new_tab_page": self.settings.new_tab_page,
+                    "default_search_engine": self.settings.default_search_engine,
+                    "download_folder": self.settings.download_folder,
+                    "dark_mode": bool(self.settings.dark_mode),
+                    "private_mode": bool(self.settings.private_mode),
+                    "save_history": bool(self.settings.save_history),
+                    "save_cookies": bool(self.settings.save_cookies),
+                    "hardware_acceleration": bool(self.settings.hardware_acceleration),
+                    "site_compatibility_mode": bool(self.settings.site_compatibility_mode),
+                    "proxy_panel_visible": bool(self.settings.proxy_panel_visible),
+                }
+                payload[setting_name] = setting_value
+                action = "save_browser_settings"
 
             if action == "save_browser_settings":
                 homepage = payload.get("homepage")
@@ -2176,10 +2206,20 @@ class BrowserWindow(QMainWindow):
                 self.apply_theme()
                 self._sync_dashboard_tabs()
                 if old_hardware != bool(self.settings.hardware_acceleration):
-                    self.statusBar().showMessage("Settings saved. Restart ARMA Browser to fully apply hardware acceleration.", 6500)
+                    message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
+                    self.statusBar().showMessage(message, 6500)
                 else:
-                    self.statusBar().showMessage("Browser settings saved.", 2500)
-                if view in self.views:
+                    message = "Setting saved." if incremental_setting else "Browser settings saved."
+                    self.statusBar().showMessage(message, 2200)
+                if incremental_setting:
+                    page.runJavaScript(
+                        "window.armaSettingSaved && window.armaSettingSaved("
+                        + json.dumps(setting_name) + ", "
+                        + json.dumps(message) + ", false);"
+                    )
+                    if view in self.views and (setting_name == "private_mode" and old_private != bool(self.settings.private_mode)):
+                        self._load_internal_page(view, "arma://settings/")
+                elif view in self.views:
                     self._load_internal_page(view, "arma://settings/")
                 return
 
@@ -2273,7 +2313,14 @@ class BrowserWindow(QMainWindow):
         except (OSError, ValueError, TypeError, RuntimeError) as error:
             logger.info("Internal page action %s was rejected: %s", action, error)
             self.statusBar().showMessage(str(error), 5500)
-            page.runJavaScript("window.armaToast && window.armaToast(" + json.dumps(str(error)) + ");")
+            if incremental_setting and setting_name:
+                page.runJavaScript(
+                    "window.armaSettingSaved && window.armaSettingSaved("
+                    + json.dumps(setting_name) + ", "
+                    + json.dumps(str(error)) + ", true);"
+                )
+            else:
+                page.runJavaScript("window.armaToast && window.armaToast(" + json.dumps(str(error)) + ");")
 
     def _handle_dashboard_action(self, page: BrowserPage, action_url: QUrl) -> None:
         if not getattr(page, "_dashboard_active", False):
