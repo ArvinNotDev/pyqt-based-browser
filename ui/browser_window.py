@@ -2,6 +2,7 @@ import os
 import re
 import time
 import json
+import copy
 import ctypes
 from ctypes import wintypes
 import logging
@@ -39,9 +40,11 @@ from .downloads_panel import DownloadsPanel
 from .dashboard.internal_page import (
     DASHBOARD_SCHEME,
     DASHBOARD_URL,
+    INTERNAL_PAGE_HOSTS,
     DashboardSchemeHandler,
     register_dashboard_scheme,
 )
+from .internal_pages import render_internal_page
 from managers.history_manager import History
 from managers.dashboard_manager import DashboardManager
 from .dashboard.bridge import DashboardBridge
@@ -498,16 +501,19 @@ class BrowserPage(QWebEnginePage):
         self.setWebChannel(None)
 
     def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
-        if url.scheme() == "arma" and url.host() == "dashboard":
-            if not is_main_frame:
+        scheme = url.scheme().lower()
+        host = url.host().lower()
+        if scheme == "arma":
+            if not is_main_frame or host not in INTERNAL_PAGE_HOSTS:
                 return False
-            # Browser history can return to the internal page after external
-            # navigation. Its content always comes from our scheme handler.
             self._enable_dashboard_bridge()
-            self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            # Only the existing dashboard is allowed to fetch remote wallpaper assets.
+            self.settings().setAttribute(
+                QWebEngineSettings.LocalContentCanAccessRemoteUrls,
+                host == "dashboard",
+            )
             return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
         if is_main_frame and self._dashboard_active:
-            # The dashboard origin is served only by our app-owned handler.
             self._disable_dashboard_bridge()
             self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
         return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
@@ -1149,10 +1155,7 @@ class BrowserWindow(QMainWindow):
                 self.tabbar.set_active(index)
 
     def show_history(self) -> None:
-        if self.history is None:
-            self.statusBar().showMessage("History is unavailable in this session.", 3000)
-            return
-        HistoryWindow(self.selected_profile, self.history, self).exec()
+        self.navigate("arma://history/")
 
     def _refresh_history(self):
         if self.settings.private_mode or not self.settings.save_history:
@@ -1373,8 +1376,7 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage("Could not open bookmarks.", 3000)
 
     def show_downloads(self, *args):
-        if hasattr(self, "downloads_panel"):
-            self._animate_downloads_panel(True)
+        self.navigate("arma://downloads/")
 
     def _bind_download_manager(self) -> None:
         panel = getattr(self, "downloads_panel", None)
@@ -1392,7 +1394,9 @@ class BrowserWindow(QMainWindow):
     def _on_download_started(self, download_id: str, source_page) -> None:
         if self._closing:
             return
-        self.show_downloads()
+        # Keep the lightweight progress drawer for new downloads. The header's
+        # Downloads button opens the full manager at arma://downloads/.
+        self._animate_downloads_panel(True)
         manager = self.download_manager
         record = next(
             (item for item in manager.get_downloads() if item.get("id") == download_id),
@@ -1889,11 +1893,22 @@ class BrowserWindow(QMainWindow):
         self.navigate(self.settings.homepage)
 
     @staticmethod
-    def _is_dashboard_address(value: str | QUrl | None) -> bool:
+    def _internal_host(value: str | QUrl | None) -> str | None:
         if value is None:
-            return False
+            return None
         url = value if isinstance(value, QUrl) else QUrl(str(value))
-        return url.scheme().lower() == "arma" and url.host().lower() == "dashboard"
+        if url.scheme().lower() != "arma":
+            return None
+        host = url.host().lower()
+        return host if host in INTERNAL_PAGE_HOSTS else None
+
+    @staticmethod
+    def _is_internal_address(value: str | QUrl | None) -> bool:
+        return BrowserWindow._internal_host(value) is not None
+
+    @staticmethod
+    def _is_dashboard_address(value: str | QUrl | None) -> bool:
+        return BrowserWindow._internal_host(value) == "dashboard"
 
     def _dashboard_state(self) -> dict:
         manager = getattr(self, "dashboard_manager", None)
@@ -1960,16 +1975,39 @@ class BrowserWindow(QMainWindow):
         page_html = page_html.replace("{{DASHBOARD_STATE}}", state_json)
         return page_html.encode("utf-8")
 
-    def _load_dashboard(self, view: QWebEngineView) -> None:
-        if self.dashboard_manager is None:
+    def _load_internal_page(self, view: QWebEngineView, address: str | QUrl) -> None:
+        """Load only an app-owned ARMA page and attach its restricted local bridge."""
+        target = address if isinstance(address, QUrl) else QUrl(str(address))
+        host = self._internal_host(target)
+        if host is None:
+            raise ValueError("Only supported ARMA internal pages can be loaded here.")
+        if host == "dashboard" and self.dashboard_manager is None:
             self.statusBar().showMessage("Dashboard preferences are unavailable.", 4000)
             return
-        view.page()._enable_dashboard_bridge()
-        view.page().settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        view.setUrl(QUrl(DASHBOARD_URL))
+        page = view.page()
+        page._enable_dashboard_bridge()
+        page.settings().setAttribute(
+            QWebEngineSettings.LocalContentCanAccessRemoteUrls, host == "dashboard"
+        )
+        normalized_url = QUrl(f"arma://{host}/")
+        view.setUrl(normalized_url)
+
+    def _load_dashboard(self, view: QWebEngineView) -> None:
+        self._load_internal_page(view, DASHBOARD_URL)
+
+    def _internal_page_document(self, host: str) -> bytes:
+        if host not in INTERNAL_PAGE_HOSTS or host == "dashboard":
+            raise ValueError("Unsupported ARMA internal page.")
+        return render_internal_page(self, host).encode("utf-8")
 
     def _sync_dashboard_page(self, page: QWebEnginePage) -> None:
         if not getattr(page, "_dashboard_active", False):
+            return
+        try:
+            current_url = page.url()
+        except RuntimeError:
+            return
+        if self._internal_host(current_url) != "dashboard":
             return
         state_json = json.dumps(self._dashboard_state(), ensure_ascii=False, separators=(",", ":"))
         state_json = state_json.replace("</", "<\\/")
@@ -1979,9 +2017,210 @@ class BrowserWindow(QMainWindow):
         )
         page.runJavaScript(script)
 
+    def _handle_internal_page_action(
+        self, page: BrowserPage, view: QWebEngineView, host: str, action: str, payload: dict
+    ) -> None:
+        """Handle an allowlisted internal-page intent after validating its payload."""
+        try:
+            if action == "navigate_internal":
+                target_host = payload.get("host")
+                if not isinstance(target_host, str) or target_host.lower() not in INTERNAL_PAGE_HOSTS:
+                    raise ValueError("That internal page is not available.")
+                self._load_internal_page(view, f"arma://{target_host.lower()}/")
+                return
+
+            if action == "browse_download_folder":
+                current = str(self.settings.download_folder or os.path.expanduser("~"))
+                directory = QFileDialog.getExistingDirectory(
+                    self, "Choose download folder", os.path.abspath(os.path.expanduser(current))
+                )
+                if directory:
+                    page.runJavaScript("window.setDownloadFolder && window.setDownloadFolder(" + json.dumps(directory) + ");")
+                return
+
+            if action == "save_browser_settings":
+                homepage = payload.get("homepage")
+                if not isinstance(homepage, str) or not homepage.strip() or len(homepage) > 8192:
+                    raise ValueError("Enter a valid homepage address.")
+                homepage = homepage.strip()
+                homepage_url = QUrl(homepage)
+                if homepage_url.scheme().lower() == "arma":
+                    if self._internal_host(homepage_url) is None:
+                        raise ValueError("Only supported ARMA internal pages can be used as the homepage.")
+                    homepage = f"arma://{homepage_url.host().lower()}/"
+                elif not (
+                    homepage_url.isValid()
+                    and homepage_url.scheme().lower() in {"http", "https"}
+                    and bool(homepage_url.host())
+                    and not homepage_url.userInfo()
+                ):
+                    raise ValueError("The homepage must be a website URL or ARMA internal page.")
+
+                startup_page = payload.get("startup_page")
+                new_tab_page = payload.get("new_tab_page")
+                if startup_page not in {"dashboard", "homepage"} or new_tab_page not in {"dashboard", "homepage"}:
+                    raise ValueError("Startup and new-tab pages must be selected from the available options.")
+                engine = payload.get("default_search_engine")
+                allowed_engines = {
+                    "https://www.google.com/search?q=",
+                    "https://duckduckgo.com/?q=",
+                    "https://www.bing.com/search?q=",
+                }
+                current_engine = str(self.settings.default_search_engine or "")
+                if not isinstance(engine, str) or len(engine) > 2048:
+                    raise ValueError("Choose a valid search engine.")
+                if engine not in allowed_engines and engine != current_engine:
+                    raise ValueError("That search engine is not supported in this settings view.")
+                folder = payload.get("download_folder")
+                if not isinstance(folder, str) or not folder.strip() or len(folder) > 4096:
+                    raise ValueError("Choose a valid download folder.")
+                folder = os.path.abspath(os.path.expanduser(folder.strip()))
+                boolean_fields = (
+                    "dark_mode", "private_mode", "save_history", "save_cookies",
+                    "hardware_acceleration", "site_compatibility_mode", "proxy_panel_visible",
+                )
+                for name in boolean_fields:
+                    if type(payload.get(name)) is not bool:
+                        raise ValueError(f"Invalid value for {name.replace('_', ' ')}.")
+
+                old_private = bool(self.settings.private_mode)
+                old_hardware = bool(self.settings.hardware_acceleration)
+                candidate = copy.copy(self.settings)
+                candidate.homepage = homepage
+                candidate.startup_page = startup_page
+                candidate.new_tab_page = new_tab_page
+                candidate.default_search_engine = engine
+                candidate.download_folder = folder
+                for name in boolean_fields:
+                    setattr(candidate, name, payload[name])
+                candidate.save(self.selected_profile)
+                for name in (
+                    "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder",
+                    *boolean_fields,
+                ):
+                    setattr(self.settings, name, getattr(candidate, name))
+
+                if old_hardware != bool(self.settings.hardware_acceleration):
+                    Settings.configure_hardware_acceleration(bool(self.settings.hardware_acceleration))
+                if old_private != bool(self.settings.private_mode):
+                    self.change_profile(self.selected_profile)
+                else:
+                    self._refresh_history()
+                    self._apply_profile_settings(self.profile)
+                    self._setup_feature_managers()
+                self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+                self.apply_theme()
+                self._sync_dashboard_tabs()
+                if old_hardware != bool(self.settings.hardware_acceleration):
+                    self.statusBar().showMessage("Settings saved. Restart ARMA Browser to fully apply hardware acceleration.", 6500)
+                else:
+                    self.statusBar().showMessage("Browser settings saved.", 2500)
+                if view in self.views:
+                    self._load_internal_page(view, "arma://settings/")
+                return
+
+            if host == "history":
+                history = self.history
+                if history is None or self.settings.private_mode or not self.settings.save_history:
+                    raise ValueError("History is disabled for this profile.")
+                if action == "history_open":
+                    target = payload.get("url")
+                    if not isinstance(target, str) or len(target) > 8192:
+                        raise ValueError("That history address is invalid.")
+                    target_url = QUrl(target)
+                    if target_url.scheme().lower() not in {"http", "https"} or not target_url.host():
+                        raise ValueError("Only recorded website addresses can be opened from history.")
+                    if view is self.current_view():
+                        self.navigate(target)
+                    else:
+                        view.setUrl(target_url)
+                    return
+                elif action == "history_delete_url":
+                    target = payload.get("url")
+                    if not isinstance(target, str) or len(target) > 8192:
+                        raise ValueError("That history address is invalid.")
+                    history.delete(link=target)
+                elif action == "history_delete_visit":
+                    target = payload.get("url")
+                    date = payload.get("date")
+                    visit_time = payload.get("time")
+                    index = payload.get("index")
+                    if (
+                        not isinstance(target, str) or len(target) > 8192
+                        or not isinstance(date, str) or len(date) > 32
+                        or not isinstance(visit_time, str) or len(visit_time) > 32
+                        or type(index) is not int or index < 0
+                    ):
+                        raise ValueError("That history entry is invalid.")
+                    history.delete_visit(target, date, visit_time, index)
+                elif action == "history_clear":
+                    history.clear()
+                else:
+                    return
+                self.navbar.history = history.history
+                self.statusBar().showMessage("History updated.", 2000)
+                self._load_internal_page(view, "arma://history/")
+                return
+
+            if host == "downloads":
+                manager = self.download_manager
+                if manager is None:
+                    raise ValueError("The download manager is unavailable.")
+                if action == "downloads_refresh":
+                    self._load_internal_page(view, "arma://downloads/")
+                    return
+                records = manager.get_downloads()
+                download_id = payload.get("id")
+                if action == "downloads_clear_finished":
+                    manager.clear_finished()
+                else:
+                    if not isinstance(download_id, str) or len(download_id) > 256:
+                        raise ValueError("That download entry is invalid.")
+                    record = next((item for item in records if str(item.get("id")) == download_id), None)
+                    if record is None:
+                        raise ValueError("That download entry no longer exists.")
+                    state = str(record.get("state", "")).lower()
+                    if action == "downloads_cancel":
+                        if state not in {"requested", "downloading"} or not manager.cancel(download_id):
+                            raise ValueError("This download can no longer be cancelled.")
+                    elif action == "downloads_pause":
+                        if state not in {"requested", "downloading"} or not manager.pause(download_id):
+                            raise ValueError("This download cannot be paused.")
+                    elif action == "downloads_resume":
+                        if state not in {"requested", "downloading"} or not manager.resume(download_id):
+                            raise ValueError("This download cannot be resumed.")
+                    elif action == "downloads_open":
+                        if state != "completed" or not manager.open_file(download_id):
+                            raise ValueError("The completed file could not be opened.")
+                    elif action == "downloads_folder":
+                        if state != "completed" or not manager.open_folder(download_id):
+                            raise ValueError("The download folder could not be opened.")
+                    elif action == "downloads_remove":
+                        if state not in {"completed", "cancelled", "failed"} or not manager.remove_download(download_id):
+                            raise ValueError("This download entry cannot be removed yet.")
+                    elif action == "downloads_delete_file":
+                        if state != "completed" or not manager.delete_download_file(download_id):
+                            raise ValueError("The file could not be deleted. Only files inside the configured download folder can be deleted.")
+                    else:
+                        return
+                self.statusBar().showMessage("Download list updated.", 2000)
+                self._load_internal_page(view, "arma://downloads/")
+                return
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            logger.info("Internal page action %s was rejected: %s", action, error)
+            self.statusBar().showMessage(str(error), 5500)
+            page.runJavaScript("window.armaToast && window.armaToast(" + json.dumps(str(error)) + ");")
+
     def _handle_dashboard_action(self, page: BrowserPage, action_url: QUrl) -> None:
-        if self.dashboard_manager is None or not getattr(page, "_dashboard_active", False):
+        if not getattr(page, "_dashboard_active", False):
             return
+        try:
+            page_url = page.url()
+        except RuntimeError:
+            return
+        if page_url.scheme().lower() != "arma" or page_url.host().lower() not in INTERNAL_PAGE_HOSTS:
+            return
+        host = page_url.host().lower()
         query = QUrlQuery(action_url)
         action = query.queryItemValue("action")
         raw_payload = query.queryItemValue("payload")
@@ -1995,6 +2234,11 @@ class BrowserWindow(QMainWindow):
             return
         view = next((candidate for candidate in self.views if candidate.page() is page), None)
         if view is None:
+            return
+        if host != "dashboard":
+            self._handle_internal_page_action(page, view, host, action, payload)
+            return
+        if self.dashboard_manager is None:
             return
         try:
             if action in {"open", "open_new", "search", "reopen"}:
@@ -2091,9 +2335,10 @@ class BrowserWindow(QMainWindow):
     def new_tab(self, url: Optional[str] = None, make_active: bool = True) -> int:
         """Create one aligned tab, placeholder, view, and page before loading."""
         raw_url = url.toString() if isinstance(url, QUrl) else (url if url is not None else self._new_tab_address())
-        is_dashboard = self._is_dashboard_address(raw_url)
-        if is_dashboard:
-            resolved_url = DASHBOARD_URL
+        internal_host = self._internal_host(raw_url)
+        is_dashboard = internal_host == "dashboard"
+        if internal_host is not None:
+            resolved_url = f"arma://{internal_host}/"
         else:
             try:
                 resolved_url = resolve_address_input(raw_url, self.settings.default_search_engine)
@@ -2125,8 +2370,8 @@ class BrowserWindow(QMainWindow):
         else:
             self._set_tab_visibility()
 
-        if is_dashboard:
-            self._load_dashboard(view)
+        if internal_host is not None:
+            self._load_internal_page(view, url_q)
         else:
             view.setUrl(url_q)
         return index
@@ -2483,7 +2728,7 @@ class BrowserWindow(QMainWindow):
         for view in list(self.views):
             old_page = view.page()
             current_url = view.url()
-            was_dashboard = bool(getattr(old_page, "_dashboard_active", False))
+            internal_address = self._internal_host(current_url)
             new_page = BrowserPage(self, self.profile, view)
             view.setPage(new_page)
             self._connect_page(view, new_page)
@@ -2492,8 +2737,8 @@ class BrowserWindow(QMainWindow):
                     old_page.deleteLater()
                 except RuntimeError:
                     logger.debug("Old profile page was already destroyed", exc_info=True)
-            if was_dashboard:
-                self._load_dashboard(view)
+            if internal_address is not None:
+                self._load_internal_page(view, current_url)
             else:
                 view.setUrl(current_url if current_url.isValid() else QUrl("about:blank"))
             self._recorded_history_urls.pop(view, None)
@@ -2555,11 +2800,12 @@ class BrowserWindow(QMainWindow):
         if not isinstance(url, str):
             self.statusBar().showMessage("The selected address is invalid.", 5000)
             return
-        if BrowserWindow._is_dashboard_address(url):
+        internal_host = BrowserWindow._internal_host(url)
+        if internal_host is not None:
             view = self.current_view()
             if view is not None:
-                self._load_dashboard(view)
-                self.navbar.url_bar.setText(DASHBOARD_URL)
+                self._load_internal_page(view, f"arma://{internal_host}/")
+                self.navbar.url_bar.setText(f"arma://{internal_host}/")
             return
         try:
             resolved_url = resolve_address_input(url, self.settings.default_search_engine)
@@ -2576,25 +2822,7 @@ class BrowserWindow(QMainWindow):
         self.navbar.url_bar.setText(qurl.toString())
 
     def open_settings(self):
-        dialog = SettingsWindow(
-            self.settings, self.selected_profile, self.history, self,
-            dashboard=self.dashboard_manager,
-        )
-        if self.settings.private_mode:
-            dialog.history_btn.setEnabled(False)
-            dialog.history_btn.setToolTip("History is unavailable in a private session.")
-        if dialog.exec():
-            previous_private_mode = bool(self.settings.private_mode)
-            self.settings.load(self.selected_profile)
-            self._refresh_history()
-            self.dock.setVisible(bool(self.settings.proxy_panel_visible))
-            if previous_private_mode != bool(self.settings.private_mode):
-                self.change_profile(self.selected_profile)
-            else:
-                self._apply_profile_settings(self.profile)
-                self._setup_feature_managers()
-            self.apply_theme()
-            self._sync_dashboard_tabs()
+        self.navigate("arma://settings/")
 
     def apply_theme(self):
         try:
