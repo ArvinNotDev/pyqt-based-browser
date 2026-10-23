@@ -1895,13 +1895,21 @@ class BrowserWindow(QMainWindow):
                 return
             failed_url = info.url().toString()
             current_url = view.url().toString()
-            # Ignore superseded requests and Chromium's normal navigation abort.
-            if info.errorCode() == -3 or (failed_url and current_url and failed_url != current_url):
+            # Chromium reports ERR_ABORTED for ordinary back/forward/reload supersession.
+            if info.errorCode() == -3:
                 return
             message = (info.errorString() or "").strip()
             if not message:
                 message = "The website could not be reached. Check the connection and try again."
             placeholder = self._placeholders.get(view)
+            if placeholder is None and view in self.views:
+                # A page can fail after an earlier successful load removed its placeholder.
+                # Put the same retryable surface in front of that view for subsequent failures.
+                placeholder = self._make_placeholder(failed_url or current_url)
+                placeholder.retry_button.clicked.connect(view.reload)
+                self._placeholders[view] = placeholder
+                self.view_layout.insertWidget(max(0, self.view_layout.indexOf(view)), placeholder)
+                view.hide()
             if placeholder is not None:
                 placeholder._load_error = True
                 placeholder.loading_title_label.setText("This page didn’t load")
