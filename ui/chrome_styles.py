@@ -815,7 +815,7 @@ QToolButton#windowCloseButton:hover {
 }
 """
 
-/* Ensure Qt's stylesheet box model does not expand controls beyond fixed geometry. */
+# Ensure Qt's stylesheet box model does not expand controls beyond fixed geometry.
 LIGHT_CHROME_POLISH += """
 QPushButton#tabScrollButton, QToolButton#tabListButton {
     min-height: 22px; max-height: 22px;
