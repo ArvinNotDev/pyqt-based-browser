@@ -159,8 +159,14 @@ class Window(QMainWindow):
             return
         self.stack.setCurrentIndex(index)
         nav_title = "Home" if index == 0 else ("Bundles" if index == 4 else "Settings")
-        for button in getattr(self, "_proxy_nav_buttons", []):
+        dark = self._display_mode == "dark"
+        for button, icon_name in zip(
+            getattr(self, "_proxy_nav_buttons", []),
+            ("fa6s.house", "fa6s.gear", "fa6s.boxes-stacked"),
+        ):
             button.setChecked(button.text() == nav_title)
+            icon_color = "#ffffff" if button.isChecked() else ("#e8edf3" if dark else "#253041")
+            button.setIcon(qta.icon(icon_name, color=icon_color))
 
     def _show_home(self):
         self._show_page_index(0)
@@ -193,11 +199,6 @@ class Window(QMainWindow):
         muted = "#9aaabd" if dark else "#667386"
         accent = "#287db5"
         hover = "rgba(71,163,242,0.15)" if dark else "rgba(24,118,191,0.11)"
-
-        # CONFIG is shared by Tor settings controls. Keep it in sync with the
-        # browser's authoritative theme instead of retaining a stale Tor-only mode.
-        if CONFIG["mode"] != mode:
-            CONFIG["mode"] = mode
 
         self.setStyleSheet(f"""
             QWidget#torProxyShell {{ background: {surface}; color: {text}; }}

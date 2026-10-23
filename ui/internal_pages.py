@@ -42,10 +42,15 @@ def _shell(browser, title: str, subtitle: str, body: str, active: str) -> str:
 :root { color-scheme: light dark; --bg:#f5f8fc; --surface:rgba(255,255,255,.88); --surface-2:#fff;
  --text:#233047; --muted:#66768c; --line:#dbe3ee; --accent:#176fc1; --accent-soft:#e2efff;
  --danger:#bb4048; --shadow:0 10px 30px rgba(25,50,80,.07); }
-html.dark { --bg:#171c23; --surface:rgba(32,38,48,.96); --surface-2:#1b222b; --text:#e8edf3;
+html.dark { color-scheme:dark; --bg:#171c23; --surface:rgba(32,38,48,.96); --surface-2:#1b222b; --text:#e8edf3;
  --muted:#9aaabd; --line:#3b4655; --accent:#75b4ff; --accent-soft:#263a53; --danger:#ff777e;
  --shadow:0 12px 34px rgba(0,0,0,.2); }
-* { box-sizing:border-box; }
+html.light { color-scheme:light; }
+* { box-sizing:border-box; scrollbar-color:var(--line) var(--bg); scrollbar-width:thin; }
+*::-webkit-scrollbar { width:10px; height:10px; }
+*::-webkit-scrollbar-track { background:var(--bg); }
+*::-webkit-scrollbar-thumb { background:var(--line); border:2px solid var(--bg); border-radius:6px; }
+*::-webkit-scrollbar-thumb:hover { background:var(--muted); }
 html, body { min-height:100%; margin:0; background:var(--bg); color:var(--text);
  font:14px/1.5 "Segoe UI",system-ui,-apple-system,sans-serif; }
 body { padding:20px clamp(12px,3.4vw,36px) 36px; }
@@ -171,6 +176,12 @@ progress { width:100%; height:6px; border:0; border-radius:4px; overflow:hidden;
   window.armaAction = (action, payload = {{}}) => {{
     if (bridge) bridge.dispatch(action, JSON.stringify(payload));
     else window.armaToast('The browser bridge is not ready yet.', 'warning');
+  }};
+  window.armaSetTheme = (mode) => {{
+    const normalized = mode === 'dark' ? 'dark' : 'light';
+    document.documentElement.classList.toggle('dark', normalized === 'dark');
+    document.documentElement.classList.toggle('light', normalized === 'light');
+    document.documentElement.style.colorScheme = normalized;
   }};
   window.armaToast = (message) => {{
     const toast = document.getElementById('toast');

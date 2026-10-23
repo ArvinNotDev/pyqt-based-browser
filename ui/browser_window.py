@@ -2840,6 +2840,14 @@ class BrowserWindow(QMainWindow):
             if getattr(self, "proxy_panel", None) is not None:
                 self.proxy_panel.apply_theme("dark" if dark else "light")
             self._sync_dashboard_tabs()
+            theme_name = "dark" if dark else "light"
+            theme_script = (
+                "window.armaSetTheme && window.armaSetTheme("
+                + json.dumps(theme_name) + ");"
+            )
+            for internal_view in tuple(getattr(self, "views", ())):
+                if self._internal_host(internal_view.url()) in {"settings", "history", "downloads"}:
+                    internal_view.page().runJavaScript(theme_script)
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     

@@ -204,6 +204,8 @@ class ProxyWindow(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        if hasattr(self, "connect_btn"):
+            self.connect_btn.set_compact(self.width() < 340)
         if self.logs_open and self._logs_animation is None:
             width = self._log_drawer_width()
             self.logs_widget.setGeometry(QRect(0, 0, width, self.height()))
@@ -543,7 +545,7 @@ class ProxyWindow(QWidget):
         self.running = True
         # Browser remains routed through the local proxy until the user
         # disconnects, even when Tor bootstrap itself has failed.
-        self.connect_btn.set_connected(True)
+        self.connect_btn.set_routing_active()
         self.btn_whatismyip.setEnabled(False)
         self.timer.stop()
         self.timer_data_usage.stop()
@@ -569,7 +571,7 @@ class ProxyWindow(QWidget):
             # Its SOCKS connection now fails with 502 until the user disconnects.
             proxy.set_tor_routing(True)
             self.connected = False
-            self.connect_btn.set_connected(True)
+            self.connect_btn.set_routing_active()
             self.btn_whatismyip.setEnabled(False)
             if self.controller:
                 try:

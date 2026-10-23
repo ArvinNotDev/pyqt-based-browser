@@ -81,6 +81,19 @@ class PulseButton(QPushButton):
             self.setText("DISCONNECT")
             self.update()
 
+    def set_routing_active(self):
+        """Show a persistent disconnect action without implying Tor is healthy."""
+        self._connected_feedback_timer.stop()
+        self._set_state("disconnect", "DISCONNECT")
+        self.setToolTip("Tor is unavailable. Click to leave Tor routing and restore direct browsing.")
+
+    def set_compact(self, compact: bool):
+        """Scale the Connect control down for narrow/mobile browser panels."""
+        target = 220 if compact else 264
+        if self.width() != target or self.height() != target:
+            self.setFixedSize(target, target)
+            self.update()
+
     def set_disconnecting(self):
         self._set_state("stopping", "DISCONNECTING…")
         self.setToolTip("Stopping Tor and the local proxy.")
@@ -113,6 +126,9 @@ class PulseButton(QPushButton):
             highlight_color = highlight_color.lighter(108)
 
         # During startup the outer rings move faster and use a cool blue color.
+        scale = min(self.width(), self.height()) / 264.0
+        if not self.isEnabled():
+            painter.setOpacity(0.62)
         for radius, alpha, width, low, high in (
             (self._halo_radius, 36, 2.0, 108.0, 127.0),
             (self._pulse_radius, 78, 2.4, 101.0, 124.0),
@@ -121,28 +137,28 @@ class PulseButton(QPushButton):
             progress = min(1.0, max(0.0, (radius - low) / (high - low)))
             ring_color.setAlpha(int(alpha * (1.0 - 0.78 * progress)))
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QPen(ring_color, width))
-            painter.drawEllipse(center, int(radius), int(radius))
+            painter.setPen(QPen(ring_color, width * scale))
+            painter.drawEllipse(center, int(radius * scale), int(radius * scale))
 
-        main_radius = 100
-        gradient = QRadialGradient(center.x() - 30, center.y() - 37, main_radius * 2.0)
+        main_radius = 100 * scale
+        gradient = QRadialGradient(center.x() - 30 * scale, center.y() - 37 * scale, main_radius * 2.0)
         gradient.setColorAt(0.0, highlight_color)
         gradient.setColorAt(0.62, base_color)
         gradient.setColorAt(1.0, QColor(edge))
-        painter.setPen(QPen(base_color.lighter(128), 1.4))
+        painter.setPen(QPen(base_color.lighter(128), 1.4 * scale))
         painter.setBrush(QBrush(gradient))
-        painter.drawEllipse(center, main_radius, main_radius)
+        painter.drawEllipse(center, int(main_radius), int(main_radius))
 
         outline = QColor("#ffffff")
         outline.setAlpha(45)
-        painter.setPen(QPen(outline, 1.2))
+        painter.setPen(QPen(outline, 1.2 * scale))
         painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(center, 78, 78)
+        painter.drawEllipse(center, int(78 * scale), int(78 * scale))
 
         painter.setPen(QColor("#ffffff"))
         font = painter.font()
         font.setBold(True)
-        font.setPointSize(13 if self._state in {"connecting", "stopping"} else 14)
+        font.setPointSize(max(10, int((13 if self._state in {"connecting", "stopping"} else 14) * scale)))
         painter.setFont(font)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
         painter.end()
