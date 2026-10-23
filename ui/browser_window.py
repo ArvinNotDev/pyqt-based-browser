@@ -400,6 +400,38 @@ class BrowserPage(QWebEnginePage):
         self._dashboard_active = False
         self._dashboard_channel: QWebChannel | None = None
         self._dashboard_bridge: DashboardBridge | None = None
+        self._media_decode_warning_shown = False
+        self.loadStarted.connect(self._reset_media_decode_warning)
+
+    def _reset_media_decode_warning(self) -> None:
+        self._media_decode_warning_shown = False
+
+    def javaScriptConsoleMessage(self, level, message, line_number, source_id) -> None:
+        """Keep Chromium diagnostics intact and surface a helpful audio compatibility hint."""
+        normalized = str(message).casefold()
+        is_audio_decode_error = (
+            "loading fsb failed for audio clip" in normalized
+            or "unable to decode audio data" in normalized
+        )
+        if is_audio_decode_error and not self._media_decode_warning_shown:
+            self._media_decode_warning_shown = True
+            QTimer.singleShot(0, self._show_audio_decode_warning)
+        super().javaScriptConsoleMessage(level, message, line_number, source_id)
+
+    def _show_audio_decode_warning(self) -> None:
+        browser = self.browser
+        if getattr(browser, "_closing", False):
+            return
+        view = next(
+            (candidate for candidate in getattr(browser, "views", ()) if candidate.page() is self),
+            None,
+        )
+        if view is None or view is not browser.current_view():
+            return
+        browser.statusBar().showMessage(
+            "This page could not decode an audio asset. Try Browser menu → Open in default browser; audio codec support may differ.",
+            10000,
+        )
 
     def _enable_dashboard_bridge(self) -> None:
         was_active = self._dashboard_active
