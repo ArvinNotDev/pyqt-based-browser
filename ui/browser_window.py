@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QDockWidget, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
-from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics
+from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -635,6 +635,8 @@ class BrowserWindow(QMainWindow):
                 self.navbar.show_history_requested.connect(self.show_history)
             if hasattr(self.navbar, "show_downloads_requested"):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
+            if hasattr(self.navbar, "open_external_requested"):
+                self.navbar.open_external_requested.connect(self.open_current_page_externally)
         except (AttributeError, RuntimeError):
             logger.exception("Could not connect one or more navigation actions")
 
@@ -2153,6 +2155,21 @@ class BrowserWindow(QMainWindow):
         self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
         self.new_tab()
+
+
+    def open_current_page_externally(self) -> None:
+        """Open the current web address in the operating system's default browser."""
+        view = self.current_view()
+        if view is None:
+            return
+        url = view.url()
+        if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
+            self.statusBar().showMessage("Only web pages can be opened externally.", 3000)
+            return
+        if QDesktopServices.openUrl(url):
+            self.statusBar().showMessage("Opened in the default browser.", 2500)
+        else:
+            self.statusBar().showMessage("Could not open the default browser.", 4000)
 
     def navigate(self, url: str):
         if isinstance(url, QUrl):
