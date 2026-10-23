@@ -365,11 +365,12 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.retry_button.show.assert_called_once_with()
 
 def test_proxy_panel_is_created_only_when_requested():
+    placeholder = Mock()
     browser = SimpleNamespace(
         proxy_panel=None,
         profile=object(),
         dock=SimpleNamespace(setWidget=Mock()),
-        _proxy_placeholder=Mock(),
+        _proxy_placeholder=placeholder,
     )
     panel = Mock()
 
@@ -380,7 +381,7 @@ def test_proxy_panel_is_created_only_when_requested():
     assert browser.proxy_panel is panel
     assert panel.profile is browser.profile
     browser.dock.setWidget.assert_called_once_with(panel)
-    browser._proxy_placeholder.deleteLater.assert_called_once_with()
+    placeholder.deleteLater.assert_called_once_with()
     assert browser._proxy_placeholder is None
     create_panel.assert_called_once_with(browser, None)
 
