@@ -13,7 +13,7 @@ from pathlib import Path
 from torproxy.paths import user_directories
 from torproxy.tor_manager import TorManager, TorManagerError, TorSettings
 
-from proxy.config import BUNDLE_DIR, IS_WINDOWS
+from proxy.config import BUNDLE_DIR, CONFIG, IS_WINDOWS
 from proxy.proxy import ProxyHandler, ThreadedHTTPServer, worker_data_usage_tracker
 from proxy.updater import (
     check_bundle_compatibility,

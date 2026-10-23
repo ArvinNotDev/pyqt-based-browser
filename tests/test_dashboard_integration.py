@@ -150,7 +150,10 @@ def test_dashboard_actions_are_rejected_from_external_pages():
 
 
 def test_dashboard_state_sync_checks_origin_again_at_execution_time():
-    browser = SimpleNamespace(_dashboard_state=lambda: {"notes": "private text"})
+    browser = SimpleNamespace(
+        _dashboard_state=lambda: {"notes": "private text"},
+        _internal_host=lambda url: "dashboard" if url.toString().startswith("arma://dashboard/") else None,
+    )
     page = SimpleNamespace(
         _dashboard_active=True,
         url=lambda: QUrl("arma://dashboard/"),

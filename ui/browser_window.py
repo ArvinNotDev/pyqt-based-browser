@@ -933,7 +933,8 @@ class BrowserWindow(QMainWindow):
         self._proxy_placeholder = None
         if placeholder is not None:
             placeholder.deleteLater()
-        panel.apply_theme("dark" if bool(self.settings.dark_mode) else "light")
+        dark_mode = bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+        panel.apply_theme("dark" if dark_mode else "light")
         return panel
 
     def show_proxy(self):
