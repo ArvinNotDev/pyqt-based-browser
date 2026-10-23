@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
-    QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
+    QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
 from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices
 from PySide6.QtWebEngineWidgets import QWebEngineView
