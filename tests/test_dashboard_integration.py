@@ -522,8 +522,8 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     tabs = CustomTabBar()
     tabs.resize(640, 50)
     first = tabs.add_tab("First website", make_active=True)
-    second = tabs.add_tab("Second website", make_active=False)
-    third = tabs.add_tab("Third website", make_active=False)
+    tabs.add_tab("Second website", make_active=False)
+    tabs.add_tab("Third website", make_active=False)
     tabs.show()
     app.processEvents()
 
