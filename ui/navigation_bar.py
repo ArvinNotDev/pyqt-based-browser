@@ -84,6 +84,8 @@ class NavigationBar(QToolBar):
     bookmark_requested = Signal()
     show_bookmarks_requested = Signal()
     show_downloads_requested = Signal()
+    downloads_panel_requested = Signal()
+    theme_toggle_requested = Signal()
     show_history_requested = Signal()
     open_external_requested = Signal()
     reload_bypass_cache_requested = Signal()
@@ -174,13 +176,15 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.clicked.connect(self.bookmark_requested.emit)
         self._add_widget(self.bookmark_btn)
 
-        self.downloads_btn = self._button("", "Open downloads manager", "utilityToolButton")
+        self.downloads_btn = self._button("", "Show or hide downloads panel", "utilityToolButton")
         self.downloads_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.downloads_btn.setIcon(self._awesome_icon("fa5s.download"))
         self.downloads_btn.setIconSize(QSize(17, 17))
-        self.downloads_btn.setAccessibleName("Downloads manager")
+        self.downloads_btn.setAccessibleName("Show or hide downloads panel")
         self.downloads_btn.setFixedSize(34, 30)
-        self.downloads_btn.clicked.connect(self.show_downloads_requested.emit)
+        self.downloads_btn.setCheckable(True)
+        self.downloads_btn.setProperty("downloadsPanelOpen", False)
+        self.downloads_btn.clicked.connect(self.downloads_panel_requested.emit)
         self._add_widget(self.downloads_btn)
 
         self.proxy_panel_btn = self._button("", "Show or hide Tor proxy", "utilityToolButton")
@@ -193,6 +197,14 @@ class NavigationBar(QToolBar):
         self.proxy_panel_btn.setProperty("proxyPanelOpen", False)
         self.proxy_panel_btn.clicked.connect(self.proxy_panel_requested.emit)
         self._add_widget(self.proxy_panel_btn)
+
+        self.theme_btn = self._button("", "Switch browser theme", "utilityToolButton")
+        self.theme_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.theme_btn.setIconSize(QSize(17, 17))
+        self.theme_btn.setAccessibleName("Switch browser theme")
+        self.theme_btn.setFixedSize(34, 30)
+        self.theme_btn.clicked.connect(self.theme_toggle_requested.emit)
+        self._add_widget(self.theme_btn)
 
         self.addSeparator()
         self.profile_btn = self._action("Profiles", "fa5s.user-circle")
@@ -476,8 +488,20 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.setIcon(
             self._awesome_icon("fa5s.star" if self._bookmark_active else "fa5.star")
         )
-        self.downloads_btn.setIcon(self._awesome_icon("fa5s.download"))
-        self.proxy_panel_btn.setIcon(self._awesome_icon("fa5s.globe"))
+        downloads_open = self.downloads_btn.isChecked()
+        proxy_open = self.proxy_panel_btn.isChecked()
+        self.downloads_btn.setIcon(qta.icon(
+            "fa5s.download",
+            color="#2f81f7" if downloads_open else self._icon_color(),
+        ))
+        self.proxy_panel_btn.setIcon(qta.icon(
+            "fa5s.globe",
+            color="#2f81f7" if proxy_open else self._icon_color(),
+        ))
+        dark = bool(getattr(self.settings, "dark_mode", False))
+        self.theme_btn.setIcon(self._awesome_icon("fa5s.sun" if dark else "fa5s.moon"))
+        self.theme_btn.setToolTip("Switch to light theme" if dark else "Switch to dark theme")
+        self.theme_btn.setAccessibleName(self.theme_btn.toolTip())
         self._refresh_profile_icon()
         self._close_suggestion_popup()
 
@@ -490,6 +514,24 @@ class NavigationBar(QToolBar):
         button.setProperty("proxyPanelOpen", bool(opened))
         button.setToolTip("Hide Tor proxy panel" if opened else "Show Tor proxy panel")
         button.setAccessibleName(button.toolTip())
+        color = "#2f81f7" if opened else self._icon_color()
+        button.setIcon(qta.icon("fa5s.globe", color=color))
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.blockSignals(False)
+        button.update()
+
+    def set_downloads_panel_state(self, opened: bool) -> None:
+        button = getattr(self, "downloads_btn", None)
+        if button is None:
+            return
+        button.blockSignals(True)
+        button.setChecked(bool(opened))
+        button.setProperty("downloadsPanelOpen", bool(opened))
+        button.setToolTip("Hide downloads panel" if opened else "Show downloads panel")
+        button.setAccessibleName(button.toolTip())
+        color = "#2f81f7" if opened else self._icon_color()
+        button.setIcon(qta.icon("fa5s.download", color=color))
         button.style().unpolish(button)
         button.style().polish(button)
         button.blockSignals(False)

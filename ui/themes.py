@@ -69,6 +69,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
 QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #e9edf3; }
 QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #dfe5ed; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #3979d6; }
+QToolButton#utilityToolButton:checked,
+QToolButton#utilityToolButton[proxyPanelOpen="true"],
+QToolButton#utilityToolButton[downloadsPanelOpen="true"] {
+    background: #e3efff; border-color: #9fc4fa; color: #246fd2;
+}
+QToolButton#utilityToolButton:checked:hover,
+QToolButton#utilityToolButton[proxyPanelOpen="true"]:hover,
+QToolButton#utilityToolButton[downloadsPanelOpen="true"]:hover {
+    background: #d3e5ff; border-color: #77aaf1;
+}
 QPushButton#tabPlusButton {
     color: #3f4752;
     background-color: #e9edf3;
@@ -523,6 +533,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
 QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #2a3038; }
 QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #343c47; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #82aff4; }
+QToolButton#utilityToolButton:checked,
+QToolButton#utilityToolButton[proxyPanelOpen="true"],
+QToolButton#utilityToolButton[downloadsPanelOpen="true"] {
+    background: rgba(69,139,237,35); border-color: rgba(112,169,249,170); color: #82b6ff;
+}
+QToolButton#utilityToolButton:checked:hover,
+QToolButton#utilityToolButton[proxyPanelOpen="true"]:hover,
+QToolButton#utilityToolButton[downloadsPanelOpen="true"]:hover {
+    background: rgba(82,154,255,50); border-color: rgba(139,188,255,215);
+}
 QPushButton#tabPlusButton {
     color: #c7ced8;
     background-color: #2a3038;

@@ -34,6 +34,8 @@ class DownloadsPanel(QFrame):
 
     close_requested = Signal()
     mode_toggle_requested = Signal()
+    open_manager_requested = Signal()
+    state_changed = Signal(bool)
     PANEL_WIDTH = 368
 
     def __init__(self, manager=None, parent=None):
@@ -70,6 +72,14 @@ class DownloadsPanel(QFrame):
         self.count_label.setObjectName("downloadsSubtitle")
         title_box.addWidget(self.count_label)
         header.addLayout(title_box, 1)
+        self.manager_button = QToolButton(self)
+        self.manager_button.setObjectName("downloadsManagerButton")
+        self.manager_button.setIcon(qta.icon("fa5s.external-link-alt"))
+        self.manager_button.setToolTip("Open the full downloads manager")
+        self.manager_button.setAccessibleName("Open the full downloads manager")
+        self.manager_button.setFixedSize(30, 30)
+        self.manager_button.clicked.connect(self.open_manager_requested.emit)
+        header.addWidget(self.manager_button)
         self.close_button = QToolButton(self)
         self.close_button.setObjectName("downloadsCloseButton")
         self.close_button.setText("×")
@@ -152,11 +162,17 @@ class DownloadsPanel(QFrame):
         self.refresh()
 
     def open(self) -> None:
+        changed = not self._is_open
         self._is_open = True
         self.show()
+        if changed:
+            self.state_changed.emit(True)
 
     def close_panel(self) -> None:
+        changed = self._is_open
         self._is_open = False
+        if changed:
+            self.state_changed.emit(False)
 
     def set_docked(self, docked: bool) -> None:
         """Label the one-click action that switches between overlay and split layouts."""

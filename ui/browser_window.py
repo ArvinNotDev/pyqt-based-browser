@@ -710,6 +710,8 @@ class BrowserWindow(QMainWindow):
         self.downloads_panel = DownloadsPanel(self.download_manager, self.content_row)
         self.downloads_panel.close_requested.connect(self._close_downloads_panel)
         self.downloads_panel.mode_toggle_requested.connect(self._toggle_downloads_panel_mode)
+        self.downloads_panel.open_manager_requested.connect(self.show_downloads)
+        self.downloads_panel.state_changed.connect(self._on_downloads_panel_state_changed)
         self.downloads_panel.hide()
         self._downloads_panel_mode = "overlay"
         self._downloads_mode_transitioning = False
@@ -808,6 +810,10 @@ class BrowserWindow(QMainWindow):
                 self.navbar.show_history_requested.connect(self.show_history)
             if hasattr(self.navbar, "show_downloads_requested"):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
+            if hasattr(self.navbar, "downloads_panel_requested"):
+                self.navbar.downloads_panel_requested.connect(self.toggle_downloads_panel)
+            if hasattr(self.navbar, "theme_toggle_requested"):
+                self.navbar.theme_toggle_requested.connect(self.toggle_theme)
             if hasattr(self.navbar, "open_external_requested"):
                 self.navbar.open_external_requested.connect(self.open_current_page_externally)
             if hasattr(self.navbar, "reload_bypass_cache_requested"):
@@ -833,6 +839,8 @@ class BrowserWindow(QMainWindow):
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
+        self.navbar.set_proxy_panel_state(self.dock.isVisible())
+        self.navbar.set_downloads_panel_state(self.downloads_panel.is_open)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
         QTimer.singleShot(120, self._initialize_deferred_history)
@@ -938,7 +946,9 @@ class BrowserWindow(QMainWindow):
         return panel
 
     def show_proxy(self):
-        visible = not self.dock.isVisible()
+        # QWidget.isHidden reflects the explicit panel toggle even while the
+        # whole browser window is being shown or minimized.
+        visible = self.dock.isHidden()
         if visible:
             self._ensure_proxy_panel()
             self.dock.setMinimumWidth(320)
@@ -953,6 +963,32 @@ class BrowserWindow(QMainWindow):
             self.dock.raise_()
         else:
             self.dock.setVisible(False)
+
+    def toggle_downloads_panel(self) -> None:
+        """Toggle the compact left downloads drawer; the toolbar icon mirrors it."""
+        if getattr(self, "_downloads_mode_transitioning", False) or getattr(self, "_downloads_splitter_animating", False):
+            return
+        opening = not bool(self.downloads_panel.is_open)
+        self._animate_downloads_panel(opening)
+
+    def _on_downloads_panel_state_changed(self, opened: bool) -> None:
+        navbar = getattr(self, "navbar", None)
+        if navbar is not None:
+            navbar.set_downloads_panel_state(opened)
+
+    def toggle_theme(self) -> None:
+        """Persist an immediate browser theme change from the toolbar."""
+        previous = bool(self.settings.dark_mode)
+        self.settings.dark_mode = not previous
+        try:
+            self.settings.save(self.selected_profile)
+        except (OSError, ValueError, TypeError):
+            self.settings.dark_mode = previous
+            logger.exception("Could not save browser theme")
+            self.statusBar().showMessage("Could not save browser theme.", 3500)
+            return
+        self.apply_theme()
+        self.statusBar().showMessage("Dark theme enabled." if self.settings.dark_mode else "Light theme enabled.", 1800)
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -1017,6 +1053,9 @@ class BrowserWindow(QMainWindow):
     def _on_proxy_visibility_changed(self, visible: bool) -> None:
         if visible and self.proxy_panel is None:
             self._ensure_proxy_panel()
+        navbar = getattr(self, "navbar", None)
+        if navbar is not None:
+            navbar.set_proxy_panel_state(visible)
         self._update_proxy_menu_action(visible)
         if self._closing or bool(self.settings.proxy_panel_visible) == bool(visible):
             return
