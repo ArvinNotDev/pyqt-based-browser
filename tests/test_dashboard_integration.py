@@ -493,3 +493,21 @@ def test_cache_bypass_reload_is_limited_to_web_pages():
     BrowserWindow.reload_current_page_bypassing_cache(browser)
     page.triggerAction.assert_not_called()
 
+
+
+
+def test_page_progress_uses_a_reserved_slot_and_resets_without_hiding():
+    view = Mock()
+    view.page.return_value.isLoading.return_value = False
+    progress_bar = Mock()
+    browser = SimpleNamespace(
+        views=[view],
+        current_view=lambda: view,
+        progress_bar=progress_bar,
+    )
+
+    BrowserWindow._hide_progress_if_current(browser, view)
+
+    progress_bar.setRange.assert_called_once_with(0, 100)
+    progress_bar.setValue.assert_called_once_with(0)
+    progress_bar.hide.assert_not_called()

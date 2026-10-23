@@ -641,13 +641,15 @@ class BrowserWindow(QMainWindow):
         self.navbar.profile_selected.connect(self.on_profile_selected)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
 
+        # Reserve a slim loading slot in the layout at all times so navigation
+        # never nudges the tab strip or page viewport when a load starts/finishes.
         self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setObjectName("pageLoadProgress")
+        self.progress_bar.setFixedHeight(3)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #29a3ef; }")
-        self.progress_bar.hide()
+        self.progress_bar.setAccessibleName("Page loading progress")
 
         self.tabbar = CustomTabBar()
         self.tabbar.setObjectName("browserTabBar")
@@ -2812,8 +2814,11 @@ class BrowserWindow(QMainWindow):
         self._set_tab_visibility()
 
     def _hide_progress_if_current(self, view: QWebEngineView) -> None:
+        # The widget is intentionally never hidden: its 3 px slot is reserved
+        # above the viewport so completing a navigation cannot cause layout shift.
         if view in self.views and view is self.current_view() and not view.page().isLoading():
-            self.progress_bar.hide()
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
 
     def _update_navigation_actions(self, view: QWebEngineView) -> None:
         if view is not self.current_view():

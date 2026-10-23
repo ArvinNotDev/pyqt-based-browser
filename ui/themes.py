@@ -418,7 +418,11 @@ QProgressBar {
     border: none;
     border-radius: 4px;
 }
-QProgressBar::chunk { background: #3979d6; border-radius: 4px; }
+QProgressBar::chunk { background: #3979d6; border-radius: 2px; }
+QProgressBar#pageLoadProgress {
+    background: transparent; border: none; border-radius: 2px; margin: 0; padding: 0;
+}
+QProgressBar#pageLoadProgress::chunk { background: #3979d6; border-radius: 2px; }
 QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #d8e0eb; }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
 
@@ -881,7 +885,11 @@ QProgressBar {
     border: none;
     border-radius: 4px;
 }
-QProgressBar::chunk { background: #82aff4; border-radius: 4px; }
+QProgressBar::chunk { background: #82aff4; border-radius: 2px; }
+QProgressBar#pageLoadProgress {
+    background: transparent; border: none; border-radius: 2px; margin: 0; padding: 0;
+}
+QProgressBar#pageLoadProgress::chunk { background: #82aff4; border-radius: 2px; }
 QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid rgba(255,255,255,38); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
 
