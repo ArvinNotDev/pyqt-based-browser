@@ -82,6 +82,7 @@ class NavigationBar(QToolBar):
     show_downloads_requested = Signal()
     show_history_requested = Signal()
     open_external_requested = Signal()
+    reload_bypass_cache_requested = Signal()
     proxy_panel_requested = Signal()
     gaming_mode_toggled = Signal(bool)
     site_connection_toggled = Signal(bool)
@@ -178,6 +179,12 @@ class NavigationBar(QToolBar):
         self.new_tab_action = QAction("New tab", self)
         self.new_tab_action.triggered.connect(self.new_tab_requested.emit)
         self.browser_menu.addAction(self.new_tab_action)
+        self.reload_bypass_cache_action = QAction("Reload without cache", self)
+        self.reload_bypass_cache_action.setToolTip(
+            "Reload the current page while bypassing the local HTTP cache (Ctrl+Shift+R)"
+        )
+        self.reload_bypass_cache_action.triggered.connect(self.reload_bypass_cache_requested.emit)
+        self.browser_menu.addAction(self.reload_bypass_cache_action)
         self.browser_menu.addSeparator()
 
         self.bookmark_action = QAction("Bookmark this page", self)
