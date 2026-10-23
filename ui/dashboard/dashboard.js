@@ -49,12 +49,25 @@
     document.body.classList.toggle('compact', state.density === 'compact');
     document.body.classList.toggle('no-motion', state.animations === false);
     document.body.classList.toggle('light', state.dark_mode === false);
+    applyViewportMode();
     for (const name of ['bookmarks', 'recent', 'closed', 'notes', 'focus']) {
       const element = byId(`${name}-widget`);
-      if (element) element.hidden = Boolean(state.widgets && state.widgets[name] === false);
+      if (!element) continue;
+      element.hidden = Boolean(state.widgets && state.widgets[name] === false);
+      const size = (state.widget_sizes || {})[name] || 'standard';
+      element.classList.remove('size-compact', 'size-standard', 'size-wide');
+      element.classList.add(`size-${['compact', 'standard', 'wide'].includes(size) ? size : 'standard'}`);
     }
     applyWidgetOrder();
   }
+
+  function applyViewportMode() {
+    const height = window.innerHeight || document.documentElement.clientHeight || 720;
+    document.body.classList.toggle('viewport-compact', height < 760);
+    document.body.classList.toggle('viewport-tight', height < 600);
+  }
+
+  window.addEventListener('resize', applyViewportMode, { passive: true });
 
   function applyWidgetOrder() {
     const host = byId('lower-grid');
@@ -81,6 +94,7 @@
       handle.classList.add('widget-drag-handle');
       handle.draggable = true;
       handle.title = 'Drag to rearrange this card';
+      handle.setAttribute('aria-label', 'Drag to rearrange this widget');
       handle.addEventListener('dragstart', event => {
         if (event.target.closest('button, a, input, textarea, select')) {
           event.preventDefault();
@@ -240,7 +254,7 @@
     if (!Array.isArray(items) || items.length === 0) {
       const empty = document.createElement('div'); empty.className = 'link-empty'; empty.textContent = emptyText; host.appendChild(empty); return;
     }
-    items.slice(0, 6).forEach(item => {
+    items.slice(0, 4).forEach(item => {
       const button = document.createElement('a');
       button.href = '#'; button.className = 'link-item';
       button.appendChild(favicon(item.url, (item.title || '↗').charAt(0).toUpperCase()));
