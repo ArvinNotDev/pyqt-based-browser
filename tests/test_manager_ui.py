@@ -12,12 +12,37 @@ from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
 from ui.bookmarks_bar import BookmarksBar
 from ui.bookmarks_dialog import BookmarksDialog
 from ui.downloads_dialog import DownloadsDialog
+from ui.navigation_bar import NavigationBar
+from ui.settings import Settings
 from ui.themes import dark_theme, light_theme
 
 
 @pytest.fixture(scope="session")
 def qapp():
     return QApplication.instance() or QApplication([])
+
+
+def test_navigation_bar_stays_fixed_when_entering_long_or_rtl_search(qapp):
+    navbar = NavigationBar(["Guest"], Settings())
+    navbar.resize(1100, 42)
+    navbar.show()
+    qapp.processEvents()
+    starting_geometry = navbar.url_bar.geometry()
+
+    navbar.url_bar.setText("https://search.example/?q=" + "long-query-" * 100)
+    qapp.processEvents()
+    assert navbar.url_bar.geometry() == starting_geometry
+    assert navbar.width() == 1100
+
+    navbar.url_bar.setText("جستجوی آزمایشی")
+    qapp.processEvents()
+    assert navbar.layoutDirection() == Qt.LeftToRight
+    assert navbar.url_bar.layoutDirection() == Qt.LeftToRight
+    assert navbar.url_bar.geometry() == starting_geometry
+    assert navbar.menu_button.text() == "⋮"
+    assert navbar.menu_button.menu() is None
+    assert navbar.menu_button.geometry().right() < navbar.width()
+    navbar.close()
 
 
 class FakeBookmarksManager:
