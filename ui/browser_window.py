@@ -1966,6 +1966,10 @@ class BrowserWindow(QMainWindow):
         if placeholder is None:
             view.setVisible(view is self.current_view())
             return
+        if not ok and page.isLoading() and not getattr(placeholder, "_load_error", False):
+            # A superseded navigation can finish with ok=False while its replacement
+            # is already loading. Keep the placeholder until the active request settles.
+            return
         if not ok and getattr(placeholder, "_load_error", False):
             # Keep the useful, retryable loading surface instead of fading to a blank page.
             placeholder.setVisible(view is self.current_view())
