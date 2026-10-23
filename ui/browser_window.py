@@ -2800,6 +2800,13 @@ class BrowserWindow(QMainWindow):
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
+        # The 3 px progress slot is always present, but its fill belongs to the
+        # selected page only. Never leave a previous tab's 100% bar on screen.
+        if view.page().isLoading():
+            self.progress_bar.setRange(0, 0)
+        else:
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
         self._update_bookmarks_bar_visibility(view.url())
         self.navbar.url_bar.setText(view.url().toString())
         self._sync_site_connection_action(view.url().toString())

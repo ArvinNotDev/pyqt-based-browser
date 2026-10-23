@@ -547,3 +547,33 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     tabs.close()
     tabs.deleteLater()
     app.processEvents()
+
+
+
+def test_activating_a_loaded_tab_clears_stale_progress_without_hiding_slot():
+    progress_bar = Mock()
+    loading_view = Mock()
+    loading_view.page.return_value.isLoading.return_value = True
+    browser = SimpleNamespace(
+        current_index=0,
+        views=[loading_view],
+        progress_bar=progress_bar,
+        _set_tab_visibility=Mock(),
+        _update_bookmarks_bar_visibility=Mock(),
+        navbar=SimpleNamespace(
+            url_bar=SimpleNamespace(setText=Mock()),
+            set_site_connection_state=Mock(),
+            set_bookmark_state=Mock(),
+            back_btn=SimpleNamespace(setEnabled=Mock()),
+            forward_btn=SimpleNamespace(setEnabled=Mock()),
+        ),
+        current_view=lambda: loading_view,
+        _sync_site_connection_action=Mock(),
+        bookmarks_manager=None,
+        _update_navigation_actions=Mock(),
+        tabbar=SimpleNamespace(set_active=Mock()),
+    )
+    BrowserWindow._activate(browser, 0)
+    progress_bar.setRange.assert_called_once_with(0, 0)
+    progress_bar.setValue.assert_not_called()
+    progress_bar.hide.assert_not_called()
