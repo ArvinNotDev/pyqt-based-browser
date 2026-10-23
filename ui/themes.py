@@ -352,6 +352,67 @@ QToolButton#bookmarkItem, QToolButton#bookmarkMore, QToolButton#bookmarkManage {
     padding-left: 9px;
     padding-right: 9px;
 }
+
+/* Translucent glass treatment for the browser's native utility surfaces. */
+QMenu {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,250), stop:1 rgba(239,245,253,245));
+    border: 1px solid rgba(255,255,255,235);
+    border-radius: 12px;
+    padding: 5px;
+}
+QMenu::item { padding: 8px 30px 8px 12px; border-radius: 7px; }
+QMenu::item:selected { background: rgba(57,121,214,32); color: #20242a; }
+QMenu::separator { background: rgba(133,150,173,90); margin: 5px 8px; }
+QFrame#suggestionPopup, QFrame#downloadToast {
+    background: rgba(250,252,255,242);
+    border: 1px solid rgba(255,255,255,235);
+    border-radius: 13px;
+}
+QFrame#downloadsPanel, QFrame#downloadCard, QFrame#settingsCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(255,255,255,245), stop:1 rgba(235,242,251,236));
+    border-color: rgba(255,255,255,225);
+    border-radius: 14px;
+}
+QDialog#settingsDialog, QDialog#historyDialog, QDialog#bookmarksDialog {
+    background: rgba(244,248,254,248);
+    border: 1px solid rgba(255,255,255,230);
+    border-radius: 16px;
+}
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background: rgba(255,255,255,226);
+    border-color: rgba(191,207,229,208);
+    border-radius: 9px;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus { border-color: #3979d6; }
+QListWidget, QTableWidget, QTreeWidget {
+    background: rgba(255,255,255,220);
+    alternate-background-color: rgba(226,236,249,150);
+    border-color: rgba(202,215,233,185);
+    border-radius: 10px;
+    selection-background-color: rgba(57,121,214,48);
+}
+QHeaderView::section {
+    background: rgba(225,234,247,214);
+    border-bottom: 1px solid rgba(190,206,229,200);
+}
+QPushButton {
+    background: rgba(255,255,255,198);
+    border-color: rgba(190,207,230,198);
+    border-radius: 10px;
+}
+QPushButton:hover { background: rgba(223,235,251,235); border-color: rgba(145,177,220,220); }
+QPushButton:pressed { background: rgba(207,224,247,245); }
+QPushButton#primaryButton { background: #326fca; border-color: #326fca; color: #fff; }
+QProgressBar {
+    background: rgba(204,217,235,190);
+    border: none;
+    border-radius: 4px;
+}
+QProgressBar::chunk { background: #3979d6; border-radius: 4px; }
+QDockWidget#proxyDock { background: rgba(240,246,254,220); border-color: rgba(255,255,255,220); }
+QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
+
 """
 
 
@@ -705,4 +766,65 @@ QToolButton#bookmarkItem, QToolButton#bookmarkMore, QToolButton#bookmarkManage {
     padding-left: 9px;
     padding-right: 9px;
 }
+
+/* Translucent glass treatment for the browser's native utility surfaces. */
+QMenu {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(43,51,64,250), stop:1 rgba(26,32,42,246));
+    border: 1px solid rgba(255,255,255,40);
+    border-radius: 12px;
+    padding: 5px;
+}
+QMenu::item { padding: 8px 30px 8px 12px; border-radius: 7px; }
+QMenu::item:selected { background: rgba(130,175,244,40); color: #f3f6fb; }
+QMenu::separator { background: rgba(151,168,191,75); margin: 5px 8px; }
+QFrame#suggestionPopup, QFrame#downloadToast {
+    background: rgba(32,39,50,246);
+    border: 1px solid rgba(255,255,255,38);
+    border-radius: 13px;
+}
+QFrame#downloadsPanel, QFrame#downloadCard, QFrame#settingsCard {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(45,53,66,248), stop:1 rgba(28,34,44,244));
+    border-color: rgba(255,255,255,35);
+    border-radius: 14px;
+}
+QDialog#settingsDialog, QDialog#historyDialog, QDialog#bookmarksDialog {
+    background: rgba(27,32,41,250);
+    border: 1px solid rgba(255,255,255,38);
+    border-radius: 16px;
+}
+QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background: rgba(18,23,31,230);
+    border-color: rgba(93,109,132,198);
+    border-radius: 9px;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QComboBox:focus,
+QSpinBox:focus, QDoubleSpinBox:focus { border-color: #82aff4; }
+QListWidget, QTableWidget, QTreeWidget {
+    background: rgba(26,32,41,235);
+    alternate-background-color: rgba(45,54,68,178);
+    border-color: rgba(255,255,255,34);
+    border-radius: 10px;
+    selection-background-color: rgba(130,175,244,42);
+}
+QHeaderView::section {
+    background: rgba(51,61,77,225);
+    border-bottom: 1px solid rgba(255,255,255,32);
+}
+QPushButton {
+    background: rgba(49,58,72,215);
+    border-color: rgba(255,255,255,42);
+    border-radius: 10px;
+}
+QPushButton:hover { background: rgba(67,80,100,235); border-color: rgba(130,175,244,90); }
+QPushButton:pressed { background: rgba(77,94,119,245); }
+QPushButton#primaryButton { background: #376fb9; border-color: #376fb9; color: #fff; }
+QProgressBar {
+    background: rgba(56,66,82,205);
+    border: none;
+    border-radius: 4px;
+}
+QProgressBar::chunk { background: #82aff4; border-radius: 4px; }
+QDockWidget#proxyDock { background: rgba(26,32,41,232); border-color: rgba(255,255,255,38); }
+QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
+
 """
