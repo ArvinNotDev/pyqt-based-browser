@@ -99,6 +99,7 @@ class ProxyWindow(QWidget):
         layout_top_ip.addWidget(self.tor_ip_label)
 
         self.btn_whatismyip = QPushButton(WHAT_IS_MY_IP)
+        self.btn_whatismyip.setEnabled(False)
         layout_ip.addWidget(self.btn_whatismyip)
         self.btn_whatismyip.clicked.connect(self.whatismyip_clicked)
         self.main_layout.addLayout(layout_ip)
@@ -203,16 +204,10 @@ class ProxyWindow(QWidget):
         except Exception as exc:
             logger.warning("Tor control port unavailable (%s); browser routing remains on Tor", type(exc).__name__)
 
-        try:
-            manage_proxy(self._parent.profile, "127.0.0.1", self.proxy.port, "set")
-            self._parent._parent.reload_engine()
-        except Exception as exc:
-            logger.exception("Could not configure the browser proxy: %s", exc)
-            self._enter_tor_failure("Browser proxy setup failed; traffic remains blocked")
-            return
-
         self._parent._notify("Tor Proxy", "Connected through Tor")
         self.connected = True
+        self.btn_whatismyip.setEnabled(True)
+        self._parent._parent.reload_engine()
         self.btn_status.setText("connected")
         self.set_btn_status_style("connected")
         self.timer.start()
@@ -241,8 +236,12 @@ class ProxyWindow(QWidget):
         """%(color))
         
     def _toggle(self):
+        browser = self._parent._parent
         if self.running:
-            self._stop_services()
+            browser._request_network_mode(False)
+            return
+        if not browser.tor_mode:
+            browser._request_network_mode(True)
             return
 
         self.connect_btn.setEnabled(False)
@@ -319,9 +318,11 @@ class ProxyWindow(QWidget):
             except Exception as exc:
                 logger.exception("proxy.start() failed (%s)", type(exc).__name__)
                 raise
-            # The browser uses this local proxy while Tor is starting. Fail closed
-            # now so traffic cannot use the direct route during bootstrap.
+            # Proxying begins only after the explicit Connect action. Hold browser
+            # traffic at the local bridge while Tor starts, so startup fails closed.
             proxy.set_tor_routing(True)
+            manage_proxy(self._parent.profile, "127.0.0.1", self.proxy.port, "set")
+            self._parent._parent.reload_engine()
             self.running = True
             self._stopping = False
             self._tor_start_token = self.tor.begin_start()
@@ -395,6 +396,7 @@ class ProxyWindow(QWidget):
             logger.warning("Tor cleanup after failure failed (%s)", type(exc).__name__)
         self.connected = False
         self.running = True
+        self.btn_whatismyip.setEnabled(False)
         self.timer.stop()
         self.timer_data_usage.stop()
         if self.controller:
@@ -419,6 +421,7 @@ class ProxyWindow(QWidget):
             # Its SOCKS connection now fails with 502 until the user disconnects.
             proxy.set_tor_routing(True)
             self.connected = False
+            self.btn_whatismyip.setEnabled(False)
             if self.controller:
                 try:
                     self.controller.close()
@@ -531,8 +534,10 @@ class ProxyWindow(QWidget):
 
         return json.dumps([ok, ports, messages])
 
-    def _stop_services(self):
+    def _stop_services(self, reload_pages=True):
         if self._stopping:
+            return
+        if not self.running and not self.connected and not self.proxy.started:
             return
         self._stopping = True
         self._tor_start_token = None
@@ -541,12 +546,13 @@ class ProxyWindow(QWidget):
         self.timer_data_usage.stop()
         self.timer.stop()
 
+        proxy.set_tor_routing(False)
         try:
             manage_proxy(self._parent.profile, "127.0.0.1", self.proxy.port, "clear")
-            self._parent._parent.reload_engine()
+            if reload_pages:
+                self._parent._parent.reload_engine()
         except Exception as exc:
             logger.warning("Could not clear browser proxy during shutdown (%s)", type(exc).__name__)
-        proxy.set_tor_routing(False)
 
         if self.controller:
             try:
@@ -558,6 +564,10 @@ class ProxyWindow(QWidget):
             self.tor.stop()
         except Exception as exc:
             logger.warning("Tor shutdown failed (%s)", type(exc).__name__)
+        try:
+            self.proxy.stop()
+        except Exception as exc:
+            logger.warning("Local proxy shutdown failed (%s)", type(exc).__name__)
 
         self.logs_widget.update_log("Proxy and Tor stopped.")
         self.running = False
