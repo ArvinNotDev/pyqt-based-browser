@@ -1,14 +1,10 @@
 from PySide6.QtWidgets import (
-    QLabel,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QMessageBox,
+    QLabel, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QFrame,
 )
-
-
-from PySide6.QtCore import Qt, QTimer, QThreadPool, Signal
+from PySide6.QtCore import (
+    Qt, QTimer, QThreadPool, Signal, QPropertyAnimation, QEasingCurve, QRect,
+)
+import qtawesome as qta
 from stem import Signal as TorSignal
 from stem.control import Controller
 from stem import SocketClosed, OperationFailed
@@ -43,73 +39,181 @@ class ProxyWindow(QWidget):
         self.data = Data()
         self.running = False
         self.connected = False
+        self.failed = False
         self.controller = None
         self._stopping = False
-        self._tor_start_token = None
+        self._identity_busy = False
         self._parent = parent
         self.tor_socks_port = self._initial_port("tor_port")
         self.proxy_port = self._initial_port("proxy_port")
         self.tor_control_port = self._initial_port("control_port")
         self.tor_dns_port = self._initial_port("dns_port")
-        logger.info(f'port(proxy): {self.proxy_port} - port(socks): {self.tor_socks_port} - port(control): {self.tor_control_port}, - port(dns): {self.tor_dns_port}')
         self.tor = TorRunner(self.tor_socks_port, self.tor_control_port, self.tor_dns_port)
-        self.tor.bridge = CONFIG["bridge"]
-        self.tor.bridges = CONFIG["bridges"]
+        self.tor.bridge = bool(CONFIG["bridge"])
+        self.tor.bridges = str(CONFIG["bridges"] or "")
         self.tor.app_window = self
-        self.proxy = Runner(self.proxy_port, self.tor_socks_port,self)
-        self.main_layout = QVBoxLayout(self)
-        self.setLayout(self.main_layout)
-        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_status = QLabel(TAP_TO_CONNECT)
-        self.set_btn_status_style("disconnected")
-        self.main_layout.addWidget(self.btn_status)
-        self.connect_btn = PulseButton("Connect")
-        self.connect_btn.clicked.connect(self._toggle)
-        self.main_layout.addWidget(self.connect_btn)
+        self.proxy = Runner(self.proxy_port, self.tor_socks_port, self)
 
-        lyt_info = QHBoxLayout()
-        self.main_layout.addLayout(lyt_info)
-        self.lbl_percent = QLabel("0%") 
-        lyt_info.addWidget(self.lbl_percent)
-        self.lbl_data_usage = QLabel(f"Data usage: {CONFIG['data_usage']/1024**2:.2f} Mb")
-        lyt_info.addWidget(self.lbl_data_usage)
-        
+        self.logs_widget = LogWindow(self)
+        self.logs_widget.apply_theme(getattr(parent, "_display_mode", "dark"))
+        self.logs_widget.hide()
+        self.logs_open = False
+        self._logs_animation = None
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        self.home_content = QWidget(self)
+        self.home_content.setObjectName("homeContent")
+        root.addWidget(self.home_content, 1)
+        self.home_layout = QVBoxLayout(self.home_content)
+        self.home_layout.setContentsMargins(16, 14, 16, 14)
+        self.home_layout.setSpacing(9)
+
+        brand = QVBoxLayout()
+        brand.setSpacing(2)
+        self.home_title = QLabel("TOR CONNECTION")
+        self.home_title.setObjectName("homeEyebrow")
+        self.home_subtitle = QLabel("Private routing for this browser")
+        self.home_subtitle.setObjectName("homeSubtitle")
+        brand.addWidget(self.home_title)
+        brand.addWidget(self.home_subtitle)
+        self.home_layout.addLayout(brand)
+
+        self.btn_status = QLabel("NOT CONNECTED")
+        self.btn_status.setObjectName("connectionStatus")
+        self.btn_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.btn_status.setWordWrap(True)
+        self.set_btn_status_style("disconnected")
+        self.home_layout.addWidget(self.btn_status)
+
+        connect_host = QWidget(self.home_content)
+        connect_row = QHBoxLayout(connect_host)
+        connect_row.setContentsMargins(0, 2, 0, 2)
+        connect_row.addStretch(1)
+        self.connect_btn = PulseButton("Connect")
+        self.connect_btn.setObjectName("connectPulseButton")
+        self.connect_btn.clicked.connect(self._toggle)
+        connect_row.addWidget(self.connect_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        connect_row.addStretch(1)
+        self.home_layout.addWidget(connect_host, 1)
+
+        metrics = QHBoxLayout()
+        metrics.setContentsMargins(0, 2, 0, 2)
+        metrics.setSpacing(10)
+        self.lbl_percent = QLabel("0%")
+        self.lbl_percent.setObjectName("bootstrapPercent")
+        self.lbl_data_usage = QLabel(f"Proxy traffic · {CONFIG['data_usage'] / 1024**2:.2f} MiB")
+        self.lbl_data_usage.setObjectName("trafficUsage")
+        metrics.addStretch(1)
+        metrics.addWidget(self.lbl_percent)
+        separator = QFrame(self.home_content)
+        separator.setObjectName("homeMetricSeparator")
+        separator.setFrameShape(QFrame.Shape.VLine)
+        metrics.addWidget(separator)
+        metrics.addWidget(self.lbl_data_usage)
+        metrics.addStretch(1)
+        self.home_layout.addLayout(metrics)
+
+        self.route_status_label = QLabel("Tor routing stays blocked until the connection is verified.")
+        self.route_status_label.setObjectName("routeStatusLabel")
+        self.route_status_label.setWordWrap(True)
+        self.route_status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.home_layout.addWidget(self.route_status_label)
+        self.tor_ip_label = QLabel("Exit IP: not checked")
+        self.tor_ip_label.setObjectName("exitIpLabel")
+        self.tor_ip_label.setWordWrap(True)
+        self.tor_ip_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.home_layout.addWidget(self.tor_ip_label)
+
+        utility_row = QHBoxLayout()
+        utility_row.setContentsMargins(0, 3, 0, 0)
+        utility_row.setSpacing(6)
+        self.btn_change_identity = QPushButton(qta.icon("fa6s.arrows-rotate"), "Identity")
+        self.btn_change_identity.setObjectName("secondaryAction")
+        self.btn_change_identity.setToolTip("Request a new Tor identity")
+        self.btn_change_identity.setEnabled(False)
+        self.btn_change_identity.clicked.connect(self.change_identity_)
+        utility_row.addWidget(self.btn_change_identity, 1)
+        self.btn_log = QPushButton(qta.icon("fa6s.align-left"), "Event log")
+        self.btn_log.setObjectName("secondaryAction")
+        self.btn_log.setCheckable(True)
+        self.btn_log.setToolTip("Show live Tor and proxy events")
+        self.btn_log.clicked.connect(self.show_logs)
+        utility_row.addWidget(self.btn_log, 1)
+        self.btn_whatismyip = QPushButton(qta.icon("fa6s.globe"), "Exit IP")
+        self.btn_whatismyip.setObjectName("secondaryAction")
+        self.btn_whatismyip.setToolTip("Verify the public IP through the Tor proxy")
+        self.btn_whatismyip.setEnabled(False)
+        self.btn_whatismyip.clicked.connect(self.whatismyip_clicked)
+        utility_row.addWidget(self.btn_whatismyip, 1)
+        self.home_layout.addLayout(utility_row)
+
         self.data.valueChanged.connect(self.dataValueChanged)
         self.tor_status_signal.connect(self.dataValueChanged)
-        self.tor_exit_signal.connect(self._tor_exited)
-        self.btn_change_identity = QPushButton(CHANGE_IDENTITY)
-        self.main_layout.addWidget(self.btn_change_identity)
-        self.btn_change_identity.clicked.connect(self.change_identity_)
-        self.logs_widget = LogWindow(self)
         self.tor_log_signal.connect(self.logs_widget.update_log)
-        self.btn_log = QPushButton(LOGS)
-        self.btn_log.clicked.connect(self.show_logs)
-        self.main_layout.addWidget(self.btn_log)
+        self.tor_exit_signal.connect(self._tor_exited)
         self.timer = QTimer(self)
-        self.timer.setInterval(30000)
+        try:
+            interval = max(0, int(CONFIG["newnym_interval"] or 0))
+        except (TypeError, ValueError):
+            interval = 0
+        self.timer.setInterval(interval)
         self.timer.timeout.connect(self.change_identity_)
         self.stop_timer.connect(self.stop_timers)
-        
-        
-        
-        layout_ip = QVBoxLayout()
-        layout_top_ip = QHBoxLayout()
-        layout_ip.addLayout(layout_top_ip)
-        self.tor_ip_label = QLabel()
-        layout_top_ip.addWidget(self.tor_ip_label)
-
-        self.btn_whatismyip = QPushButton(WHAT_IS_MY_IP)
-        self.btn_whatismyip.setEnabled(False)
-        layout_ip.addWidget(self.btn_whatismyip)
-        self.btn_whatismyip.clicked.connect(self.whatismyip_clicked)
-        self.main_layout.addLayout(layout_ip)
-        self.thread_pool = QThreadPool()
-        
         self.timer_data_usage = QTimer(self)
         self.timer_data_usage.setInterval(1000)
         self.timer_data_usage.timeout.connect(self.change_data_usage)
+        self._apply_home_theme()
+
+    def _apply_home_theme(self):
+        dark = (getattr(self._parent, "_display_mode", CONFIG["mode"])) == "dark"
+        border = "#394655" if dark else "#d7e0eb"
+        muted = "#9caabb" if dark else "#64748b"
+        accent = "#65aaf6" if dark else "#176fc1"
+        surface = "#202630" if dark else "#f7f9fc"
+        text = "#e8edf3" if dark else "#243247"
+        hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
+        self.home_content.setStyleSheet(f"""
+            QWidget#homeContent {{ background: {surface}; color: {text}; }}
+            QLabel#homeEyebrow {{ background: transparent; color: {accent}; font-size: 10px; font-weight: 850; letter-spacing: 1.1px; }}
+            QLabel#homeSubtitle {{ background: transparent; color: {muted}; font-size: 10px; }}
+            QLabel#connectionStatus {{ color: {text}; background: {hover}; border: 1px solid {border}; border-radius: 9px; padding: 8px 6px; font-size: 11px; font-weight: 800; }}
+            QLabel#connectionStatus[connectionState="connected"] {{ color: #2eae69; border-color: rgba(46,174,105,0.48); background: rgba(46,174,105,0.08); }}
+            QLabel#connectionStatus[connectionState="connecting"] {{ color: {accent}; border-color: {accent}; background: rgba(71,163,242,0.08); }}
+            QLabel#connectionStatus[connectionState="disconnected"] {{ color: {muted}; }}
+            QLabel#bootstrapPercent {{ color: {accent}; background: transparent; font-size: 12px; font-weight: 800; }}
+            QLabel#trafficUsage, QLabel#routeStatusLabel, QLabel#exitIpLabel {{ color: {muted}; background: transparent; font-size: 10px; padding: 2px; }}
+            QFrame#homeMetricSeparator {{ color: {border}; background: {border}; max-width: 1px; }}
+            QPushButton#connectPulseButton {{ background: transparent; border: none; padding: 0; margin: 0; }}
+            QPushButton#connectPulseButton:hover, QPushButton#connectPulseButton:pressed, QPushButton#connectPulseButton:focus {{ background: transparent; border: none; }}
+            QPushButton#secondaryAction {{ min-height: 34px; padding: 0 6px; border-radius: 8px; background: transparent; color: {text}; border: 1px solid {border}; font-size: 10px; font-weight: 650; }}
+            QPushButton#secondaryAction:hover {{ background: {hover}; border-color: {accent}; }}
+            QPushButton#secondaryAction:checked {{ background: {hover}; border-color: {accent}; }}
+            QPushButton#secondaryAction:disabled {{ color: {muted}; background: transparent; }}
+        """)
+        self.logs_widget.apply_theme("dark" if dark else "light")
+        self.btn_change_identity.setIcon(qta.icon("fa6s.arrows-rotate", color=text))
+        self.btn_log.setIcon(qta.icon("fa6s.align-left", color=text))
+        self.btn_whatismyip.setIcon(qta.icon("fa6s.globe", color=text))
+
+    def apply_theme(self, mode=None):
+        if mode in {"dark", "light"}:
+            self._parent._display_mode = mode
+        self._apply_home_theme()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.logs_open and self._logs_animation is None:
+            width = self._log_drawer_width()
+            self.logs_widget.setGeometry(QRect(0, 0, width, self.height()))
+
+    def _log_drawer_width(self):
+        available = max(1, self.width())
+        return min(available, max(220, min(360, int(available * 0.84))))
 
     @staticmethod
+    def _initial_port(config_key):    @staticmethod
     def _initial_port(config_key):
         value = CONFIG[config_key]
         if CONFIG[config_key + "_checked"] and isinstance(value, int) and 1 <= value <= 65535:
@@ -145,49 +249,90 @@ class ProxyWindow(QWidget):
         self.btn_whatismyip.setEnabled(True)
         
     def show_logs(self):
-        if self.logs_widget.isHidden():
-            self.logs_widget.setParent(self)
-            self.logs_widget.move(10,10)
-            self.logs_widget.show() 
-        else:
-            self.logs_widget.hide() 
-            
-       
+        opening = not self.logs_open
+        self.logs_open = opening
+        self.btn_log.setChecked(opening)
+        if self._logs_animation is not None:
+            self._logs_animation.stop()
+        width = self._log_drawer_width()
+        height = max(1, self.height())
+        if opening:
+            self.logs_widget.setGeometry(QRect(-width, 0, width, height))
+            self.logs_widget.show()
+            self.logs_widget.raise_()
+        start_rect = self.logs_widget.geometry()
+        end_rect = QRect(0, 0, width, height) if opening else QRect(-width, 0, width, height)
+        animation = QPropertyAnimation(self.logs_widget, b"geometry", self)
+        animation.setDuration(220)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic if opening else QEasingCurve.Type.InCubic)
+        animation.setStartValue(start_rect)
+        animation.setEndValue(end_rect)
+        def finished():
+            self._logs_animation = None
+            if not self.logs_open:
+                self.logs_widget.hide()
+        animation.finished.connect(finished)
+        self._logs_animation = animation
+        animation.start()
+
     def change_identity_(self):
-        worker = Worker(
-            self.change_identity
-        )
+        if self._identity_busy or not self.connected:
+            return
+        self._identity_busy = True
+        self.btn_change_identity.setEnabled(False)
+        worker = Worker(self.change_identity)
+        worker.signals.finished.connect(self._on_identity_finished)
+        worker.signals.error.connect(self._on_identity_error)
         self.thread_pool.start(worker)
+
+    def _on_identity_finished(self, result):
+        self._identity_busy = False
+        self.btn_change_identity.setEnabled(bool(self.connected))
+        if isinstance(result, dict) and result.get("wait", 0) > 0:
+            self.logs_widget.update_log(
+                f"Tor rate-limits identity requests; try again in about {result['wait']:.0f} seconds.",
+                level="warning",
+            )
+        elif result is True:
+            self.logs_widget.update_log("Tor accepted the new identity request.")
+        else:
+            self.logs_widget.update_log("Tor did not accept the identity request.", level="warning")
+
+    def _on_identity_error(self, error):
+        self._identity_busy = False
+        self.btn_change_identity.setEnabled(bool(self.connected))
+        self.logs_widget.update_log(f"Identity change failed: {error}", level="error")
 
     def change_identity(self):
         if not self.connected:
-            logger.warning("change_tor_identity called but not connected to Tor.")
+            logger.warning("Identity change requested while Tor is not connected.")
             return False
-
         try:
-            
-                self.controller.authenticate()
-                self.controller.signal(TorSignal.NEWNYM)
-                logger.info("Tor identity changed successfully (NEWNYM sent).")
-                return True
-
+            request = getattr(self.tor, "request_new_identity", None)
+            if callable(request):
+                wait = float(request() or 0)
+                return {"wait": wait} if wait > 0 else True
+            if self.controller is None:
+                raise RuntimeError("Tor ControlPort is not available.")
+            wait = float(self.controller.get_newnym_wait())
+            if wait > 0:
+                return {"wait": wait}
+            self.controller.signal(TorSignal.NEWNYM)
+            return True
         except SocketClosed:
-            logger.error("Tor control socket is closed. Marking connection as disconnected.")
+            logger.error("Tor control socket is closed; marking connection as disconnected.")
             self.connected = False
             return False
-
         except AuthenticationFailure:
-            logger.critical("Authentication to Tor control port failed. Check password or cookie.")
+            logger.error("Tor ControlPort authentication failed.")
             return False
-
         except OperationFailed:
-            logger.warning("Tor NEWNYM signal was rejected. Possibly due to rate limit.")
+            logger.warning("Tor rejected NEWNYM, likely because of its rate limit.")
+            return False
+        except Exception:
+            logger.exception("Unexpected error while changing Tor identity.")
             return False
 
-        except Exception as e:
-            logger.exception(f"Unexpected error while sending NEWNYM: {e}")
-            return False
-        
     def dataValueChanged(self, v):
         self.lbl_percent.setText(str(v)+"")
         if v != "100%" or not self.running or self.connected:
@@ -210,31 +355,31 @@ class ProxyWindow(QWidget):
         self._parent._parent.reload_engine()
         self.btn_status.setText("connected")
         self.set_btn_status_style("connected")
-        self.timer.start()
+        if self.timer.interval() > 0:
+            self.timer.start()
         self.timer_data_usage.start()
+        self.btn_change_identity.setEnabled(True)
         
         
     def set_btn_status_style(self, stmt):
-        if stmt == "disconnected":
-            color = "#e74c3c"
-        elif stmt == "connected":
-            color = "#2ecc71"
-        else:
-            color = "#f39c12"
-        
-        self.btn_status.setStyleSheet("""
-            QLabel {
-                padding: 20px;
-                border-radius: 15px;
-                font-size: 18px;
-                font-weight: bold;
-                border: 4px solid %s;
-            }
-            QLabel:hover {
-                border: 4px solid #1B5E20;
-            }
-        """%(color))
-        
+        self.btn_status.setProperty("connectionState", stmt)
+        self.btn_status.style().unpolish(self.btn_status)
+        self.btn_status.style().polish(self.btn_status)
+        self.btn_status.update()
+        if hasattr(self, "route_status_label"):
+            if stmt == "connected":
+                self.route_status_label.setText("Tor is verified. Browser traffic can use the protected route.")
+                self.btn_change_identity.setEnabled(True)
+                self.btn_whatismyip.setEnabled(True)
+            elif stmt in {"connecting", "disconnecting"}:
+                self.route_status_label.setText("Establishing the Tor route. Traffic remains blocked until readiness is verified.")
+                self.btn_change_identity.setEnabled(False)
+                self.btn_whatismyip.setEnabled(False)
+            else:
+                self.route_status_label.setText("Tor routing stays blocked until the connection is verified.")
+                self.btn_change_identity.setEnabled(False)
+                self.btn_whatismyip.setEnabled(False)
+
     def _toggle(self):
         browser = self._parent._parent
         if self.running:
