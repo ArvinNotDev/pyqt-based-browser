@@ -17,46 +17,49 @@ class UpdaterWindow(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.parent_ = parent
-        
-        main_layout = QHBoxLayout()
-        self.setLayout(main_layout)
-        
-        left_layout = QVBoxLayout()
-        main_layout.addLayout(left_layout)
-        
-        
-        self.btn_get_versions = QPushButton("get versions")
-        self.btn_get_versions.clicked.connect(self.get_available_versions)
-        left_layout.addWidget(self.btn_get_versions)
-        
-        self.updates_list = QListWidget()
-        self.updates_list.itemClicked.connect(self.selected_version)
-        left_layout.addWidget(self.updates_list)
-        
-        self.lbl_status = QLabel()
-        left_layout.addWidget(self.lbl_status)
-       
-        self.thread_pool = QThreadPool()
-        
-    
-        right_layout = QVBoxLayout()
-        main_layout.addLayout(right_layout)
-        
-        self.btn_refresh_version = QPushButton("refresh")
-        self.btn_refresh_version.clicked.connect(self.refresh_version)
-        right_layout.addWidget(self.btn_refresh_version)
+        self.setObjectName("torBundlePage")
+        self.setMinimumWidth(0)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(12, 10, 12, 12)
+        main_layout.setSpacing(9)
 
+        self.btn_get_versions = QPushButton("Check available bundles")
+        self.btn_get_versions.setObjectName("bundlePrimaryAction")
+        self.btn_get_versions.clicked.connect(self.get_available_versions)
+        main_layout.addWidget(self.btn_get_versions)
+
+        self.updates_list = QListWidget()
+        self.updates_list.setObjectName("bundleList")
+        self.updates_list.setMinimumHeight(65)
+        self.updates_list.itemClicked.connect(self.selected_version)
+        main_layout.addWidget(QLabel("Available downloads"))
+        main_layout.addWidget(self.updates_list, 1)
+
+        self.lbl_status = QLabel("Select a bundle to see versions and actions.")
+        self.lbl_status.setWordWrap(True)
+        main_layout.addWidget(self.lbl_status)
+        self.thread_pool = QThreadPool(self)
+
+        main_layout.addWidget(QLabel("Installed bundles"))
+        self.btn_refresh_version = QPushButton("Refresh installed bundles")
+        self.btn_refresh_version.clicked.connect(self.refresh_version)
+        main_layout.addWidget(self.btn_refresh_version)
         self.list_tor_versions = QListWidget()
-        right_layout.addWidget(self.list_tor_versions)
-        
-        self.btn_set_default_version = QPushButton("set default version")
+        self.list_tor_versions.setObjectName("installedBundleList")
+        self.list_tor_versions.setMinimumHeight(65)
+        main_layout.addWidget(self.list_tor_versions, 1)
+
+        actions = QHBoxLayout()
+        actions.setSpacing(6)
+        self.btn_set_default_version = QPushButton("Use selected")
         self.btn_set_default_version.clicked.connect(self.set_default_version)
-        right_layout.addWidget(self.btn_set_default_version)
-        
-        self.btn_delete_version = QPushButton("delete version")
+        actions.addWidget(self.btn_set_default_version, 1)
+        self.btn_delete_version = QPushButton("Delete")
         self.btn_delete_version.clicked.connect(self.delete_version)
-        right_layout.addWidget(self.btn_delete_version)
-    
+        actions.addWidget(self.btn_delete_version, 1)
+        main_layout.addLayout(actions)
+        self.refresh_version()
+
     def refresh_version(self):
         self.list_tor_versions.clear()
         print(get_own_bundles())

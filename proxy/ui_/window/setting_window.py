@@ -1,20 +1,10 @@
 from PySide6.QtWidgets import (
-    QApplication,
-    QLabel,
-    QWidget,
-    QButtonGroup,
-    QRadioButton,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
-    QCheckBox,
-    QTextEdit,
-    QLineEdit,
-    QStackedWidget,
-    QListWidget,
-    QMessageBox
+    QApplication, QFrame, QScrollArea, QSizePolicy, QLabel, QWidget,
+    QButtonGroup, QRadioButton, QVBoxLayout, QHBoxLayout, QPushButton,
+    QCheckBox, QTextEdit, QLineEdit, QStackedWidget, QListWidget, QMessageBox,
 )
-from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtCore import Qt, QThreadPool, QSize
+import qtawesome as qta
 
 from pyzbar.pyzbar import decode
 import re
@@ -34,36 +24,101 @@ class SettingWindow(QWidget):
         super().__init__(parent)
         self._parent = parent
         main_layout = QVBoxLayout(self)
-        self.setLayout(main_layout)
+        main_layout.setContentsMargins(10, 8, 10, 10)
+        main_layout.setSpacing(8)
 
-        top_layout = QHBoxLayout(self)
-        btn_before_page = QPushButton("⬅️")
-        btn_before_page.clicked.connect(self.go_to_before_page)
+        navigation = QHBoxLayout()
+        navigation.setSpacing(6)
+        self.settings_nav_group = QButtonGroup(self)
+        self.settings_nav_group.setExclusive(True)
+        self.settings_nav_buttons = []
+        for index, (label, icon_name) in enumerate((
+            ("Bridges", "fa6s.link"), ("Ports", "fa6s.network-wired")
+        )):
+            button = QPushButton(label, self)
+            button.setObjectName("proxySettingsNavButton")
+            button.setIcon(qta.icon(icon_name))
+            button.setIconSize(QSize(14, 14))
+            button.setCheckable(True)
+            button.setMinimumHeight(34)
+            button.clicked.connect(lambda _checked=False, page=index: self._set_settings_page(page))
+            self.settings_nav_group.addButton(button, index)
+            self.settings_nav_buttons.append(button)
+            navigation.addWidget(button, 1)
+        main_layout.addLayout(navigation)
 
-        top_layout.addWidget(btn_before_page)
-        self.lbl_page_number = QLabel("Page: 1")
-        self.lbl_page_number.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_page_number.setFixedWidth(50)
-        top_layout.addWidget(self.lbl_page_number)
-        btn_next_page = QPushButton("➡️")
-        btn_next_page.clicked.connect(self.go_to_next_page)
-        top_layout.addWidget(btn_next_page)
-
-        main_layout.addLayout(top_layout)
-
-        self.page_setting = QStackedWidget()
-        main_layout.addWidget(self.page_setting)
+        self.lbl_page_number = QLabel("Page: 1", self)
+        self.lbl_page_number.hide()
+        self.page_setting = QStackedWidget(self)
+        self.page_setting.setObjectName("proxySettingsPages")
+        main_layout.addWidget(self.page_setting, 1)
 
         self.first_page = QWidget()
-        self.first_page_layout = QVBoxLayout()
-        self.first_page.setLayout(self.first_page_layout)
-        self.page_setting.addWidget(self.first_page)
+        self.first_page.setObjectName("proxySettingsContent")
+        self.first_page_layout = QVBoxLayout(self.first_page)
+        self.first_page_layout.setContentsMargins(12, 10, 12, 12)
+        self.first_page_layout.setSpacing(10)
+        self.first_page_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        bridges_scroll = QScrollArea(self.page_setting)
+        bridges_scroll.setWidgetResizable(True)
+        bridges_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        bridges_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        bridges_scroll.setWidget(self.first_page)
+        self.page_setting.addWidget(bridges_scroll)
 
         self.initialize_first_page()
         self.initialize_second_page()
+        self.settings_nav_buttons[0].setChecked(True)
+
+        if getattr(self._parent, "_embedded", False):
+            rules_row = QHBoxLayout()
+            self.btn_block_hosts = QPushButton("Blocked hosts…", self)
+            self.btn_block_hosts.setToolTip("Manage hosts blocked from browsing.")
+            self.btn_block_hosts.clicked.connect(self._parent._show_block_host)
+            self.btn_exclude_hosts = QPushButton("Excluded hosts…", self)
+            self.btn_exclude_hosts.setToolTip("Manage hosts that bypass Tor routing.")
+            self.btn_exclude_hosts.clicked.connect(self._parent._show_exclude_host)
+            rules_row.addWidget(self.btn_block_hosts, 1)
+            rules_row.addWidget(self.btn_exclude_hosts, 1)
+            main_layout.addLayout(rules_row)
+        self.apply_theme(getattr(self._parent, "_display_mode", "dark"))
+
+    def _set_settings_page(self, index):
+        if not 0 <= index < self.page_setting.count():
+            return
+        self.page_setting.setCurrentIndex(index)
+        for page_index, button in enumerate(self.settings_nav_buttons):
+            button.setChecked(page_index == index)
+        self.lbl_page_number.setText(f"Page: {index + 1}")
+
+    def apply_theme(self, mode="dark"):
+        dark = mode == "dark"
+        border = "#394655" if dark else "#d7e0eb"
+        panel = "#202630" if dark else "#f7f9fc"
+        text = "#e8edf3" if dark else "#253247"
+        accent = "#65aaf6" if dark else "#176fc1"
+        hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
+        self.setStyleSheet(f"""
+            QWidget {{ color: {text}; background: transparent; }}
+            QWidget#proxySettingsContent {{ background: {panel}; }}
+            QLabel {{ color: {text}; }}
+            QLineEdit, QTextEdit, QListWidget {{ background: {"#171c23" if dark else "#ffffff"}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 7px; selection-background-color: {accent}; }}
+            QCheckBox {{ spacing: 7px; }}
+            QPushButton {{ min-height: 32px; padding: 0 10px; background: transparent; color: {text}; border: 1px solid {border}; border-radius: 8px; font-weight: 600; }}
+            QPushButton:hover {{ background: {hover}; border-color: {accent}; }}
+            QPushButton#proxySettingsNavButton {{ min-height: 34px; padding: 0 8px; border-color: transparent; }}
+            QPushButton#proxySettingsNavButton:checked {{ background: {"#314c70" if dark else "#dce9fc"}; border-color: {"#5276a4" if dark else "#b8d0f3"}; }}
+            QPushButton#proxySettingsBackButton {{ min-height: 32px; border: 1px solid {border}; border-radius: 8px; background: transparent; color: {text}; }}
+            QPushButton#proxySettingsBackButton:hover {{ border-color: {accent}; background: {hover}; }}
+            QScrollBar:vertical {{ background: transparent; width: 9px; margin: 2px; }}
+            QScrollBar::handle:vertical {{ background: {"#4b5b70" if dark else "#bdc8d8"}; min-height: 24px; border-radius: 4px; }}
+            QScrollBar::handle:vertical:hover {{ background: {"#6a809c" if dark else "#94a8c4"}; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+        """)
 
     def initialize_first_page(self):
-        mode_layout = QHBoxLayout(self)
+        mode_layout = QHBoxLayout()
         self.first_page_layout.addLayout(mode_layout)
 
 
@@ -74,13 +129,15 @@ class SettingWindow(QWidget):
         btn_bridge.stateChanged.connect(self.bridge_state_changed)
         self.first_page_layout.addWidget(btn_bridge)
 
-        self.inp_bridges = QTextEdit(self, placeholderText="Enter your bridges . . . (obfs4 or webtunnel)")
+        self.inp_bridges = QTextEdit(self, placeholderText="Paste bridge records (obfs4, Snowflake or WebTunnel)…")
+        self.inp_bridges.setMinimumHeight(90)
+        self.inp_bridges.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.inp_bridges.setText(CONFIG["bridges"] or "")
         self.inp_bridges.setEnabled(bool(CONFIG["bridge"]))
         self.inp_bridges.textChanged.connect(self.set_bridges)
         self.first_page_layout.addWidget(self.inp_bridges)
 
-        self.btn_qrcode = QPushButton("Qr-Code")
+        self.btn_qrcode = QPushButton("Import bridges from QR code")
         self.btn_qrcode.clicked.connect(self.show_qrcode)
         self.first_page_layout.addWidget(self.btn_qrcode)
 
@@ -124,10 +181,17 @@ class SettingWindow(QWidget):
 
     def initialize_second_page(self):
         self.second_page = QWidget()
-        self.page_setting.addWidget(self.second_page)
-
-        self.second_page_layout = QVBoxLayout()
-        self.second_page.setLayout(self.second_page_layout)
+        self.second_page.setObjectName("proxySettingsContent")
+        self.second_page_layout = QVBoxLayout(self.second_page)
+        self.second_page_layout.setContentsMargins(12, 10, 12, 12)
+        self.second_page_layout.setSpacing(10)
+        self.second_page_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        ports_scroll = QScrollArea(self.page_setting)
+        ports_scroll.setWidgetResizable(True)
+        ports_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        ports_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        ports_scroll.setWidget(self.second_page)
+        self.page_setting.addWidget(ports_scroll)
 
         ports = ["tor_port", "proxy_port", "dns_port", "control_port"]
         for port in ports:
@@ -213,16 +277,10 @@ class SettingWindow(QWidget):
 
     # ---------- other helpers ----------
     def go_to_before_page(self):
-        current_index = self.page_setting.currentIndex()
-        new_index = max(0, current_index - 1)
-        self.page_setting.setCurrentIndex(new_index)
-        self.lbl_page_number.setText(f"Page: {self.page_setting.currentIndex()+1}")
+        self._set_settings_page(max(0, self.page_setting.currentIndex() - 1))
 
     def go_to_next_page(self):
-        current_index = self.page_setting.currentIndex()
-        new_index = min(self.page_setting.count() - 1, current_index + 1)
-        self.page_setting.setCurrentIndex(new_index)
-        self.lbl_page_number.setText(f"Page: {self.page_setting.currentIndex()+1}")
+        self._set_settings_page(min(self.page_setting.count() - 1, self.page_setting.currentIndex() + 1))
 
     def show_qrcode(self):
         worker = Worker(self.qrcode_widget.run)
