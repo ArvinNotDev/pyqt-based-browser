@@ -299,3 +299,66 @@ def test_internal_dashboard_scheme_serves_a_reloadable_document():
     page.deleteLater()
     profile.deleteLater()
     app.processEvents()
+
+def test_loading_placeholder_is_full_size_and_has_a_retry_action():
+    from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
+
+    app = QApplication.instance() or QApplication([])
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(dark_mode=True),
+        view_container=QWidget(),
+        _is_dashboard_address=BrowserWindow._is_dashboard_address,
+    )
+
+    placeholder = BrowserWindow._make_placeholder(browser, "https://offline.example/")
+
+    assert placeholder.objectName() == "pageLoadingScreen"
+    assert placeholder.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Expanding
+    assert placeholder.loading_detail_label.text() == "Connecting to the website…"
+    retry = placeholder.findChild(QPushButton, "loadingRetry")
+    assert retry is not None
+    assert not retry.isVisible()
+    placeholder.deleteLater()
+    browser.view_container.deleteLater()
+    app.processEvents()
+
+
+def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
+    view = SimpleNamespace(url=lambda: QUrl("https://offline.example/"))
+    placeholder = SimpleNamespace(
+        _load_error=False,
+        loading_title_label=SimpleNamespace(setText=Mock()),
+        loading_detail_label=SimpleNamespace(setText=Mock()),
+        loading_progress=SimpleNamespace(hide=Mock(), show=Mock()),
+        retry_button=SimpleNamespace(show=Mock(), hide=Mock()),
+    )
+    browser = SimpleNamespace(
+        views=[view],
+        current_view=lambda: view,
+        _placeholders={view: placeholder},
+        statusBar=lambda: SimpleNamespace(showMessage=Mock()),
+    )
+
+    aborted = SimpleNamespace(
+        status=lambda: QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus,
+        errorCode=lambda: -3,
+        url=lambda: QUrl("https://offline.example/"),
+        errorString=lambda: "Operation canceled",
+    )
+    BrowserWindow._on_loading_changed(browser, aborted, view, object())
+    assert placeholder._load_error is False
+    placeholder.loading_title_label.setText.assert_not_called()
+
+    failed = SimpleNamespace(
+        status=lambda: QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus,
+        errorCode=lambda: -105,
+        url=lambda: QUrl("https://offline.example/"),
+        errorString=lambda: "Name not resolved",
+    )
+    BrowserWindow._on_loading_changed(browser, failed, view, object())
+    assert placeholder._load_error is True
+    placeholder.loading_title_label.setText.assert_called_once_with("This page didn’t load")
+    placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
+    placeholder.loading_progress.hide.assert_called_once_with()
+    placeholder.retry_button.show.assert_called_once_with()
+
