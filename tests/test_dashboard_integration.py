@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from PySide6.QtCore import QEventLoop, QObject, QTimer, QUrl, QUrlQuery
 from PySide6.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 from PySide6.QtWidgets import QApplication
-from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEngineProfile, QWebEngineUrlScheme
 
 from managers.dashboard_manager import DEFAULTS as DASHBOARD_DEFAULTS, PRESETS
 from ui.browser_window import (
@@ -16,6 +16,7 @@ from ui.browser_window import (
     DASHBOARD_URL,
     DASHBOARD_SCHEME,
 )
+from ui.dashboard.internal_page import DASHBOARD_DEFAULT_PORT, register_dashboard_scheme
 from ui.dashboard.internal_page import DashboardSchemeHandler
 from ui.dashboard.bridge import DashboardBridge
 from proxy.set_proxy import manage_proxy
@@ -384,4 +385,9 @@ def test_proxy_panel_is_created_only_when_requested():
     placeholder.deleteLater.assert_called_once_with()
     assert browser._proxy_placeholder is None
     create_panel.assert_called_once_with(browser, None)
+
+def test_dashboard_scheme_has_a_valid_default_port_and_registers_idempotently():
+    register_dashboard_scheme()
+    scheme = QWebEngineUrlScheme.schemeByName(DASHBOARD_SCHEME)
+    assert scheme.defaultPort() == DASHBOARD_DEFAULT_PORT == 443
 
