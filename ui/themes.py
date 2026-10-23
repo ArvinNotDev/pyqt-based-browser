@@ -420,7 +420,8 @@ QProgressBar {
 }
 QProgressBar::chunk { background: #3979d6; border-radius: 2px; }
 QProgressBar#pageLoadProgress {
-    background: transparent; border: none; border-radius: 2px; margin: 0; padding: 0;
+    background: transparent; border: none; border-radius: 2px;
+    min-height: 3px; max-height: 3px; margin: 0; padding: 0;
 }
 QProgressBar#pageLoadProgress::chunk { background: #3979d6; border-radius: 2px; }
 QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #d8e0eb; }
@@ -930,7 +931,8 @@ QProgressBar {
 }
 QProgressBar::chunk { background: #82aff4; border-radius: 2px; }
 QProgressBar#pageLoadProgress {
-    background: transparent; border: none; border-radius: 2px; margin: 0; padding: 0;
+    background: transparent; border: none; border-radius: 2px;
+    min-height: 3px; max-height: 3px; margin: 0; padding: 0;
 }
 QProgressBar#pageLoadProgress::chunk { background: #82aff4; border-radius: 2px; }
 QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid rgba(255,255,255,38); }
