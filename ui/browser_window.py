@@ -17,7 +17,7 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QDockWidget, QInputDialog,
+    QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
