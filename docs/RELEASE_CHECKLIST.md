@@ -34,4 +34,6 @@ Use this checklist for each release candidate. Record the OS, Python version, ar
 
 - [ ] Resolve or explicitly accept the current expected failures for malformed settings reads and invalid proxy-port validation.
 - [ ] Confirm bookmark/download and URL utility tests are no longer skipped once those modules are integrated.
-- [ ] Do not publish a frozen Windows executable until resource and mutable-data paths have been corrected and clean-machine Qt WebEngine/Tor bundle checks pass.
+- [ ] Keep the Windows one-file build labeled Beta and unsigned until a manual clean-machine check confirms Qt WebEngine rendering, persistence, downloads, and shutdown.
+- [ ] Validate live Tor bootstrap/bridges separately; the automated executable smoke test does not claim live Tor connectivity.
+- [ ] Verify the published EXE SHA-256 sidecar after downloading.
