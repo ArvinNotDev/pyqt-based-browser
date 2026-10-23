@@ -127,3 +127,98 @@ def test_crazygames_game_assets_use_direct_route(host, monkeypatch, proxy_module
     monkeypatch.setattr(proxy_module, "PROXY_INTO_TOR", True)
 
     assert proxy_module.route_uses_tor(host) is False
+
+
+def test_optional_tor_proxy_is_applied_only_on_set_and_previous_route_restored(
+    monkeypatch,
+):
+    from proxy import set_proxy as proxy_settings
+
+    class FakeNetworkProxyFactory:
+        @staticmethod
+        def usesSystemConfiguration():
+            return False
+
+        @staticmethod
+        def setUseSystemConfiguration(enabled):
+            raise AssertionError("custom proxy configuration should be restored")
+
+    class FakeNetworkProxy:
+        HttpProxy = "http"
+        NoProxy = "none"
+
+        def __init__(self, proxy_type, host="", port=0):
+            self.proxy_type = proxy_type
+            self.host = host
+            self.port = port
+
+        @classmethod
+        def applicationProxy(cls):
+            return original_route
+
+        @staticmethod
+        def setApplicationProxy(value):
+            applied_routes.append(value)
+
+    original_route = FakeNetworkProxy("system", "system-proxy", 8080)
+    applied_routes = []
+    monkeypatch.setattr(proxy_settings, "QNetworkProxy", FakeNetworkProxy)
+    monkeypatch.setattr(proxy_settings, "QNetworkProxyFactory", FakeNetworkProxyFactory)
+    monkeypatch.setattr(proxy_settings, "_previous_proxy", None)
+    monkeypatch.setattr(proxy_settings, "_application_proxy_active", False)
+    monkeypatch.setattr(proxy_settings, "_uses_system_configuration", False)
+
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43210, "set")
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43211, "set")
+    assert applied_routes[0].proxy_type == FakeNetworkProxy.HttpProxy
+    assert (applied_routes[0].host, applied_routes[0].port) == ("127.0.0.1", 43210)
+    assert applied_routes[1].port == 43211
+
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43211, "clear")
+    assert applied_routes[-1] is original_route
+    applied_count = len(applied_routes)
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43211, "clear")
+    assert len(applied_routes) == applied_count
+
+
+def test_optional_tor_proxy_restores_system_proxy_configuration(monkeypatch):
+    from proxy import set_proxy as proxy_settings
+
+    restored = []
+
+    class FakeNetworkProxy:
+        HttpProxy = "http"
+        NoProxy = "none"
+
+        def __init__(self, proxy_type, host="", port=0):
+            self.proxy_type = proxy_type
+            self.host = host
+            self.port = port
+
+        @staticmethod
+        def applicationProxy():
+            return FakeNetworkProxy("system", "system-proxy", 8080)
+
+        @staticmethod
+        def setApplicationProxy(_proxy):
+            return None
+
+    class FakeNetworkProxyFactory:
+        @staticmethod
+        def usesSystemConfiguration():
+            return True
+
+        @staticmethod
+        def setUseSystemConfiguration(enabled):
+            restored.append(enabled)
+
+    monkeypatch.setattr(proxy_settings, "QNetworkProxy", FakeNetworkProxy)
+    monkeypatch.setattr(proxy_settings, "QNetworkProxyFactory", FakeNetworkProxyFactory)
+    monkeypatch.setattr(proxy_settings, "_previous_proxy", None)
+    monkeypatch.setattr(proxy_settings, "_application_proxy_active", False)
+    monkeypatch.setattr(proxy_settings, "_uses_system_configuration", False)
+
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43210, "set")
+    proxy_settings.manage_proxy(object(), "127.0.0.1", 43210, "clear")
+
+    assert restored == [True]
