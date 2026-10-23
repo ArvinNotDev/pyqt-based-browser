@@ -389,6 +389,7 @@ def _contrast(foreground, background):
         (light_theme, "#3f4752", "#f7f8fa"),
         (dark_theme, "#c7ced8", "#1b1e23"),
     ],
+    ids=("light-theme", "dark-theme"),
 )
 def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreground, background):
     qapp.setStyleSheet(stylesheet)
