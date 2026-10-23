@@ -224,7 +224,9 @@ class NavigationBar(QToolBar):
 
         self.menu_button = QToolButton(self)
         self.menu_button.setObjectName("menuButton")
-        self.menu_button.setText("")
+        # Retain the legacy text API for integrations/tests; IconOnly renders the
+        # precisely centred vector icon instead of the glyph baseline.
+        self.menu_button.setText("⋮")
         self.menu_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.menu_button.setIconSize(QSize(18, 18))
         self.menu_button.setFixedSize(QSize(36, 32))
