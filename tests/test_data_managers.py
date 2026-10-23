@@ -424,6 +424,14 @@ class DataManagerTests(unittest.TestCase):
         separate.attach_profile(FakeProfile(str(old_directory)))
         self.assertEqual(separate.download_dir, os.path.abspath(explicit_directory))
 
+        separate.set_download_directory(new_directory)
+        request = FakeDownloadRequest(name="new-destination.txt")
+        separate._on_download_requested(request)
+        self.assertEqual(
+            os.path.dirname(separate.get_downloads()[0]["path"]),
+            os.path.abspath(new_directory),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
