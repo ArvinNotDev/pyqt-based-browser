@@ -113,7 +113,9 @@
         const source = byId(draggedWidget);
         if (!source || !host.contains(source)) return;
         const rect = widget.getBoundingClientRect();
-        const after = event.clientY > rect.top + rect.height / 2;
+        const offsetX = (event.clientX - (rect.left + rect.width / 2)) / Math.max(1, rect.width);
+        const offsetY = (event.clientY - (rect.top + rect.height / 2)) / Math.max(1, rect.height);
+        const after = Math.abs(offsetX) > Math.abs(offsetY) ? offsetX > 0 : offsetY > 0;
         host.insertBefore(source, after ? widget.nextElementSibling : widget);
         const order = [...host.querySelectorAll('.widget')].map(item => item.id.replace(/-widget$/, ''));
         state.widget_order = order;
