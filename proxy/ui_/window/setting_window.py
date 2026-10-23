@@ -58,7 +58,7 @@ class SettingWindow(QWidget):
 
         self.sidebar = QFrame(self)
         self.sidebar.setObjectName("proxySettingsSidebar")
-        self.sidebar.setFixedWidth(132)
+        self.sidebar.setFixedWidth(124)
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(7, 9, 7, 9)
         self.sidebar_layout.setSpacing(4)
@@ -224,7 +224,7 @@ class SettingWindow(QWidget):
             QLabel#proxySettingsHint {{ color: {muted}; font-size: 11px; }}
             QLineEdit#proxySettingsSearch {{ background: {surface}; color: {text}; border: 1px solid {border}; border-radius: 10px; padding: 7px 11px; selection-background-color: {accent}; selection-color: #ffffff; }}
             QLineEdit#proxySettingsSearch:focus {{ border-color: {accent}; }}
-            QPushButton#proxySettingCategory {{ min-height: 34px; text-align: left; padding: 0 7px; background: transparent; color: {text}; border: 1px solid transparent; border-radius: 8px; font-size: 11px; font-weight: 650; }}
+            QPushButton#proxySettingCategory {{ min-height: 34px; text-align: left; padding: 0 5px; background: transparent; color: {text}; border: 1px solid transparent; border-radius: 8px; font-size: 10px; font-weight: 650; }}
             QPushButton#proxySettingCategory:hover {{ background: {hover}; border-color: {border}; }}
             QPushButton#proxySettingCategory:checked {{ background: {accent}; color: #ffffff; border-color: {accent}; font-weight: 750; }}
             QLabel {{ background: transparent; }}

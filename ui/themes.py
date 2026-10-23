@@ -14,8 +14,7 @@ QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(231,237,246,220); border: 1px solid rgba(255,255,255,175); border-radius: 12px; }
 QWidget#browserContentCard { background: #e9edf3; border: 1px solid #dce1e8; border-radius: 14px; }
-QDockWidget#proxyDock { border: 1px solid #dce1e8; border-radius: 14px; }
-QDockWidget#proxyDock::title { background: #eef1f5; border-top-left-radius: 13px; border-top-right-radius: 13px; padding: 7px 10px; }
+QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #dce1e8; }
 
 QWidget#customTitleBar {
     background-color: rgba(242,246,252,235);
@@ -410,7 +409,7 @@ QProgressBar {
     border-radius: 4px;
 }
 QProgressBar::chunk { background: #3979d6; border-radius: 4px; }
-QDockWidget#proxyDock { background: rgba(240,246,254,220); border-color: rgba(255,255,255,220); }
+QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #d8e0eb; }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
 
 
@@ -469,8 +468,7 @@ QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rg
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(34,40,49,230); border: 1px solid rgba(255,255,255,24); border-radius: 12px; }
 QWidget#browserContentCard { background: #22272e; border: 1px solid #30353d; border-radius: 14px; }
-QDockWidget#proxyDock { border: 1px solid #30353d; border-radius: 14px; }
-QDockWidget#proxyDock::title { background: #22272e; border-top-left-radius: 13px; border-top-right-radius: 13px; padding: 7px 10px; }
+QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid #30353d; }
 
 QWidget#customTitleBar {
     background-color: rgba(23,27,34,242);
@@ -864,7 +862,7 @@ QProgressBar {
     border-radius: 4px;
 }
 QProgressBar::chunk { background: #82aff4; border-radius: 4px; }
-QDockWidget#proxyDock { background: rgba(26,32,41,232); border-color: rgba(255,255,255,38); }
+QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid rgba(255,255,255,38); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
 
 

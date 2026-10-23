@@ -20,7 +20,7 @@ from PySide6.QtCore import (
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
+    QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
@@ -748,7 +748,7 @@ class BrowserWindow(QMainWindow):
         self.browser_proxy_splitter.addWidget(self.browser_workspace)
 
         self.dock = _ProxyPanelHost(self.browser_proxy_splitter)
-        self.dock.setMinimumWidth(270)
+        self.dock.setMinimumWidth(320)
         self.dock.setMaximumWidth(420)
         self._proxy_placeholder = None
         if self.proxy_panel is not None:
@@ -940,10 +940,10 @@ class BrowserWindow(QMainWindow):
         visible = not self.dock.isVisible()
         if visible:
             self._ensure_proxy_panel()
-            self.dock.setMinimumWidth(270)
+            self.dock.setMinimumWidth(320)
             self.dock.setVisible(True)
             total_width = max(1, self.browser_proxy_splitter.width())
-            pane_width = min(360, max(290, int(total_width * 0.32)))
+            pane_width = min(380, max(320, int(total_width * 0.32)))
             self.browser_proxy_splitter.setSizes([max(1, total_width - pane_width), pane_width])
         else:
             self.dock.setVisible(False)
