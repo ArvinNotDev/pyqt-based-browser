@@ -375,10 +375,15 @@ class DataManagerTests(unittest.TestCase):
             set(record),
             {
                 "id", "file_name", "path", "url", "received_bytes",
-                "total_bytes", "state", "paused", "error",
+                "total_bytes", "state", "paused", "error", "requested_at",
+                "started_at", "finished_at", "speed_bytes_per_sec", "speed_samples",
             },
         )
         self.assertFalse(record["paused"])
+        self.assertTrue(record["requested_at"])
+        self.assertTrue(record["started_at"])
+        self.assertEqual(record["finished_at"], "")
+        self.assertIsInstance(record["speed_samples"], list)
         self.assertIn(["requested"], observed_states)
         self.assertIn(["downloading"], observed_states)
 
@@ -391,7 +396,9 @@ class DataManagerTests(unittest.TestCase):
 
         request.finish()
         self.assertIn(["completed"], observed_states)
-        self.assertEqual(manager.get_downloads()[0]["state"], "completed")
+        completed = manager.get_downloads()[0]
+        self.assertEqual(completed["state"], "completed")
+        self.assertTrue(completed["finished_at"])
         self.assertFalse(manager.cancel(original_id))
 
     def test_download_paths_are_reserved_across_profile_managers(self):

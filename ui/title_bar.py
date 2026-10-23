@@ -1,9 +1,33 @@
 """Custom, draggable title bar for the frameless browser window."""
 
+import ctypes
+import sys
+from ctypes import wintypes
+
 from PySide6.QtCore import QPoint, QRect, QSize, Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 import qtawesome as qta
+
+
+def _start_native_caption_operation(window, hit_test: int) -> bool:
+    """Delegate a fallback move/resize to Windows instead of emulating every pixel."""
+    if sys.platform != "win32":
+        return False
+    try:
+        hwnd = wintypes.HWND(int(window.winId()))
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.ReleaseCapture()
+        send_message = user32.SendMessageW
+        send_message.argtypes = (
+            wintypes.HWND, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t
+        )
+        send_message.restype = ctypes.c_ssize_t
+        # WM_NCLBUTTONDOWN: let Windows own snapping, sizing and drag feedback.
+        send_message(hwnd, 0x00A1, hit_test, 0)
+        return True
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
 
 
 class CustomTitleBar(QWidget):
@@ -88,6 +112,10 @@ class CustomTitleBar(QWidget):
                 self._manual_move_active = False
                 event.accept()
                 return
+            if _start_native_caption_operation(self.host, 2):  # HTCAPTION
+                self._manual_move_active = False
+                event.accept()
+                return
             self._manual_move_origin = event.globalPosition().toPoint()
             self._manual_move_geometry = self.host.geometry()
             self._manual_move_active = not self.host.isMaximized() and not self.host.isFullScreen()
@@ -140,6 +168,18 @@ class ResizeHandle(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             handle = self.host.windowHandle()
             if handle is not None and handle.startSystemResize(self.edges):
+                event.accept()
+                return
+            left = bool(self.edges & Qt.Edge.LeftEdge)
+            right = bool(self.edges & Qt.Edge.RightEdge)
+            top = bool(self.edges & Qt.Edge.TopEdge)
+            bottom = bool(self.edges & Qt.Edge.BottomEdge)
+            hit_test = (
+                13 if top and left else 14 if top and right
+                else 16 if bottom and left else 17 if bottom and right
+                else 10 if left else 11 if right else 12 if top else 15
+            )
+            if _start_native_caption_operation(self.host, hit_test):
                 event.accept()
                 return
             self._resize_origin = event.globalPosition().toPoint()

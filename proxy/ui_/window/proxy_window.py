@@ -36,6 +36,9 @@ class ProxyWindow(QWidget):
     tor_exit_signal = Signal(str)
     def __init__(self, parent=None):
         super().__init__(parent)
+        # All background checks and Tor tasks share this window-owned pool.
+        self.thread_pool = QThreadPool(self)
+        self.thread_pool.setMaxThreadCount(3)
         self.data = Data()
         self.running = False
         self.connected = False

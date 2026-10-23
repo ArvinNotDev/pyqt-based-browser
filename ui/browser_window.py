@@ -797,7 +797,10 @@ class BrowserWindow(QMainWindow):
         self._native_refresh_pending = False
         self._native_style_hwnd = 0
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Per-pixel translucent top-level windows can leave Chromium/WebEngine
+        # surfaces stale or transparent during native moves and monitor-DPI changes.
+        # Keep non-Windows compositing unchanged, but use an opaque native surface on Windows.
+        self.setAttribute(Qt.WA_TranslucentBackground, sys.platform != "win32")
         proxy_routing.load_exclude()
         self.tor_mode = bool(tor_mode)
         # Tor must configure its proxy before WebEngine profiles exist. In ordinary
