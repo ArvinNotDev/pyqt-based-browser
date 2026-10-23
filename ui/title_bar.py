@@ -9,16 +9,16 @@ class CustomTitleBar(QWidget):
         super().__init__(window)
         self.host = window
         self.setObjectName("customTitleBar")
-        self.setFixedHeight(38)
+        self.setFixedHeight(40)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 7, 0)
+        layout.setContentsMargins(14, 0, 10, 0)
         layout.setSpacing(8)
 
         self.logo = QLabel("A", self)
         self.logo.setObjectName("titleBarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
-        self.logo.setFixedSize(25, 25)
+        self.logo.setFixedSize(24, 24)
         self.logo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(self.logo)
 
@@ -46,7 +46,7 @@ class CustomTitleBar(QWidget):
         button.setText(text)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
-        button.setFixedSize(34, 27)
+        button.setFixedSize(34, 28)
         button.setFocusPolicy(Qt.NoFocus)
         return button
 
