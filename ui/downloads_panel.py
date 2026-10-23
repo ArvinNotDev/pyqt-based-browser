@@ -9,6 +9,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
+    QGraphicsBlurEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -43,6 +44,17 @@ class DownloadsPanel(QFrame):
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._manager = None
         self._is_open = False
+
+        # Blur only a decorative material layer. All labels, inputs and buttons
+        # remain separate, sharp child widgets so the glass never hurts readability.
+        self.glass_material = QFrame(self)
+        self.glass_material.setObjectName("downloadsGlassMaterial")
+        self.glass_material.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.glass_material.setFocusPolicy(Qt.NoFocus)
+        material_blur = QGraphicsBlurEffect(self.glass_material)
+        material_blur.setBlurRadius(14)
+        self.glass_material.setGraphicsEffect(material_blur)
+        self.glass_material.lower()
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 14)
@@ -99,6 +111,7 @@ class DownloadsPanel(QFrame):
         self.scroll.setFrameShape(QFrame.NoFrame)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.list_host = QWidget(self.scroll)
+        self.list_host.setObjectName("downloadsListHost")
         self.list_layout = QVBoxLayout(self.list_host)
         self.list_layout.setContentsMargins(0, 2, 0, 2)
         self.list_layout.setSpacing(9)
@@ -112,6 +125,13 @@ class DownloadsPanel(QFrame):
         root.addWidget(self.scroll, 1)
 
         self.set_manager(manager)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        material = getattr(self, "glass_material", None)
+        if material is not None:
+            material.setGeometry(self.rect().adjusted(2, 2, -2, -2))
+            material.lower()
 
     @property
     def is_open(self) -> bool:
