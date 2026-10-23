@@ -1880,10 +1880,12 @@ class BrowserWindow(QMainWindow):
         try:
             if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
                 return
-            if not info.isMainFrame() or view is not self.current_view():
+            if view is not self.current_view():
                 return
-            # Chromium/Qt use these codes for an aborted or superseded navigation.
-            if info.errorCode() in {-3, 102}:
+            failed_url = info.url().toString()
+            current_url = view.url().toString()
+            # Ignore superseded requests and Chromium's normal navigation abort.
+            if info.errorCode() == -3 or (failed_url and current_url and failed_url != current_url):
                 return
             message = (info.errorString() or "").strip()
             if not message:
