@@ -125,6 +125,40 @@ def _with_resizable_frameless_windows_style(style: int) -> int:
     )
     return style & ~_WIN_WS_CAPTION
 
+def _is_snap_aligned_geometry(frame: QRect, available: QRect) -> bool:
+    """Detect common Windows Snap Layout cells without relying on maximize state."""
+    if frame.isEmpty() or available.isEmpty():
+        return False
+    tolerance = max(8, int(min(available.width(), available.height()) * 0.006))
+    fractions = (0.0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1.0)
+
+    def boundaries(origin: int, length: int) -> tuple[int, ...]:
+        return tuple(origin + round(length * fraction) for fraction in fractions)
+
+    x_grid = boundaries(available.x(), available.width())
+    y_grid = boundaries(available.y(), available.height())
+    frame_edges = (
+        frame.x(),
+        frame.x() + frame.width(),
+        frame.y(),
+        frame.y() + frame.height(),
+    )
+    x_aligned = (
+        any(abs(frame_edges[0] - value) <= tolerance for value in x_grid)
+        and any(abs(frame_edges[1] - value) <= tolerance for value in x_grid)
+    )
+    y_aligned = (
+        any(abs(frame_edges[2] - value) <= tolerance for value in y_grid)
+        and any(abs(frame_edges[3] - value) <= tolerance for value in y_grid)
+    )
+    # Avoid classifying a small, ordinary window as snapped just because two
+    # of its edges happen to land near grid lines.
+    large_enough = (
+        frame.width() >= available.width() * 0.18
+        and frame.height() >= available.height() * 0.18
+    )
+    return bool(x_aligned and y_aligned and large_enough)
+
 
 logger = logging.getLogger(__name__)
 register_dashboard_scheme()
@@ -139,6 +173,72 @@ class _DownloadsOverlayDismissArea(QFrame):
         if event.button() == Qt.LeftButton:
             self.dismissed.emit()
         event.accept()
+
+
+class _PageLoadOverlay(QFrame):
+    """A small, non-blocking loading HUD attached to its own web page."""
+
+    def __init__(self, view: QWidget):
+        super().__init__(view)
+        self.view = view
+        self.setObjectName("pageLoadOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setFixedHeight(56)
+        self.setMinimumWidth(220)
+        self.setMaximumWidth(360)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 8, 12, 9)
+        layout.setSpacing(6)
+        heading = QHBoxLayout()
+        heading.setContentsMargins(0, 0, 0, 0)
+        heading.setSpacing(8)
+        self.title_label = QLabel("Loading page", self)
+        self.title_label.setObjectName("pageLoadOverlayTitle")
+        heading.addWidget(self.title_label, 1)
+        self.percent_label = QLabel("Connecting…", self)
+        self.percent_label.setObjectName("pageLoadOverlayPercent")
+        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        heading.addWidget(self.percent_label)
+        layout.addLayout(heading)
+
+        self.progress_bar = QProgressBar(self)
+        self.progress_bar.setObjectName("pageLoadOverlayProgress")
+        self.progress_bar.setTextVisible(False)
+        self.progress_bar.setFixedHeight(4)
+        self.progress_bar.setRange(0, 0)
+        layout.addWidget(self.progress_bar)
+
+        view.installEventFilter(self)
+        self.hide()
+
+    def _position_over_page(self) -> None:
+        if self.view is None:
+            return
+        parent_width = max(1, self.view.width())
+        width = min(336, max(1, parent_width - 24))
+        x = max(8, (parent_width - width) // 2)
+        self.setGeometry(x, 14, width, self.height())
+        self.raise_()
+
+    def show_loading(self, progress: int | None = None) -> None:
+        if progress is None:
+            self.progress_bar.setRange(0, 0)
+            self.percent_label.setText("Connecting…")
+        else:
+            value = max(0, min(100, int(progress)))
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(value)
+            self.percent_label.setText(f"{value}%")
+        self._position_over_page()
+        self.show()
+        self.raise_()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.view and event.type() == QEvent.Type.Resize:
+            self._position_over_page()
+        return super().eventFilter(watched, event)
 
 
 class _ProxyPanelHost(QFrame):
@@ -796,6 +896,11 @@ class BrowserWindow(QMainWindow):
         self._window_handle_connected = None
         self._native_refresh_pending = False
         self._native_style_hwnd = 0
+        self._edge_to_edge_frame_state = None
+        self._snap_frame_sync_timer = QTimer(self)
+        self._snap_frame_sync_timer.setSingleShot(True)
+        self._snap_frame_sync_timer.setInterval(75)
+        self._snap_frame_sync_timer.timeout.connect(self._sync_window_frame)
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         # Per-pixel translucent top-level windows can leave Chromium/WebEngine
         # surfaces stale or transparent during native moves and monitor-DPI changes.
@@ -874,16 +979,6 @@ class BrowserWindow(QMainWindow):
         self.navbar.profile_selected.connect(self.on_profile_selected)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
 
-        # Reserve a slim loading slot in the layout at all times so navigation
-        # never nudges the tab strip or page viewport when a load starts/finishes.
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setObjectName("pageLoadProgress")
-        self.progress_bar.setFixedHeight(3)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setAccessibleName("Page loading progress")
-
         self.tabbar = CustomTabBar()
         self.tabbar.setObjectName("browserTabBar")
         self.tabbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
@@ -895,6 +990,7 @@ class BrowserWindow(QMainWindow):
         self.tabbar.tab_reordered.connect(self._move_tab)
 
         self.views: List[QWebEngineView] = []
+        self._page_load_overlays: Dict[QWebEngineView, _PageLoadOverlay] = {}
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
         self._snapshots: Dict[QWebEngineView, QPixmap] = {}
         self._recorded_history_urls: Dict[QWebEngineView, str] = {}
@@ -924,6 +1020,7 @@ class BrowserWindow(QMainWindow):
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(1, 1, 1, 1)
         shell_layout.setSpacing(0)
+        self._shell_layout = shell_layout
         self.title_bar = CustomTitleBar(self)
         shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self.navbar)
@@ -937,7 +1034,6 @@ class BrowserWindow(QMainWindow):
         browser_workspace_layout.setContentsMargins(0, 0, 0, 0)
         browser_workspace_layout.setSpacing(0)
         browser_workspace_layout.addWidget(self.tabbar)
-        browser_workspace_layout.addWidget(self.progress_bar)
 
         self.content_row = QWidget(self.browser_workspace)
         content_layout = QHBoxLayout(self.content_row)
@@ -1224,6 +1320,10 @@ class BrowserWindow(QMainWindow):
         self.apply_theme()
         self.statusBar().showMessage("Dark theme enabled." if self.settings.dark_mode else "Light theme enabled.", 1800)
 
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self._schedule_snap_frame_sync()
+
     def changeEvent(self, event):
         super().changeEvent(event)
         if event.type() == QEvent.WindowStateChange and hasattr(self, "title_bar"):
@@ -1237,15 +1337,37 @@ class BrowserWindow(QMainWindow):
         if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
             return
         edge_to_edge = self.isMaximized() or self.isFullScreen()
+        if sys.platform == "win32" and not edge_to_edge:
+            screen = self.screen()
+            handle = self.windowHandle()
+            if handle is not None and handle.screen() is not None:
+                screen = handle.screen()
+            if screen is not None:
+                edge_to_edge = _is_snap_aligned_geometry(
+                    self.frameGeometry(), screen.availableGeometry()
+                )
+        if getattr(self, "_edge_to_edge_frame_state", None) == edge_to_edge:
+            return
+        self._edge_to_edge_frame_state = edge_to_edge
         margin = 0 if edge_to_edge else 8
+        shell_margin = 0 if edge_to_edge else 1
         self._root_layout.setContentsMargins(margin, margin, margin, margin)
+        shell_layout = getattr(self, "_shell_layout", None)
+        if shell_layout is not None:
+            shell_layout.setContentsMargins(shell_margin, shell_margin, shell_margin, shell_margin)
         self._shell.setProperty("edgeToEdge", edge_to_edge)
         self._shell.style().unpolish(self._shell)
         self._shell.style().polish(self._shell)
         self._shell.update()
 
+    def _schedule_snap_frame_sync(self) -> None:
+        timer = getattr(self, "_snap_frame_sync_timer", None)
+        if timer is not None and not self.isMaximized() and not self.isFullScreen():
+            timer.start()
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._schedule_snap_frame_sync()
         self._update_resize_handles()
         self._position_download_toast()
         if getattr(self, "_downloads_panel_mode", "split") == "overlay":
@@ -2772,6 +2894,7 @@ class BrowserWindow(QMainWindow):
 
         view = QWebEngineView(self.view_container)
         view.setVisible(False)
+        self._page_load_overlays[view] = _PageLoadOverlay(view)
         # WebEngine owns a separate compositor surface; transparency and animated
         # graphics effects can make that surface blink during its first paint.
         page = BrowserPage(self, self.profile, view)
@@ -2858,6 +2981,7 @@ class BrowserWindow(QMainWindow):
             placeholder.deleteLater()
 
         self.view_layout.removeWidget(closing_view)
+        self._page_load_overlays.pop(closing_view, None)
         closing_view.stop()
         closing_view.hide()
         closing_view.deleteLater()
@@ -2896,13 +3020,12 @@ class BrowserWindow(QMainWindow):
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
-        # The 3 px progress slot is always present, but its fill belongs to the
-        # selected page only. Never leave a previous tab's 100% bar on screen.
-        if view.page().isLoading():
-            self.progress_bar.setRange(0, 0)
+        if view.page().isLoading() and self._placeholders.get(view) is None:
+            self._show_page_load_overlay(view)
         else:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
+            overlay = self._page_load_overlays.get(view)
+            if overlay is not None:
+                overlay.hide()
         self._update_bookmarks_bar_visibility(view.url())
         self.navbar.url_bar.setText(view.url().toString())
         self._sync_site_connection_action(view.url().toString())
@@ -2977,9 +3100,12 @@ class BrowserWindow(QMainWindow):
             placeholder.loading_progress.show()
             placeholder.retry_button.hide()
         if view is self.current_view():
-            self.progress_bar.setRange(0, 0)
-            self.progress_bar.show()
-            self.statusBar().showMessage("Loading…", 0)
+            if self._placeholders.get(view) is None:
+                self._show_page_load_overlay(view)
+            else:
+                overlay = self._page_load_overlays.get(view)
+                if overlay is not None:
+                    overlay.hide()
 
     def _on_loading_changed(self, info, view: QWebEngineView, page: QWebEnginePage):
         """Report real main-frame network failures without treating cancelled loads as errors."""
@@ -2999,10 +3125,9 @@ class BrowserWindow(QMainWindow):
             tabbar = getattr(self, "tabbar", None)
             if view in self.views and tabbar is not None:
                 tabbar.set_loading(self.views.index(view), False)
-            progress_bar = getattr(self, "progress_bar", None)
-            if progress_bar is not None:
-                progress_bar.setRange(0, 100)
-                progress_bar.setValue(0)
+            overlay = getattr(self, "_page_load_overlays", {}).get(view)
+            if overlay is not None:
+                overlay.hide()
             placeholder = self._placeholders.get(view)
             if placeholder is None and view in self.views:
                 # A page can fail after an earlier successful load removed its placeholder.
@@ -3022,17 +3147,38 @@ class BrowserWindow(QMainWindow):
         except (AttributeError, RuntimeError):
             logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
 
+    def _page_load_overlay_for(self, view: QWebEngineView):
+        return getattr(self, "_page_load_overlays", {}).get(view)
+
+    def _show_page_load_overlay(self, view: QWebEngineView, progress: int | None = None) -> None:
+        if view not in getattr(self, "views", ()) or view is not self.current_view():
+            return
+        # The full-page first-load placeholder already presents progress of its own.
+        if getattr(self, "_placeholders", {}).get(view) is not None:
+            return
+        overlay = self._page_load_overlay_for(view)
+        if overlay is not None:
+            overlay.show_loading(progress)
+
+    def _hide_page_load_overlay_if_current(self, view: QWebEngineView) -> None:
+        if (
+            view in getattr(self, "views", ())
+            and view is self.current_view()
+            and not view.page().isLoading()
+        ):
+            overlay = self._page_load_overlay_for(view)
+            if overlay is not None:
+                overlay.hide()
+
     def _on_load_progress(self, progress: int, view):
         if view is not self.current_view():
             return
 
         now = time.monotonic()
-        if now - self._last_progress_ts < 0.05:  # 50ms
+        if now - getattr(self, "_last_progress_ts", 0.0) < 0.05:  # 50ms
             return
         self._last_progress_ts = now
-
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(progress)
+        self._show_page_load_overlay(view, progress)
 
 
     def _on_load_finished_with_swap(self, ok: bool, view: QWebEngineView, page: QWebEnginePage):
@@ -3045,14 +3191,13 @@ class BrowserWindow(QMainWindow):
             page.runJavaScript(
                 "document.documentElement.classList.add('dashboard-ready');"
             )
-        if view is self.current_view():
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(100)
-            QTimer.singleShot(300, lambda v=view: self._hide_progress_if_current(v))
+        if view is self.current_view() and self._placeholders.get(view) is None:
+            self._show_page_load_overlay(view, 100)
+            # Keep the completed percentage briefly, then hide it without shifting
+            # the page viewport or reserving an empty progress row.
+            QTimer.singleShot(220, lambda v=view: self._hide_page_load_overlay_if_current(v))
             # loadFinished(False) also occurs for cancelled or superseded navigations.
             # A real main-frame network failure is reported by _on_loading_changed.
-            if ok:
-                self.statusBar().showMessage("Page loaded", 1200)
 
         if ok and self.history is not None:
             url_text = view.url().toString()
@@ -3090,12 +3235,6 @@ class BrowserWindow(QMainWindow):
         placeholder.deleteLater()
         self._set_tab_visibility()
 
-    def _hide_progress_if_current(self, view: QWebEngineView) -> None:
-        # The widget is intentionally never hidden: its 3 px slot is reserved
-        # above the viewport so completing a navigation cannot cause layout shift.
-        if view in self.views and view is self.current_view() and not view.page().isLoading():
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(0)
 
     def _update_navigation_actions(self, view: QWebEngineView) -> None:
         if view is not self.current_view():
@@ -3560,6 +3699,7 @@ class BrowserWindow(QMainWindow):
             download_manager.shutdown()
         views = list(self.views)
         self.views.clear()
+        self._page_load_overlays.clear()
         self._placeholders.clear()
         for view in views:
             view.stop()
@@ -3606,7 +3746,7 @@ class BrowserWindow(QMainWindow):
             widget: widget.isVisible()
             for widget in (
                 self.title_bar, self.navbar, self.bookmarks_bar, self.tabbar,
-                self.progress_bar, self.dock,
+                self.dock,
             )
             if widget is not None
         }

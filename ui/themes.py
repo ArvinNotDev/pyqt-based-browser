@@ -419,11 +419,6 @@ QProgressBar {
     border-radius: 4px;
 }
 QProgressBar::chunk { background: #3979d6; border-radius: 2px; }
-QProgressBar#pageLoadProgress {
-    background: transparent; border: none; border-radius: 2px;
-    min-height: 3px; max-height: 3px; margin: 0; padding: 0;
-}
-QProgressBar#pageLoadProgress::chunk { background: #3979d6; border-radius: 2px; }
 QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #d8e0eb; }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
 
@@ -951,11 +946,6 @@ QProgressBar {
     border-radius: 4px;
 }
 QProgressBar::chunk { background: #82aff4; border-radius: 2px; }
-QProgressBar#pageLoadProgress {
-    background: transparent; border: none; border-radius: 2px;
-    min-height: 3px; max-height: 3px; margin: 0; padding: 0;
-}
-QProgressBar#pageLoadProgress::chunk { background: #82aff4; border-radius: 2px; }
 QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid rgba(255,255,255,38); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
 
@@ -1067,5 +1057,145 @@ QToolButton#tabListButton::menu-indicator { image: none; }
 from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
 
 # Keep legacy dialog/feature styles intact, then apply one final coherent chrome layer.
-light_theme = f"{light_theme}\n{LIGHT_CHROME_POLISH}"
-dark_theme = f"{dark_theme}\n{DARK_CHROME_POLISH}"
+light_theme = f"{light_theme}\n{LIGHT_CHROME_POLISH}" + """
+QFrame#pageLoadOverlay {
+    background: rgba(250, 253, 255, 246);
+    border: 1px solid rgba(176, 196, 223, 235);
+    border-radius: 12px;
+}
+QLabel#pageLoadOverlayTitle { color: #243248; font-size: 11px; font-weight: 700; }
+QLabel#pageLoadOverlayPercent { color: #3979d6; font-size: 10px; font-weight: 700; }
+QProgressBar#pageLoadOverlayProgress {
+    background: #dfe8f5; border: none; border-radius: 2px;
+    min-height: 4px; max-height: 4px; margin: 0; padding: 0;
+}
+QProgressBar#pageLoadOverlayProgress::chunk { background: #3979d6; border-radius: 2px; }
+QFrame#downloadsPanel {
+    background: rgba(244, 247, 252, 250);
+    border: 1px solid rgba(209, 220, 236, 225);
+    border-radius: 16px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,245), stop:1 rgba(234,241,250,235));
+    border: 1px solid rgba(255,255,255,225); border-radius: 14px;
+}
+QLineEdit#downloadsSearch {
+    color: #243248; background: #ffffff; border: 1px solid #d5dfed;
+    border-radius: 10px; padding: 8px 11px; selection-background-color: #cfe0fb;
+}
+QLineEdit#downloadsSearch:focus { border-color: #80aee9; }
+QFrame#downloadCard {
+    background: rgba(255,255,255,248); border: 1px solid #dce4ef;
+    border-radius: 12px;
+}
+QFrame#downloadCard:hover { border-color: #b7cbe7; background: #ffffff; }
+QFrame#downloadCard[selected="true"] {
+    background: #f0f6ff; border: 1px solid #8fb7f0;
+}
+QPushButton#downloadFileName {
+    color: #223147; font-size: 12px; font-weight: 700; text-align: left;
+}
+QLabel#downloadSource { color: #7a8798; font-size: 10px; }
+QLabel#downloadStatus { color: #506179; font-size: 10px; font-weight: 600; }
+QProgressBar#downloadProgress {
+    background: #e5ecf5; border: none; border-radius: 3px;
+    min-height: 5px; max-height: 5px; margin: 0; padding: 0;
+}
+QProgressBar#downloadProgress::chunk { background: #4485df; border-radius: 3px; }
+QToolButton#downloadMoreButton {
+    color: #66758a; background: transparent; border: 1px solid transparent;
+    border-radius: 7px; min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px; padding: 0;
+}
+QToolButton#downloadMoreButton:hover { background: #eaf1fb; border-color: #d5e2f4; }
+QFrame#downloadDetailsPanel {
+    background: rgba(255,255,255,250); border: 1px solid #d9e3f0;
+    border-radius: 13px;
+}
+QLabel#downloadDetailsEyebrow { color: #718198; font-size: 9px; font-weight: 800; }
+QLabel#downloadDetailsTitle { color: #223147; font-size: 12px; font-weight: 750; }
+QLabel#downloadDetailsSummary { color: #40536c; font-size: 11px; font-weight: 600; }
+QLabel#downloadDetailsTimes { color: #718198; font-size: 9px; }
+QPushButton#downloadsPrimaryButton {
+    color: #ffffff; background: #3979d6; border: none; border-radius: 8px;
+    padding: 6px 11px; min-height: 18px; font-weight: 650;
+}
+QPushButton#downloadsPrimaryButton:hover { background: #2d6dc8; }
+QPushButton#downloadsSecondaryButton {
+    color: #44556b; background: #ffffff; border: 1px solid #d5dfed;
+    border-radius: 8px; padding: 7px 9px;
+}
+QPushButton#downloadsSecondaryButton:hover { color: #285eae; border-color: #91b5e8; background: #f5f9ff; }
+"""
+dark_theme = f"{dark_theme}\n{DARK_CHROME_POLISH}" + """
+QFrame#pageLoadOverlay {
+    background: rgba(29, 37, 49, 248);
+    border: 1px solid rgba(126, 151, 184, 150);
+    border-radius: 12px;
+}
+QLabel#pageLoadOverlayTitle { color: #edf4ff; font-size: 11px; font-weight: 700; }
+QLabel#pageLoadOverlayPercent { color: #8bbaff; font-size: 10px; font-weight: 700; }
+QProgressBar#pageLoadOverlayProgress {
+    background: #3b4759; border: none; border-radius: 2px;
+    min-height: 4px; max-height: 4px; margin: 0; padding: 0;
+}
+QProgressBar#pageLoadOverlayProgress::chunk { background: #82aff4; border-radius: 2px; }
+QFrame#downloadsPanel {
+    background: rgba(23, 29, 39, 250);
+    border: 1px solid rgba(82, 98, 121, 170);
+    border-radius: 16px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(48,59,75,248), stop:1 rgba(28,35,46,246));
+    border: 1px solid rgba(255,255,255,28); border-radius: 14px;
+}
+QLineEdit#downloadsSearch {
+    color: #e5edf8; background: #151b24; border: 1px solid #3b485b;
+    border-radius: 10px; padding: 8px 11px; selection-background-color: #3e6eac;
+}
+QLineEdit#downloadsSearch:focus { border-color: #739fda; }
+QFrame#downloadCard {
+    background: rgba(35,43,56,248); border: 1px solid #3b4658;
+    border-radius: 12px;
+}
+QFrame#downloadCard:hover { border-color: #536681; background: #293447; }
+QFrame#downloadCard[selected="true"] {
+    background: #26364c; border: 1px solid #6a96d1;
+}
+QPushButton#downloadFileName {
+    color: #e7eef8; font-size: 12px; font-weight: 700; text-align: left;
+}
+QLabel#downloadSource { color: #8998ad; font-size: 10px; }
+QLabel#downloadStatus { color: #bdc9da; font-size: 10px; font-weight: 600; }
+QProgressBar#downloadProgress {
+    background: #354153; border: none; border-radius: 3px;
+    min-height: 5px; max-height: 5px; margin: 0; padding: 0;
+}
+QProgressBar#downloadProgress::chunk { background: #82aff4; border-radius: 3px; }
+QToolButton#downloadMoreButton {
+    color: #a5b4c9; background: transparent; border: 1px solid transparent;
+    border-radius: 7px; min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px; padding: 0;
+}
+QToolButton#downloadMoreButton:hover { background: #303e52; border-color: #465973; }
+QFrame#downloadDetailsPanel {
+    background: rgba(30, 38, 50, 252); border: 1px solid #3b4b62;
+    border-radius: 13px;
+}
+QLabel#downloadDetailsEyebrow { color: #8d9eb5; font-size: 9px; font-weight: 800; }
+QLabel#downloadDetailsTitle { color: #ecf3fc; font-size: 12px; font-weight: 750; }
+QLabel#downloadDetailsSummary { color: #c2d0e2; font-size: 11px; font-weight: 600; }
+QLabel#downloadDetailsTimes { color: #8d9eb5; font-size: 9px; }
+QPushButton#downloadsPrimaryButton {
+    color: #101a28; background: #8bbaff; border: none; border-radius: 8px;
+    padding: 6px 11px; min-height: 18px; font-weight: 700;
+}
+QPushButton#downloadsPrimaryButton:hover { background: #a2c8ff; }
+QPushButton#downloadsSecondaryButton {
+    color: #d0dced; background: #252f3e; border: 1px solid #425168;
+    border-radius: 8px; padding: 7px 9px;
+}
+QPushButton#downloadsSecondaryButton:hover { color: #eef5ff; border-color: #6a8dbb; background: #2e3a4d; }
+"""

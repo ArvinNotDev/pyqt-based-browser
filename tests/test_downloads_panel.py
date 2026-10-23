@@ -4,7 +4,6 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QGraphicsBlurEffect,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -170,7 +169,7 @@ def test_downloads_glass_softens_only_its_material_not_the_controls():
 
     assert panel.manager_button is not None
     assert not panel.manager_button.icon().isNull()
-    assert isinstance(panel.glass_material.graphicsEffect(), QGraphicsBlurEffect)
+    assert panel.glass_material.graphicsEffect() is None
     assert panel.glass_material.parentWidget() is panel
     assert panel.glass_material.isAncestorOf(panel.search) is False
     assert panel.search.parentWidget() is panel

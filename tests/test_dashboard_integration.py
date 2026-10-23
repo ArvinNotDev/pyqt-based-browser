@@ -350,7 +350,7 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         views=[view],
         current_view=lambda: view,
         _placeholders={view: placeholder},
-        progress_bar=Mock(),
+        _page_load_overlays={view: Mock()},
         tabbar=SimpleNamespace(set_loading=Mock()),
         statusBar=lambda: SimpleNamespace(showMessage=Mock()),
     )
@@ -377,8 +377,7 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
     placeholder.loading_progress.hide.assert_called_once_with()
     placeholder.retry_button.show.assert_called_once_with()
-    browser.progress_bar.setRange.assert_called_once_with(0, 100)
-    browser.progress_bar.setValue.assert_called_once_with(0)
+    browser._page_load_overlays[view].hide.assert_called_once_with()
     browser.tabbar.set_loading.assert_called_once_with(0, False)
 
 def test_proxy_panel_is_created_only_when_requested():
@@ -501,21 +500,29 @@ def test_cache_bypass_reload_is_limited_to_web_pages():
 
 
 
-def test_page_progress_uses_a_reserved_slot_and_resets_without_hiding():
+def test_page_load_overlay_hides_after_the_active_navigation_finishes():
     view = Mock()
     view.page.return_value.isLoading.return_value = False
-    progress_bar = Mock()
+    overlay = Mock()
     browser = SimpleNamespace(
         views=[view],
         current_view=lambda: view,
-        progress_bar=progress_bar,
+        _page_load_overlays={view: overlay},
     )
 
-    BrowserWindow._hide_progress_if_current(browser, view)
+    BrowserWindow._hide_page_load_overlay_if_current(browser, view)
 
-    progress_bar.setRange.assert_called_once_with(0, 100)
-    progress_bar.setValue.assert_called_once_with(0)
-    progress_bar.hide.assert_not_called()
+    overlay.hide.assert_called_once_with()
+
+
+def test_snap_aligned_geometry_is_detected_for_half_and_quarter_windows():
+    from PySide6.QtCore import QRect
+    from ui.browser_window import _is_snap_aligned_geometry
+
+    available = QRect(0, 0, 1920, 1080)
+    assert _is_snap_aligned_geometry(QRect(960, 0, 960, 1080), available)
+    assert _is_snap_aligned_geometry(QRect(0, 0, 960, 540), available)
+    assert not _is_snap_aligned_geometry(QRect(137, 91, 1200, 770), available)
 
 
 
@@ -558,14 +565,15 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
 
 
 
-def test_activating_a_loading_tab_uses_indeterminate_reserved_progress():
-    progress_bar = Mock()
+def test_activating_a_loading_tab_shows_its_page_overlay():
+    overlay = Mock()
     loading_view = Mock()
     loading_view.page.return_value.isLoading.return_value = True
     browser = SimpleNamespace(
         current_index=0,
         views=[loading_view],
-        progress_bar=progress_bar,
+        _page_load_overlays={loading_view: overlay},
+        _placeholders={loading_view: None},
         _set_tab_visibility=Mock(),
         _update_bookmarks_bar_visibility=Mock(),
         navbar=SimpleNamespace(
@@ -582,20 +590,19 @@ def test_activating_a_loading_tab_uses_indeterminate_reserved_progress():
         tabbar=SimpleNamespace(set_active=Mock()),
     )
     BrowserWindow._activate(browser, 0)
-    progress_bar.setRange.assert_called_once_with(0, 0)
-    progress_bar.setValue.assert_not_called()
-    progress_bar.hide.assert_not_called()
+    overlay.show_loading.assert_called_once_with(None)
 
 
 
-def test_activating_a_loaded_tab_clears_stale_progress_without_hiding_slot():
-    progress_bar = Mock()
+def test_activating_a_loaded_tab_hides_a_stale_page_overlay():
+    overlay = Mock()
     loaded_view = Mock()
     loaded_view.page.return_value.isLoading.return_value = False
     browser = SimpleNamespace(
         current_index=0,
         views=[loaded_view],
-        progress_bar=progress_bar,
+        _page_load_overlays={loaded_view: overlay},
+        _placeholders={loaded_view: None},
         _set_tab_visibility=Mock(),
         _update_bookmarks_bar_visibility=Mock(),
         navbar=SimpleNamespace(
@@ -614,9 +621,7 @@ def test_activating_a_loaded_tab_clears_stale_progress_without_hiding_slot():
 
     BrowserWindow._activate(browser, 0)
 
-    progress_bar.setRange.assert_called_once_with(0, 100)
-    progress_bar.setValue.assert_called_once_with(0)
-    progress_bar.hide.assert_not_called()
+    overlay.hide.assert_called_once_with()
 
 
 

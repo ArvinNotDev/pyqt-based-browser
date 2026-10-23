@@ -6,13 +6,12 @@ import os
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QUrl, Signal, QPointF
-from PySide6.QtGui import QDesktopServices, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QDesktopServices, QColor, QFontMetrics, QPainter, QPainterPath, QPen
 import qtawesome as qta
 
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QGraphicsBlurEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -125,9 +124,8 @@ class DownloadsPanel(QFrame):
         self.glass_material.setObjectName("downloadsGlassMaterial")
         self.glass_material.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.glass_material.setFocusPolicy(Qt.NoFocus)
-        material_blur = QGraphicsBlurEffect(self.glass_material)
-        material_blur.setBlurRadius(14)
-        self.glass_material.setGraphicsEffect(material_blur)
+        # Keep the glass material lightweight; QGraphicsBlurEffect blurs this layer,
+        # not the webpage behind it, and adds needless repaint cost while moving windows.
         self.glass_material.lower()
 
         root = QVBoxLayout(self)
@@ -208,17 +206,17 @@ class DownloadsPanel(QFrame):
 
         self.details_frame = QFrame(self)
         self.details_frame.setObjectName("downloadDetailsPanel")
-        self.details_frame.setStyleSheet(
-            "QFrame#downloadDetailsPanel { border-top: 1px solid palette(mid); background: transparent; }"
-        )
         details_layout = QVBoxLayout(self.details_frame)
-        details_layout.setContentsMargins(2, 8, 2, 0)
-        details_layout.setSpacing(4)
+        details_layout.setContentsMargins(12, 10, 12, 10)
+        details_layout.setSpacing(5)
+        self.details_eyebrow = QLabel("DOWNLOAD DETAILS", self.details_frame)
+        self.details_eyebrow.setObjectName("downloadDetailsEyebrow")
+        details_layout.addWidget(self.details_eyebrow)
         self.details_title = QLabel("Select a download", self.details_frame)
         self.details_title.setObjectName("downloadDetailsTitle")
         self.details_title.setWordWrap(True)
         details_layout.addWidget(self.details_title)
-        self.details_summary = QLabel("Speed and transfer details will appear here.", self.details_frame)
+        self.details_summary = QLabel("Current speed and transfer size appear here.", self.details_frame)
         self.details_summary.setObjectName("downloadDetailsSummary")
         self.details_summary.setWordWrap(True)
         details_layout.addWidget(self.details_summary)
@@ -227,7 +225,6 @@ class DownloadsPanel(QFrame):
         self.details_times = QLabel("Requested —   Started —\nFinished —", self.details_frame)
         self.details_times.setObjectName("downloadDetailsTimes")
         self.details_times.setWordWrap(True)
-        self.details_times.setStyleSheet("color: palette(mid); font-size: 10px;")
         details_layout.addWidget(self.details_times)
         root.addWidget(self.details_frame)
 
@@ -367,9 +364,13 @@ class DownloadsPanel(QFrame):
 
         source = QLabel(str(download.get("url", "")), card)
         source.setObjectName("downloadSource")
-        source.setWordWrap(True)
+        source.setWordWrap(False)
         source.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        source.setToolTip(str(download.get("url", "")))
+        full_url = str(download.get("url", ""))
+        source.setText(QFontMetrics(source.font()).elidedText(
+            full_url, Qt.TextElideMode.ElideMiddle, max(100, self.width() - 78)
+        ))
+        source.setToolTip(full_url)
         layout.addWidget(source)
 
         state = str(download.get("state", "unknown"))
@@ -479,10 +480,13 @@ class DownloadsPanel(QFrame):
             state_text = "Paused"
         else:
             state_text = labels.get(state, "Status unavailable")
+        speed_suffix = ""
+        if state == "downloading" and not download.get("paused"):
+            speed_suffix = f" · {DownloadsPanel._format_speed(download.get('speed_bytes_per_sec', 0.0))}"
         if state in _ACTIVE and total > 0:
-            return f"{state_text} · {received / 1_048_576:.1f} / {total / 1_048_576:.1f} MB"
+            return f"{state_text} · {received / 1_048_576:.1f} / {total / 1_048_576:.1f} MB{speed_suffix}"
         if state in _ACTIVE:
-            return f"{state_text} · {received / 1_048_576:.1f} MB"
+            return f"{state_text} · {received / 1_048_576:.1f} MB{speed_suffix}"
         error = str(download.get("error", ""))
         return f"{state_text} · {error}" if error else state_text
 
