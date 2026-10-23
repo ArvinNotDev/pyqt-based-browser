@@ -326,13 +326,14 @@ def test_loading_placeholder_is_full_size_and_has_a_retry_action():
 def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     view = Mock()
     view.url.return_value = QUrl("https://offline.example/")
-    placeholder = SimpleNamespace(
-        _load_error=False,
-        loading_title_label=SimpleNamespace(setText=Mock()),
-        loading_detail_label=SimpleNamespace(setText=Mock()),
-        loading_progress=SimpleNamespace(hide=Mock(), show=Mock()),
-        retry_button=SimpleNamespace(show=Mock(), hide=Mock()),
-    )
+    placeholder = Mock()
+    placeholder._load_error = False
+    placeholder.loading_title_label.setText = Mock()
+    placeholder.loading_detail_label.setText = Mock()
+    placeholder.loading_progress.hide = Mock()
+    placeholder.loading_progress.show = Mock()
+    placeholder.retry_button.show = Mock()
+    placeholder.retry_button.hide = Mock()
     browser = SimpleNamespace(
         views=[view],
         current_view=lambda: view,
