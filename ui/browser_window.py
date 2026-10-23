@@ -2218,6 +2218,11 @@ class BrowserWindow(QMainWindow):
 
                 old_private = bool(self.settings.private_mode)
                 old_hardware = bool(self.settings.hardware_acceleration)
+                settings_field_names = (
+                    "homepage", "startup_page", "new_tab_page", "default_search_engine",
+                    "download_folder", *boolean_fields,
+                )
+                old_values = {name: getattr(self.settings, name) for name in settings_field_names}
                 candidate = copy.copy(self.settings)
                 candidate.homepage = homepage
                 candidate.startup_page = startup_page
@@ -2227,23 +2232,36 @@ class BrowserWindow(QMainWindow):
                 for name in boolean_fields:
                     setattr(candidate, name, payload[name])
                 candidate.save(self.selected_profile)
-                for name in (
-                    "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder",
-                    *boolean_fields,
-                ):
+                for name in settings_field_names:
                     setattr(self.settings, name, getattr(candidate, name))
+                changed_fields = {
+                    name for name in settings_field_names
+                    if old_values[name] != getattr(candidate, name)
+                }
 
-                if old_hardware != bool(self.settings.hardware_acceleration):
+                if "hardware_acceleration" in changed_fields:
                     Settings.configure_hardware_acceleration(bool(self.settings.hardware_acceleration))
                 if old_private != bool(self.settings.private_mode):
+                    # Private mode changes the QWebEngine profile and its owned managers.
+                    # A profile switch is the only preference edit that requires rebuilding them.
                     self.change_profile(self.selected_profile)
                 else:
-                    self._refresh_history()
-                    self._apply_profile_settings(self.profile)
-                    self._setup_feature_managers()
-                self.dock.setVisible(bool(self.settings.proxy_panel_visible))
-                self.apply_theme()
-                self._sync_dashboard_tabs()
+                    if changed_fields & {"save_cookies", "site_compatibility_mode"}:
+                        self._apply_profile_settings(self.profile)
+                    if "save_history" in changed_fields:
+                        self._refresh_history()
+                    if "download_folder" in changed_fields and self.download_manager is not None:
+                        try:
+                            self.download_manager.set_download_directory(folder)
+                        except (AttributeError, OSError, TypeError, ValueError):
+                            logger.exception("Could not update the active download directory")
+
+                if "proxy_panel_visible" in changed_fields:
+                    self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+                if "dark_mode" in changed_fields:
+                    self.apply_theme()
+                elif changed_fields & {"save_history", "private_mode"}:
+                    self._sync_dashboard_tabs()
                 if old_hardware != bool(self.settings.hardware_acceleration):
                     message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
                     self.statusBar().showMessage(message, 6500)

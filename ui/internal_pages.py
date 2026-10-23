@@ -345,11 +345,11 @@ def _settings_page(browser) -> str:
         )
 
     sections = (
-        ("general", "General", "home homepage startup new tab search engine", "fa-solid fa-house"),
-        ("appearance", "Appearance", "theme light dark colors appearance mode", "fa-solid fa-palette"),
-        ("privacy", "Privacy & security", "private history cookies compatibility profile", "fa-solid fa-shield-halved"),
-        ("performance", "Performance", "hardware gpu acceleration rendering restart", "fa-solid fa-gauge-high"),
-        ("downloads", "Downloads", "download directory folder proxy panel startup", "fa-solid fa-download"),
+        ("general", "General", "home homepage startup new tab search engine", "⌂"),
+        ("appearance", "Appearance", "theme light dark colors appearance mode", "◐"),
+        ("privacy", "Privacy & security", "private history cookies compatibility profile", "◇"),
+        ("performance", "Performance", "hardware gpu acceleration rendering restart", "↯"),
+        ("downloads", "Downloads", "download directory folder proxy panel startup", "↓"),
     )
     category_buttons = "".join(
         f'<button type="button" class="settings-category{" active" if key == "general" else ""}" '

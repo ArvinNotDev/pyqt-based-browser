@@ -42,6 +42,19 @@ class SettingWindow(QWidget):
         main_layout.setContentsMargins(10, 9, 10, 10)
         main_layout.setSpacing(9)
 
+        self._category_menu_open = False
+        search_row = QHBoxLayout()
+        search_row.setContentsMargins(0, 0, 0, 0)
+        search_row.setSpacing(6)
+        self.menu_toggle = QPushButton(qta.icon("fa6s.bars"), "")
+        self.menu_toggle.setObjectName("proxySettingsMenuToggle")
+        self.menu_toggle.setFixedSize(36, 36)
+        self.menu_toggle.setToolTip("Show setting categories")
+        self.menu_toggle.setAccessibleName("Show setting categories")
+        self.menu_toggle.setCheckable(True)
+        self.menu_toggle.clicked.connect(self.toggle_category_menu)
+        search_row.addWidget(self.menu_toggle)
+
         self.search_input = QLineEdit(self)
         self.search_input.setObjectName("proxySettingsSearch")
         self.search_input.setPlaceholderText("Search settings…  e.g. bridge, port, NEWNYM")
@@ -49,7 +62,8 @@ class SettingWindow(QWidget):
         self.search_input.setMinimumHeight(36)
         self.search_input.setAccessibleName("Search Tor settings")
         self.search_input.textChanged.connect(self._filter_categories)
-        main_layout.addWidget(self.search_input)
+        search_row.addWidget(self.search_input, 1)
+        main_layout.addLayout(search_row)
 
         content = QHBoxLayout()
         content.setContentsMargins(0, 0, 0, 0)
@@ -58,12 +72,11 @@ class SettingWindow(QWidget):
 
         self.sidebar = QFrame(self)
         self.sidebar.setObjectName("proxySettingsSidebar")
-        self.sidebar.setFixedWidth(124)
+        self.sidebar.setFixedWidth(164)
+        self.sidebar.hide()
         self.sidebar_layout = QVBoxLayout(self.sidebar)
         self.sidebar_layout.setContentsMargins(7, 9, 7, 9)
         self.sidebar_layout.setSpacing(4)
-        content.addWidget(self.sidebar)
-
         self.settings_nav_group = QButtonGroup(self)
         self.settings_nav_group.setExclusive(True)
         self.settings_nav_buttons = []
@@ -169,7 +182,36 @@ class SettingWindow(QWidget):
         self.apply_theme(self._dark_mode)
         self.show_category(self._active_category)
 
-    def show_category(self, key):
+    def _position_category_menu(self):
+        row_bottom = self.search_input.geometry().bottom() + 7
+        self.sidebar.setGeometry(
+            10,
+            max(45, row_bottom),
+            min(190, max(140, self.width() - 20)),
+            max(120, self.height() - row_bottom - 12),
+        )
+
+    def toggle_category_menu(self, opened=None):
+        should_open = not self.sidebar.isVisible() if opened is None else bool(opened)
+        self._category_menu_open = should_open
+        if should_open:
+            self._position_category_menu()
+            self.sidebar.show()
+            self.sidebar.raise_()
+        else:
+            self.sidebar.hide()
+        self.menu_toggle.blockSignals(True)
+        self.menu_toggle.setChecked(should_open)
+        self.menu_toggle.setIcon(qta.icon(
+            "fa6s.xmark" if should_open else "fa6s.bars",
+            color="#ffffff" if should_open and self._dark_mode == "dark" else
+                  ("#253041" if self._dark_mode == "light" else "#e8edf3"),
+        ))
+        self.menu_toggle.setToolTip("Hide setting categories" if should_open else "Show setting categories")
+        self.menu_toggle.setAccessibleName(self.menu_toggle.toolTip())
+        self.menu_toggle.blockSignals(False)
+
+    def show_category(self, key, close_menu=True):
         if key not in self._category_pages:
             return
         self._active_category = key
@@ -177,6 +219,14 @@ class SettingWindow(QWidget):
         for category, button in self._category_buttons.items():
             button.setChecked(category == key)
         self._update_category_icons()
+        if close_menu:
+            self.toggle_category_menu(False)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self._category_menu_open:
+            self._position_category_menu()
+            self.sidebar.raise_()
 
     def _set_settings_page(self, index):
         if not 0 <= index < self.page_setting.count():
@@ -199,9 +249,11 @@ class SettingWindow(QWidget):
             label.setVisible(not query or any(key in matched for key in keys))
         self.no_results_label.setVisible(bool(query) and not matched)
         if query and matched and self._active_category not in matched:
-            self.show_category(matched[0])
+            self.show_category(matched[0], close_menu=False)
         elif query and len(matched) == 1:
-            self.show_category(matched[0])
+            self.show_category(matched[0], close_menu=False)
+        if query:
+            self.toggle_category_menu(True)
 
     def apply_theme(self, mode="dark"):
         dark = mode == "dark"
@@ -216,6 +268,8 @@ class SettingWindow(QWidget):
         self.setStyleSheet(f"""
             QWidget {{ color: {text}; }}
             QWidget#proxySettingsSidebar {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; }}
+            QPushButton#proxySettingsMenuToggle {{ min-height: 36px; min-width: 36px; padding: 0; border-radius: 9px; }}
+            QPushButton#proxySettingsMenuToggle:checked {{ background: {accent}; color: #ffffff; border-color: {accent}; }}
             QWidget#proxySettingsContent {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; }}
             QWidget#proxyHostRulesPage {{ background: {panel}; border: 1px solid {border}; border-radius: 10px; }}
             QLabel#proxySettingsGroupTitle {{ color: {muted}; background: transparent; font-size: 9px; font-weight: 800; padding: 7px 5px 3px; }}
@@ -246,6 +300,12 @@ class SettingWindow(QWidget):
             QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
         """)
         self._update_category_icons()
+        if hasattr(self, "menu_toggle"):
+            opened = bool(getattr(self, "_category_menu_open", False))
+            self.menu_toggle.setIcon(qta.icon(
+                "fa6s.xmark" if opened else "fa6s.bars",
+                color="#ffffff" if opened and dark else ("#253041" if not dark else "#e8edf3"),
+            ))
         if hasattr(self, "btn_qrcode"):
             self.btn_qrcode.setIcon(qta.icon("fa6s.qrcode", color="#eff1f4" if dark else "#202832"))
 
