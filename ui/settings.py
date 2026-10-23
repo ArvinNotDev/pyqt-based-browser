@@ -10,6 +10,7 @@ from PySide6.QtCore import QStandardPaths
 
 from managers.profile_manager import Profile
 from managers.storage import atomic_write_json, backup_corrupt_file, validate_profile_name
+from app_paths import user_data_path
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,7 @@ class Settings:
     # Retained for callers that used these public attributes. Neither is
     # serialized as a per-profile setting.
     profile: Profile = field(default_factory=Profile)
-    file_path: str = "settings.json"
+    file_path: str = field(default_factory=lambda: user_data_path("settings.json"))
     profiles_list: list[str] = field(default_factory=list)
 
     @staticmethod
