@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -28,6 +29,7 @@ def test_defaults_are_independent_and_stable():
     assert first.download_folder == default_download_directory()
     assert first.show_dev_tools is False
     assert first.hardware_acceleration is True
+    assert first.webgpu_enabled is False
     assert first.profile is not second.profile
     assert first.profiles_list is not second.profiles_list
 
@@ -64,6 +66,7 @@ def test_loading_older_settings_keeps_new_defaults_and_ignores_unknown_keys(tmp_
     assert settings.homepage == "https://old.example/"
     assert settings.startup_page == "homepage"
     assert settings.hardware_acceleration is True
+    assert settings.webgpu_enabled is False
     assert not hasattr(settings, "future_option")
 
 
@@ -166,3 +169,24 @@ def test_load_profile_settings_uses_this_machines_profile_list(tmp_path, monkeyp
     settings.load_profile_settings()
 
     assert settings.profiles_list == ["Guest", "Research"]
+
+
+
+def test_webgpu_flag_preserves_unrelated_chromium_flags(monkeypatch):
+    monkeypatch.setenv(
+        "QTWEBENGINE_CHROMIUM_FLAGS",
+        "--no-sandbox --enable-features=Vulkan,TranslateUI --disable-features=Translate",
+    )
+
+    Settings.configure_webgpu(False)
+    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+    assert "--no-sandbox" in flags
+    assert "--enable-features=Vulkan,TranslateUI" in flags
+    assert "--disable-features=Translate,WebGPU" in flags
+
+    Settings.configure_webgpu(True)
+    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+    assert "--no-sandbox" in flags
+    assert "--enable-features=Vulkan,TranslateUI" in flags
+    assert "--disable-features=Translate" in flags
+    assert not any("WebGPU" in flag for flag in flags)

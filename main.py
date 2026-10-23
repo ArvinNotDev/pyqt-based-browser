@@ -18,6 +18,7 @@ def _load_startup_settings(profile_name=None):
         profile_name = settings.profiles_list[0]
     settings.load(profile_name)
     Settings.configure_hardware_acceleration(settings.hardware_acceleration)
+    Settings.configure_webgpu(settings.webgpu_enabled)
     return settings
 
 

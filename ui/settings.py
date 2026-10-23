@@ -43,6 +43,7 @@ class Settings:
     download_folder: str = field(default_factory=default_download_directory)
     show_dev_tools: bool = False
     hardware_acceleration: bool = True
+    webgpu_enabled: bool = False
     proxy_panel_visible: bool = True
     site_compatibility_mode: bool = True
 
@@ -191,8 +192,8 @@ class Settings:
         string_fields.update({"startup_page", "new_tab_page"})
         boolean_fields = {
             "dark_mode", "save_history", "save_cookies", "private_mode",
-            "show_dev_tools", "hardware_acceleration", "proxy_panel_visible",
-            "site_compatibility_mode",
+            "show_dev_tools", "hardware_acceleration", "webgpu_enabled",
+            "proxy_panel_visible", "site_compatibility_mode",
         }
         for name in string_fields:
             value = values.get(name)
@@ -245,6 +246,7 @@ class Settings:
             "download_folder": default_download_directory(),
             "show_dev_tools": False,
             "hardware_acceleration": True,
+            "webgpu_enabled": False,
             "proxy_panel_visible": True,
             "site_compatibility_mode": True,
         }
@@ -351,6 +353,68 @@ class Settings:
             flags.append("--disable-gpu")
         os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(flags)
         os.environ["QT_OPENGL"] = "software"
+
+    @classmethod
+    def configure_webgpu(cls, enabled: bool) -> None:
+        """Configure WebGPU without disabling normal GPU composition.
+
+        QtWebEngine reads QTWEBENGINE_CHROMIUM_FLAGS before its first WebEngine
+        initialization, so call this at startup. Runtime changes require a
+        browser restart. Existing Chromium feature switches and unrelated flags
+        are preserved.
+        """
+        flags = os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS", "").split()
+        passthrough: list[str] = []
+        enabled_features: list[str] = []
+        disabled_features: list[str] = []
+
+        def feature_key(value: str) -> str:
+            return value.split("<", 1)[0].strip().casefold()
+
+        for flag in flags:
+            if flag.startswith("--enable-features="):
+                enabled_features.extend(
+                    part.strip() for part in flag.split("=", 1)[1].split(",") if part.strip()
+                )
+            elif flag.startswith("--disable-features="):
+                disabled_features.extend(
+                    part.strip() for part in flag.split("=", 1)[1].split(",") if part.strip()
+                )
+            else:
+                passthrough.append(flag)
+
+        if enabled:
+            disabled_features = [
+                item for item in disabled_features if feature_key(item) != "webgpu"
+            ]
+        else:
+            enabled_features = [
+                item for item in enabled_features if feature_key(item) != "webgpu"
+            ]
+            if not any(feature_key(item) == "webgpu" for item in disabled_features):
+                disabled_features.append("WebGPU")
+
+        def unique_features(values: list[str]) -> list[str]:
+            seen: set[str] = set()
+            result: list[str] = []
+            for item in values:
+                key = feature_key(item)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(item)
+            return result
+
+        enabled_features = unique_features(enabled_features)
+        disabled_features = unique_features(disabled_features)
+        if enabled_features:
+            passthrough.append("--enable-features=" + ",".join(enabled_features))
+        if disabled_features:
+            passthrough.append("--disable-features=" + ",".join(disabled_features))
+
+        if passthrough:
+            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = " ".join(passthrough)
+        else:
+            os.environ.pop("QTWEBENGINE_CHROMIUM_FLAGS", None)
 
     @classmethod
     def configure_hardware_acceleration(cls, enabled: bool) -> None:

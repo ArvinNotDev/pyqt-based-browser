@@ -457,9 +457,10 @@ def _settings_page(browser) -> str:
         <div class="panel-head"><h3>Graphics</h3><p>Hardware acceleration changes require restarting the browser to fully take effect.</p></div>
         <div class="panel-body setting-list">
           {checkbox("hardware_acceleration", "Use hardware acceleration", "Use the GPU where supported. A restart is needed after changing this setting.", settings.hardware_acceleration)}
+          {checkbox("webgpu_enabled", "Enable WebGPU", "Experimental web graphics API. Restart required; enable it only if this system can create a WebGPU context.", settings.webgpu_enabled)}
         </div>
       </section>
-      <p class="footer-note">A browser or graphics-driver may report WebGPU as unavailable on some systems. This is a Chromium graphics capability warning; it is not the same as a page JavaScript exception.</p>
+      <p class="footer-note">If Chromium reports “Failed to create WebGPU Context Provider”, leave WebGPU disabled to avoid repeated context creation failures while keeping normal GPU composition available. Graphics options are read at startup and require a browser restart.</p>
     </section>
 
     <section class="settings-section" id="section-downloads" data-section="downloads" aria-labelledby="heading-downloads">
