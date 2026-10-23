@@ -895,8 +895,8 @@ QDialog#settingsDialog QFormLayout QLabel { font-size: 13px; }
 """
 
 
-/* A clearer app identity, live page context, and consistent window-control targets. */
 LIGHT_CHROME_POLISH += """
+/* A clearer app identity, live page context, and consistent window-control targets. */
 QWidget#customTitleBar { min-height: 38px; }
 QLabel#titleBarLogo { border-radius: 9px; font-size: 14px; font-weight: 800; }
 QLabel#titleBarTitle { color: #2c3d55; font-size: 13px; font-weight: 750; }
