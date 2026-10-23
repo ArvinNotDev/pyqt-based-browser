@@ -445,3 +445,45 @@ def test_download_toast_keeps_its_own_opacity_animation():
     harness.deleteLater()
     app.processEvents()
 
+def test_bookmarks_bar_visibility_is_scoped_to_dashboard_tabs():
+    bar = Mock()
+    browser = SimpleNamespace(
+        bookmarks_bar=bar,
+        _is_dashboard_address=BrowserWindow._is_dashboard_address,
+        current_view=Mock(return_value=None),
+    )
+
+    BrowserWindow._update_bookmarks_bar_visibility(browser, DASHBOARD_URL)
+    bar.setVisible.assert_called_once_with(True)
+
+    BrowserWindow._update_bookmarks_bar_visibility(browser, "https://example.test/")
+    assert bar.setVisible.call_args.args == (False,)
+
+
+def test_cache_bypass_reload_is_limited_to_web_pages():
+    from PySide6.QtWebEngineCore import QWebEnginePage
+
+    page = Mock()
+    view = SimpleNamespace(
+        url=lambda: QUrl("https://example.test/"),
+        page=lambda: page,
+    )
+    status_bar = SimpleNamespace(showMessage=Mock())
+    browser = SimpleNamespace(
+        current_view=lambda: view,
+        statusBar=lambda: status_bar,
+    )
+
+    BrowserWindow.reload_current_page_bypassing_cache(browser)
+    page.triggerAction.assert_called_once_with(
+        QWebEnginePage.WebAction.ReloadAndBypassCache
+    )
+    status_bar.showMessage.assert_called_once_with(
+        "Reloading without the local cache…", 2500
+    )
+
+    page.triggerAction.reset_mock()
+    view.url = lambda: QUrl("arma://dashboard/")
+    BrowserWindow.reload_current_page_bypassing_cache(browser)
+    page.triggerAction.assert_not_called()
+
