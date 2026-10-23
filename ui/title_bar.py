@@ -4,7 +4,7 @@ import ctypes
 import sys
 from ctypes import wintypes
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
 
 import qtawesome as qta
@@ -87,6 +87,8 @@ class CustomTitleBar(QWidget):
         else:
             self.host.showMaximized()
         self.sync_maximize_button()
+        # Some window managers apply the state after the clicked signal returns.
+        QTimer.singleShot(0, self.sync_maximize_button)
 
     def apply_icon_theme(self, dark: bool) -> None:
         color = "#c4cedd" if dark else "#68778c"

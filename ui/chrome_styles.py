@@ -704,3 +704,113 @@ QPushButton#tabCloseButton {
 """
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]
+
+/* Final geometry pass: clip WebEngine pages, keep tabs inside their strip, and
+   round the actual custom-window content rather than relying on CSS decoration. */
+LIGHT_CHROME_POLISH += """
+QWidget#customTitleBar {
+    border-top-left-radius: 17px;
+    border-top-right-radius: 17px;
+}
+QFrame#browserShell[edgeToEdge="true"] { border-radius: 0; border-width: 0; }
+QWidget#browserContentCard {
+    background-color: #edf2f8;
+    border: none;
+    border-radius: 15px;
+}
+QWebEngineView#browserPageView { background: transparent; border: none; }
+QFrame#browserTabBar {
+    padding: 0;
+    border-radius: 10px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { border: none; background: transparent; }
+QFrame#browserTab {
+    min-height: 22px; max-height: 22px;
+    padding: 0;
+    border-radius: 7px;
+    border-bottom: 2px solid transparent;
+}
+QFrame#browserTab[active="true"] {
+    border-radius: 7px;
+    border: 1px solid #b5c8e2;
+    border-bottom: 2px solid #3979d6;
+}
+QLabel#tabFavicon { min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }
+QPushButton#tabCloseButton {
+    min-width: 18px; max-width: 18px;
+    min-height: 18px; max-height: 18px;
+    padding: 0; border: none; border-radius: 6px;
+}
+QPushButton#tabPlusButton {
+    min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px;
+    padding: 0; border-radius: 8px;
+}
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton {
+    background: transparent; border: 1px solid transparent;
+    border-radius: 8px; padding: 0;
+}
+QToolButton#windowMinimizeButton:hover, QToolButton#windowMaximizeButton:hover {
+    background: rgba(125, 148, 180, 40);
+    border-color: rgba(125, 148, 180, 90);
+}
+QToolButton#windowCloseButton:hover {
+    background: #d94e58; border-color: #d94e58;
+}
+"""
+DARK_CHROME_POLISH += """
+QWidget#customTitleBar {
+    border-top-left-radius: 17px;
+    border-top-right-radius: 17px;
+}
+QFrame#browserShell[edgeToEdge="true"] { border-radius: 0; border-width: 0; }
+QWidget#browserContentCard {
+    background-color: #171c24;
+    border: none;
+    border-radius: 15px;
+}
+QWebEngineView#browserPageView { background: transparent; border: none; }
+QFrame#browserTabBar {
+    padding: 0;
+    border-radius: 10px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { border: none; background: transparent; }
+QFrame#browserTab {
+    min-height: 22px; max-height: 22px;
+    padding: 0;
+    border-radius: 7px;
+    border-bottom: 2px solid transparent;
+}
+QFrame#browserTab[active="true"] {
+    background: #2e3949;
+    border-radius: 7px;
+    border: 1px solid #52657e;
+    border-bottom: 2px solid #82aff4;
+}
+QLabel#tabFavicon { min-width: 14px; max-width: 14px; min-height: 14px; max-height: 14px; }
+QPushButton#tabCloseButton {
+    min-width: 18px; max-width: 18px;
+    min-height: 18px; max-height: 18px;
+    padding: 0; border: none; border-radius: 6px;
+}
+QPushButton#tabPlusButton {
+    min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px;
+    padding: 0; border-radius: 8px;
+}
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton {
+    background: transparent; border: 1px solid transparent;
+    border-radius: 8px; padding: 0;
+}
+QToolButton#windowMinimizeButton:hover, QToolButton#windowMaximizeButton:hover {
+    background: rgba(125, 148, 180, 42);
+    border-color: rgba(125, 148, 180, 95);
+}
+QToolButton#windowCloseButton:hover {
+    background: #d94e58; border-color: #d94e58;
+}
+"""

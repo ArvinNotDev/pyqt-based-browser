@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QSize, QPropertyAnimation, QProcess,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QRectF, QSize, QPropertyAnimation, QProcess,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainterPath, QRegion
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -85,7 +85,7 @@ except ModuleNotFoundError as exc:
 TAB_WIDTH = 150
 MIN_TAB_WIDTH = 92
 MAX_TAB_WIDTH = 198
-TAB_HEIGHT = 32
+TAB_HEIGHT = 30
 TAB_SPACING = 4
 SCROLL_STEP = 220
 
@@ -103,8 +103,11 @@ _WIN_SWP_NOZORDER = 0x0004
 _WIN_SWP_NOACTIVATE = 0x0010
 _WIN_SWP_FRAMECHANGED = 0x0020
 _WIN_WM_NCHITTEST = 0x0084
+_WIN_HTCLIENT = 1
 _WIN_HTCAPTION = 2
-_WIN_HTMAXBUTTON = 9
+_WIN_DWMWA_WINDOW_CORNER_PREFERENCE = 33
+_WIN_DWMWCP_DONOTROUND = 1
+_WIN_DWMWCP_ROUND = 2
 _WIN_HTLEFT = 10
 _WIN_HTRIGHT = 11
 _WIN_HTTOP = 12
@@ -158,6 +161,16 @@ def _is_snap_aligned_geometry(frame: QRect, available: QRect) -> bool:
         and frame.height() >= available.height() * 0.18
     )
     return bool(x_aligned and y_aligned and large_enough)
+
+
+def _rounded_region(rect: QRect, radius: float) -> QRegion:
+    """Return a widget mask with rounded corners in device-independent coordinates."""
+    if rect.isEmpty():
+        return QRegion()
+    corner_radius = max(0.0, min(float(radius), min(rect.width(), rect.height()) / 2.0))
+    path = QPainterPath()
+    path.addRoundedRect(QRectF(rect), corner_radius, corner_radius)
+    return QRegion(path.toFillPolygon().toPolygon())
 
 
 logger = logging.getLogger(__name__)
@@ -239,6 +252,40 @@ class _PageLoadOverlay(QFrame):
         if watched is self.view and event.type() == QEvent.Type.Resize:
             self._position_over_page()
         return super().eventFilter(watched, event)
+
+
+class _RoundedWebView(QWebEngineView):
+    """WebEngine viewport clipped to the browser's rounded content card."""
+
+    CORNER_RADIUS = 14
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("browserPageView")
+        self._mask_timer = QTimer(self)
+        self._mask_timer.setSingleShot(True)
+        self._mask_timer.setInterval(24)
+        self._mask_timer.timeout.connect(self._apply_rounded_mask)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        # Debounce region updates during interactive resizing to avoid adding
+        # work to every compositor resize frame.
+        self._mask_timer.start()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._mask_timer.start(0)
+
+    def _apply_rounded_mask(self) -> None:
+        width, height = self.width(), self.height()
+        if width < 2 or height < 2:
+            self.clearMask()
+            return
+        self.setMask(_rounded_region(
+            QRect(0, 0, width, height),
+            min(self.CORNER_RADIUS, width / 2.0, height / 2.0),
+        ))
 
 
 class _ProxyPanelHost(QFrame):
@@ -997,6 +1044,7 @@ class BrowserWindow(QMainWindow):
         self.current_index: int = -1
         self.view_container = QWidget()
         self.view_container.setObjectName("browserContentCard")
+        self.view_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.view_layout = QVBoxLayout(self.view_container)
         self.view_layout.setContentsMargins(5, 5, 5, 5)
 
@@ -1333,20 +1381,40 @@ class BrowserWindow(QMainWindow):
             # Qt can change native window styles during maximize/fullscreen transitions.
             self._queue_window_frame_refresh()
 
+    def _is_edge_to_edge_geometry(self) -> bool:
+        edge_to_edge = self.isMaximized() or self.isFullScreen()
+        if sys.platform != "win32" or edge_to_edge:
+            return bool(edge_to_edge)
+        screen = self.screen()
+        handle = self.windowHandle()
+        if handle is not None and handle.screen() is not None:
+            screen = handle.screen()
+        return bool(
+            screen is not None
+            and _is_snap_aligned_geometry(
+                self.frameGeometry(), screen.availableGeometry()
+            )
+        )
+
+    def _apply_shell_corner_mask(self, edge_to_edge: bool | None = None) -> None:
+        shell = getattr(self, "_shell", None)
+        if shell is None:
+            return
+        if edge_to_edge is None:
+            edge_to_edge = self._is_edge_to_edge_geometry()
+        if edge_to_edge or shell.width() < 2 or shell.height() < 2:
+            shell.clearMask()
+        else:
+            shell.setMask(_rounded_region(
+                QRect(0, 0, shell.width(), shell.height()), 18
+            ))
+
     def _sync_window_frame(self) -> None:
         if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
             return
-        edge_to_edge = self.isMaximized() or self.isFullScreen()
-        if sys.platform == "win32" and not edge_to_edge:
-            screen = self.screen()
-            handle = self.windowHandle()
-            if handle is not None and handle.screen() is not None:
-                screen = handle.screen()
-            if screen is not None:
-                edge_to_edge = _is_snap_aligned_geometry(
-                    self.frameGeometry(), screen.availableGeometry()
-                )
+        edge_to_edge = self._is_edge_to_edge_geometry()
         if getattr(self, "_edge_to_edge_frame_state", None) == edge_to_edge:
+            self._apply_shell_corner_mask(edge_to_edge)
             return
         self._edge_to_edge_frame_state = edge_to_edge
         margin = 0 if edge_to_edge else 8
@@ -1359,6 +1427,8 @@ class BrowserWindow(QMainWindow):
         self._shell.style().unpolish(self._shell)
         self._shell.style().polish(self._shell)
         self._shell.update()
+        self._apply_shell_corner_mask(edge_to_edge)
+        self._apply_native_window_corner_preference(edge_to_edge)
 
     def _schedule_snap_frame_sync(self) -> None:
         timer = getattr(self, "_snap_frame_sync_timer", None)
@@ -1367,6 +1437,7 @@ class BrowserWindow(QMainWindow):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_shell_corner_mask()
         self._schedule_snap_frame_sync()
         self._update_resize_handles()
         self._position_download_toast()
@@ -2892,7 +2963,7 @@ class BrowserWindow(QMainWindow):
                 resolved_url = "about:blank"
         url_q = QUrl(resolved_url)
 
-        view = QWebEngineView(self.view_container)
+        view = _RoundedWebView(self.view_container)
         view.setVisible(False)
         self._page_load_overlays[view] = _PageLoadOverlay(view)
         # WebEngine owns a separate compositor surface; transparency and animated
@@ -3454,6 +3525,34 @@ class BrowserWindow(QMainWindow):
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
+    def _apply_native_window_corner_preference(self, edge_to_edge: bool) -> None:
+        """Ask DWM for genuinely rounded outer corners in windowed mode."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+            set_attribute = dwmapi.DwmSetWindowAttribute
+            set_attribute.argtypes = (
+                wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD
+            )
+            set_attribute.restype = ctypes.c_long
+            preference = ctypes.c_int(
+                _WIN_DWMWCP_DONOTROUND if edge_to_edge else _WIN_DWMWCP_ROUND
+            )
+            result = int(set_attribute(
+                wintypes.HWND(hwnd),
+                _WIN_DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(preference),
+                ctypes.sizeof(preference),
+            ))
+            if result < 0:
+                logger.debug("DWM did not accept the requested corner preference (HRESULT 0x%08X).", result & 0xFFFFFFFF)
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.debug("Could not request native rounded window corners.", exc_info=True)
+
     def _apply_native_window_styles(self) -> None:
         """Restore Windows resize/maximize styles without adding a visible title bar."""
         # Do not add a resize frame while genuinely fullscreen. The state-change
@@ -3488,6 +3587,7 @@ class BrowserWindow(QMainWindow):
                 if not set_window_pos(wintypes.HWND(hwnd), wintypes.HWND(0), 0, 0, 0, 0, flags):
                     raise ctypes.WinError(ctypes.get_last_error())
             self._native_style_hwnd = hwnd
+            self._apply_native_window_corner_preference(self._is_edge_to_edge_geometry())
         except (AttributeError, OSError, TypeError, ValueError):
             logger.debug("Could not restore native frameless-window styles.", exc_info=True)
 
@@ -3563,7 +3663,7 @@ class BrowserWindow(QMainWindow):
         self._queue_window_frame_refresh()
 
     def nativeEvent(self, eventType, message):
-        """Hit-test native resize edges, the caption, and the Windows 11 Snap button."""
+        """Hit-test native resize edges while keeping custom buttons as Qt client controls."""
         if sys.platform == "win32":
             try:
                 native = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
@@ -3591,7 +3691,10 @@ class BrowserWindow(QMainWindow):
                         if maximize is not None:
                             rect = QRect(maximize.mapTo(self, QPoint(0, 0)), maximize.size())
                             if rect.contains(local_point):
-                                return True, _WIN_HTMAXBUTTON
+                                # HTMAXBUTTON hands the click to Windows' native non-client
+                                # button handling, bypassing the QToolButton signal. Keep this
+                                # rectangle in the client area so Qt can maximize/restore it.
+                                return True, _WIN_HTCLIENT
                         buttons = tuple(
                             getattr(title_bar, name, None)
                             for name in ("minimize_button", "maximize_button", "close_button")
