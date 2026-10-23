@@ -15,7 +15,7 @@ This README documents the features present in the source today, how to run them,
 - Choose a built-in gradient or import a local dashboard wallpaper. Dashboard appearance, shortcuts, notes, widgets, and timer settings are kept separately for each profile.
 - Hover over an inactive tab to preview it. Resize tab widths to fit the window, then use the tab-strip scroll controls when the window has more tabs than can fit.
 - Right-click a tab to open, reload, duplicate, copy its address, close it, close other tabs, close tabs to its right, or reopen a recently closed tab.
-- Closing the final tab exits the browser when the Downloads panel is closed. ARMA Browser does not restore the previous set of tabs at startup.
+- Closing the final tab opens a fresh dashboard tab. ARMA Browser does not restore the previous set of tabs at startup.
 
 ### Bookmarks and history
 
@@ -29,7 +29,7 @@ This README documents the features present in the source today, how to run them,
 - Selecting **Downloads** from the browser menu opens an animated drawer on the left side of the browser. Starting a download also opens the drawer and shows a brief in-app notification.
 - Download cards show the filename, source URL, progress, and current status. The action menu includes **Copy URL**, **Open file**, **Show in folder**, **Pause/Resume**, **Cancel**, **Remove from list**, and **Delete downloaded file** where each action applies.
 - **Clear finished** removes completed, cancelled, and failed entries from the list. Removing an entry does not delete its file. Deleting a completed download asks for confirmation and removes the downloaded file from the configured download folder.
-- A download record exists in memory for the current browser session; the file itself remains in the selected download folder. Private browsing also saves downloaded files there, so downloaded files are not automatically private or deleted when the browser closes.
+- Downloads use the computer's default Downloads folder unless a different folder is chosen in Settings. A download record exists in memory for the current browser session; the file itself remains in the selected folder. Private browsing also saves downloaded files there, so downloaded files are not automatically private or deleted when the browser closes.
 - Once a download request is accepted, the tab that started it closes. The Downloads drawer remains available to track and manage the transfer.
 - Closing the browser while downloads are active or paused asks whether to cancel them and close. Choosing **Cancel** keeps the browser open.
 
