@@ -80,6 +80,13 @@ class DownloadManager(QObject):
         self._sync_download_dir_from_profile(profile)
         profile.downloadRequested.connect(self._on_download_requested)
 
+    def set_download_directory(self, download_dir: str | os.PathLike[str]) -> None:
+        """Set the destination used for future requests from this profile."""
+        if not isinstance(download_dir, (str, os.PathLike)) or not os.fspath(download_dir):
+            raise ValueError("A download folder is required.")
+        self.download_dir = os.path.abspath(os.path.expanduser(os.fspath(download_dir)))
+        self._download_dir_was_explicit = True
+
     @staticmethod
     def _profile_download_path(profile) -> str | None:
         getter = getattr(profile, "downloadPath", None)
