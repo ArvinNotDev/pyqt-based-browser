@@ -946,11 +946,17 @@ class BrowserWindow(QMainWindow):
             self._sync_site_connection_action(view.url().toString())
             return
         self._sync_site_connection_action(view.url().toString())
-        view.reload()
-        self.statusBar().showMessage(
-            f"Reconnecting {host} directly" if direct else f"Restoring the configured route for {host}",
-            3000,
-        )
+        view.page().triggerAction(QWebEnginePage.WebAction.ReloadAndBypassCache)
+        if self.tor_mode:
+            message = (
+                f"Retrying {host} with a direct connection"
+                if direct else f"Restoring the configured Tor route for {host}"
+            )
+        else:
+            message = (
+                f"Direct-route preference saved for {host}; it applies when Tor routing is enabled."
+            )
+        self.statusBar().showMessage(message, 3500)
 
     def _install_browser_shortcuts(self) -> None:
         """Install Chrome-style browser shortcuts that Gaming mode can pause."""
