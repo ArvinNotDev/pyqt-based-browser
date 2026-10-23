@@ -85,6 +85,17 @@ logger = logging.getLogger(__name__)
 register_dashboard_scheme()
 
 
+class _DownloadsOverlayDismissArea(QFrame):
+    """Transparent click target that dismisses the drawer without obscuring the page."""
+
+    dismissed = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dismissed.emit()
+        event.accept()
+
+
 class TabButton(QFrame):
     clicked = Signal()
     closed = Signal()
@@ -613,6 +624,13 @@ class BrowserWindow(QMainWindow):
         self.downloads_panel.hide()
         self._downloads_panel_mode = "overlay"
         self._downloads_mode_transitioning = False
+        self.downloads_overlay_dismiss = _DownloadsOverlayDismissArea(self.content_row)
+        self.downloads_overlay_dismiss.setObjectName("downloadsOverlayDismissArea")
+        self.downloads_overlay_dismiss.setStyleSheet(
+            "QFrame#downloadsOverlayDismissArea { background: transparent; border: none; }"
+        )
+        self.downloads_overlay_dismiss.dismissed.connect(self._close_downloads_panel)
+        self.downloads_overlay_dismiss.hide()
         self.downloads_splitter = QSplitter(Qt.Horizontal, self.content_row)
         self.downloads_splitter.setObjectName("downloadsSplitter")
         self.downloads_splitter.setHandleWidth(10)
@@ -848,10 +866,15 @@ class BrowserWindow(QMainWindow):
         self._position_download_toast()
         if getattr(self, "_downloads_panel_mode", "split") == "overlay":
             if getattr(self.downloads_panel, "is_open", False):
+                dismiss_area = getattr(self, "downloads_overlay_dismiss", None)
+                if dismiss_area is not None and dismiss_area.isVisible():
+                    dismiss_area.setGeometry(self.content_row.rect())
+                    dismiss_area.raise_()
                 self.downloads_panel.setGeometry(
                     self.downloads_panel.x(), 0, self.downloads_panel.width(),
                     max(1, self.content_row.height())
                 )
+                self.downloads_panel.raise_()
 
     def _update_resize_handles(self) -> None:
         handles = getattr(self, "_resize_handles", None)
@@ -1433,6 +1456,19 @@ class BrowserWindow(QMainWindow):
         self._downloads_splitter_animation = animation
         animation.start()
 
+    def _show_downloads_overlay_dismiss_area(self) -> None:
+        area = getattr(self, "downloads_overlay_dismiss", None)
+        if area is None:
+            return
+        area.setGeometry(self.content_row.rect())
+        area.show()
+        area.raise_()
+
+    def _hide_downloads_overlay_dismiss_area(self) -> None:
+        area = getattr(self, "downloads_overlay_dismiss", None)
+        if area is not None:
+            area.hide()
+
     def _finish_downloads_mode_transition(self) -> None:
         self._downloads_mode_transitioning = False
         self.downloads_panel.mode_button.setEnabled(True)
@@ -1460,6 +1496,7 @@ class BrowserWindow(QMainWindow):
         panel.set_docked(False)
         row_height = max(1, self.content_row.height())
         panel.setGeometry(QRect(-width, 0, width, row_height))
+        self._show_downloads_overlay_dismiss_area()
         panel.open()
         panel.raise_()
         self._animate_downloads_panel_geometry(
@@ -1490,6 +1527,7 @@ class BrowserWindow(QMainWindow):
         if next_mode == "split":
             # Reinsert the existing drawer next to the existing view container. The
             # QWebEngineView and its page object are never touched by this transition.
+            self._hide_downloads_overlay_dismiss_area()
             panel.hide()
             panel.setMinimumWidth(0)
             if panel.parent() is not splitter:
@@ -1554,6 +1592,7 @@ class BrowserWindow(QMainWindow):
             self._collapse_downloads_splitter()
             panel.setParent(row)
             panel.setGeometry(QRect(-panel_width, 0, panel_width, row_height))
+            self._show_downloads_overlay_dismiss_area()
             panel.open()
             panel.raise_()
             self._animate_downloads_panel_geometry(
@@ -1620,6 +1659,7 @@ class BrowserWindow(QMainWindow):
         else:
             panel.hide()
             if self._downloads_panel_mode == "overlay":
+                self._hide_downloads_overlay_dismiss_area()
                 panel.setParent(self.downloads_splitter)
                 self.downloads_splitter.insertWidget(0, panel)
                 panel.setMinimumWidth(0)
