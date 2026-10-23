@@ -3,6 +3,8 @@ import re
 import time
 import json
 import logging
+import heapq
+from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Dict
 
@@ -970,6 +972,7 @@ class BrowserWindow(QMainWindow):
                     )
                     self._download_managers[manager_key] = self.download_manager
                 self.download_manager.attach_profile(self.profile)
+                self.download_manager.set_download_directory(self.settings.download_folder)
             except Exception:
                 logger.exception("Could not initialize downloads for profile %s", self.selected_profile)
                 self.download_manager = None
@@ -1135,8 +1138,8 @@ class BrowserWindow(QMainWindow):
 
     def _close_downloads_panel(self) -> None:
         self._animate_downloads_panel(False)
-        if not self.views and not self.close():
-            self.new_tab()
+        if not self.views:
+            self.new_tab(DASHBOARD_URL)
 
     def _collapse_downloads_splitter(self) -> None:
         if not hasattr(self, "downloads_splitter"):
@@ -1218,8 +1221,8 @@ class BrowserWindow(QMainWindow):
                 QTimer.singleShot(0, self._close_empty_browser)
 
     def _close_empty_browser(self) -> None:
-        if not self.views and not self.downloads_panel.is_open and not self.close():
-            self.new_tab()
+        if not self.views:
+            self.new_tab(DASHBOARD_URL)
 
     def _setup_download_toast(self, parent: QWidget) -> None:
         self.download_toast = QFrame(parent)
@@ -1342,18 +1345,19 @@ class BrowserWindow(QMainWindow):
             logger.exception("Could not load dashboard bookmarks")
         if self.history is not None and self.settings.save_history and not self.settings.private_mode:
             try:
-                recent = []
-                for link, visits in self.history.history.items():
-                    if not isinstance(link, str) or not link.startswith(("http://", "https://")):
-                        continue
-                    last_visit = visits[-1] if isinstance(visits, list) and visits else {}
-                    stamp = (
-                        f"{last_visit.get('date', '')} {last_visit.get('time', '')}"
-                        if isinstance(last_visit, dict) else ""
+                recent = (
+                    (
+                        f"{visits[-1].get('date', '')} {visits[-1].get('time', '')}"
+                        if isinstance(visits, list) and visits and isinstance(visits[-1], dict)
+                        else "",
+                        {"title": link, "url": link},
                     )
-                    recent.append((stamp, {"title": link, "url": link}))
-                recent.sort(key=lambda item: item[0], reverse=True)
-                state["recent"] = [item for _, item in recent[:6]]
+                    for link, visits in self.history.history.items()
+                    if isinstance(link, str) and link.startswith(("http://", "https://"))
+                )
+                state["recent"] = [
+                    item for _, item in heapq.nlargest(6, recent, key=lambda item: item[0])
+                ]
             except (AttributeError, TypeError):
                 logger.exception("Could not prepare dashboard history")
         state["closed"] = [
@@ -1363,7 +1367,9 @@ class BrowserWindow(QMainWindow):
         ]
         return state
 
-    def _dashboard_document(self) -> bytes:
+    @staticmethod
+    @lru_cache(maxsize=1)
+    def _dashboard_template() -> str:
         asset_dir = Path(__file__).resolve().parent / "dashboard"
         page_html = (asset_dir / "index.html").read_text(encoding="utf-8")
         css = (asset_dir / "dashboard.css").read_text(encoding="utf-8")
@@ -1375,6 +1381,10 @@ class BrowserWindow(QMainWindow):
         page_html = page_html.replace(
             '<script src="dashboard.js"></script>', f"<script>{script}</script>"
         )
+        return page_html
+
+    def _dashboard_document(self) -> bytes:
+        page_html = BrowserWindow._dashboard_template()
         state_json = json.dumps(self._dashboard_state(), ensure_ascii=False, separators=(",", ":"))
         state_json = state_json.replace("</", "<\\/")
         page_html = page_html.replace("{{DASHBOARD_STATE}}", state_json)
@@ -1609,10 +1619,7 @@ class BrowserWindow(QMainWindow):
 
         if not self.views:
             self.current_index = -1
-            if self.downloads_panel.is_open:
-                return
-            if not self.close():
-                self.new_tab()
+            self.new_tab(DASHBOARD_URL)
             return
 
         if was_active:
@@ -1705,6 +1712,10 @@ class BrowserWindow(QMainWindow):
         if not self._page_is_current(view, page):
             return
 
+        if ok and self._is_dashboard_address(view.url()):
+            page.runJavaScript(
+                "document.documentElement.classList.add('dashboard-ready');"
+            )
         if view is self.current_view():
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
