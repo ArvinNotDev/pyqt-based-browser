@@ -124,7 +124,7 @@ class DataManagerTests(unittest.TestCase):
     def test_settings_defaults_round_trip_and_partial_values(self):
         path = str(Path(self.temp_dir.name) / "settings.json")
         settings = Settings(file_path=path)
-        self.assertEqual(settings.homepage, "https://www.google.com")
+        self.assertEqual(settings.homepage, "arma://dashboard/")
         self.assertTrue(settings.save_history)
         settings.homepage = "https://example.test"
         settings.private_mode = True
@@ -146,7 +146,7 @@ class DataManagerTests(unittest.TestCase):
         self.assertEqual(partial.window_height, 720)
         partial.homepage = "https://previous-profile.test"
         partial.load("Missing")
-        self.assertEqual(partial.homepage, "https://www.google.com")
+        self.assertEqual(partial.homepage, "arma://dashboard/")
 
     def test_settings_migrates_legacy_profile_list_without_deleting_it(self):
         path = str(Path(self.temp_dir.name) / "settings.json")
@@ -168,7 +168,7 @@ class DataManagerTests(unittest.TestCase):
         path.write_text(original, encoding="utf-8")
         settings = Settings(file_path=str(path))
         settings.load("Guest")
-        self.assertEqual(settings.homepage, "https://www.google.com")
+        self.assertEqual(settings.homepage, "arma://dashboard/")
         settings.save("Guest")
         backups = list(path.parent.glob("settings.json.corrupt-*.bak"))
         self.assertEqual(len(backups), 1)
@@ -360,9 +360,10 @@ class DataManagerTests(unittest.TestCase):
             set(record),
             {
                 "id", "file_name", "path", "url", "received_bytes",
-                "total_bytes", "state", "error",
+                "total_bytes", "state", "paused", "error",
             },
         )
+        self.assertFalse(record["paused"])
         self.assertIn(["requested"], observed_states)
         self.assertIn(["downloading"], observed_states)
 
