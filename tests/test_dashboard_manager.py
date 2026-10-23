@@ -113,3 +113,24 @@ def test_imported_wallpaper_is_managed_and_survives_reload(tmp_path):
     reloaded = DashboardManager("Guest", base_dir=base)
     assert reloaded.data["wallpaper"] == wallpaper_key
     assert reloaded.wallpaper_data_url()
+
+
+
+def test_dashboard_widget_sizes_are_profile_scoped_normalized_and_validated(tmp_path):
+    base = tmp_path / "profiles"
+    manager = DashboardManager("Guest", base_dir=base)
+    manager.update({"widget_sizes": {"notes": "wide", "bookmarks": "compact"}})
+
+    loaded = DashboardManager("Guest", base_dir=base)
+    work = DashboardManager("Work", base_dir=base)
+    assert loaded.data["widget_sizes"]["notes"] == "wide"
+    assert loaded.data["widget_sizes"]["bookmarks"] == "compact"
+    assert loaded.data["widget_sizes"]["recent"] == "standard"
+    assert work.data["widget_sizes"]["notes"] == "standard"
+
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": {"notes": "gigantic"}})
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": {"unknown": "wide"}})
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": []})

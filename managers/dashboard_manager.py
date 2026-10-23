@@ -28,6 +28,8 @@ DEFAULT_SHORTCUTS = [
 ]
 
 DEFAULT_WIDGET_ORDER = ["bookmarks", "recent", "closed", "notes", "focus"]
+WIDGET_SIZES = {"compact", "standard", "wide"}
+DEFAULT_WIDGET_SIZES = {name: "standard" for name in DEFAULT_WIDGET_ORDER}
 
 DEFAULTS = {
     "wallpaper": "aurora",
@@ -41,6 +43,7 @@ DEFAULTS = {
     "density": "comfortable",
     "widgets": {"bookmarks": True, "recent": True, "closed": True, "notes": True, "focus": True},
     "widget_order": DEFAULT_WIDGET_ORDER,
+    "widget_sizes": DEFAULT_WIDGET_SIZES,
     "shortcuts": DEFAULT_SHORTCUTS,
     "notes": "",
     "quick_notes": [],
@@ -145,6 +148,12 @@ class DashboardManager:
             result["widget_order"] = normalized_order + [
                 name for name in DEFAULT_WIDGET_ORDER if name not in seen_widgets
             ]
+        widget_sizes = data.get("widget_sizes")
+        if isinstance(widget_sizes, dict):
+            result["widget_sizes"].update({
+                name: size for name, size in widget_sizes.items()
+                if name in result["widget_sizes"] and size in WIDGET_SIZES
+            })
         result["shortcuts"] = normalize_shortcuts(data.get("shortcuts", DEFAULT_SHORTCUTS))
         notes = data.get("notes")
         if isinstance(notes, str):
@@ -350,6 +359,15 @@ class DashboardManager:
                     or len(set(value)) != len(value)
                 ):
                     raise ValueError("Widget order contains an invalid or duplicate widget.")
+            if key == "widget_sizes":
+                if not isinstance(value, dict) or any(
+                    not isinstance(name, str)
+                    or name not in DEFAULT_WIDGET_SIZES
+                    or not isinstance(size, str)
+                    or size not in WIDGET_SIZES
+                    for name, size in value.items()
+                ):
+                    raise ValueError("Widget sizes must map known widgets to compact, standard, or wide.")
             if key == "notes" and not isinstance(value, str):
                 raise ValueError("Notes must be text.")
             if key == "quick_notes" and (

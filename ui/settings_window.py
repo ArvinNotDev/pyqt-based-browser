@@ -245,10 +245,13 @@ class SettingsWindow(QDialog):
 
         self.section_list = QListWidget()
         self.section_list.setObjectName("settingsNav")
-        self.section_list.setFixedWidth(172)
-        self.section_list.setSpacing(3)
+        self.section_list.setFixedWidth(190)
+        self.section_list.setSpacing(4)
+        self.section_list.setLayoutDirection(Qt.LeftToRight)
         self.section_list.setAccessibleName("Settings sections")
-        content.addWidget(self.section_list)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        content.addWidget(self.section_list, 0, Qt.AlignLeft)
 
         self.pages = QStackedWidget()
         self.pages.setObjectName("settingsPages")
@@ -510,18 +513,43 @@ class SettingsWindow(QDialog):
         card_layout.addWidget(self.dashboard_accent_input)
 
         widgets = data.get("widgets", {})
+        widget_sizes = data.get("widget_sizes", {})
         self.dashboard_widget_checks = {}
+        self.dashboard_widget_size_combos = {}
+        card_layout.addWidget(QLabel("Widgets · visibility and size"))
+        card_layout.addWidget(self._note(
+            "Turn cards on or off here. On the start page, drag a card by its heading to change its position."
+        ))
         for key, label in (
-            ("bookmarks", "Show bookmarks"),
-            ("recent", "Show recently visited"),
-            ("closed", "Show recently closed"),
-            ("notes", "Show quick notes"),
-            ("focus", "Show focus timer"),
+            ("bookmarks", "Bookmarks"),
+            ("recent", "Recently visited"),
+            ("closed", "Recently closed"),
+            ("notes", "Quick notes"),
+            ("focus", "Focus timer"),
         ):
+            row = QWidget()
+            row.setObjectName("dashboardWidgetOptionRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(12)
             checkbox = QCheckBox(label)
             checkbox.setChecked(bool(widgets.get(key, True)))
+            checkbox.setAccessibleName(f"Show {label.lower()} widget")
+            size_combo = QComboBox()
+            size_combo.setObjectName("dashboardWidgetSize")
+            size_combo.addItem("Compact", "compact")
+            size_combo.addItem("Standard", "standard")
+            size_combo.addItem("Wide", "wide")
+            size_combo.setCurrentIndex(max(
+                0, size_combo.findData(widget_sizes.get(key, "standard"))
+            ))
+            size_combo.setToolTip(f"Width of the {label.lower()} widget")
+            size_combo.setAccessibleName(f"{label} widget size")
+            row_layout.addWidget(checkbox, 1)
+            row_layout.addWidget(size_combo, 0)
             self.dashboard_widget_checks[key] = checkbox
-            card_layout.addWidget(checkbox)
+            self.dashboard_widget_size_combos[key] = size_combo
+            card_layout.addWidget(row)
 
         wallpaper_row = QHBoxLayout()
         self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(data.get("wallpaper", "aurora")))
@@ -531,7 +559,7 @@ class SettingsWindow(QDialog):
         wallpaper_row.addWidget(self.dashboard_wallpaper_label, 1)
         wallpaper_row.addWidget(wallpaper_button)
         card_layout.addLayout(wallpaper_row)
-        card_layout.addWidget(self._note("Supported images are copied into this profile's dashboard storage. Use the dashboard itself to add, edit, or reorder shortcuts."))
+        card_layout.addWidget(self._note("Supported images are copied into this profile's dashboard storage. Add and reorder shortcuts on the start page; drag widget headings to reorder cards and choose each card's size above."))
         card_layout.addStretch(1)
 
     @staticmethod
@@ -719,6 +747,10 @@ class SettingsWindow(QDialog):
                 "widgets": {
                     key: checkbox.isChecked()
                     for key, checkbox in self.dashboard_widget_checks.items()
+                },
+                "widget_sizes": {
+                    key: combo.currentData()
+                    for key, combo in self.dashboard_widget_size_combos.items()
                 },
             }
             if self._wallpaper_source:
