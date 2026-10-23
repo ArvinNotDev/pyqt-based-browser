@@ -412,3 +412,16 @@ def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreg
     assert bar.bookmark_actions[0].text() == "Example"
     dialog.close()
     qapp.setStyleSheet("")
+
+
+
+def test_theme_toggle_is_not_a_navigation_header_control(qapp):
+    navbar = NavigationBar(["Guest"], settings=Settings())
+
+    assert not hasattr(navbar, "theme_btn")
+    assert not hasattr(navbar, "theme_toggle_requested")
+    assert navbar.settings_btn in navbar.browser_menu.actions()
+
+    navbar.close()
+    navbar.deleteLater()
+    qapp.processEvents()

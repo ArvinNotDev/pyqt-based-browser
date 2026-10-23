@@ -85,7 +85,6 @@ class NavigationBar(QToolBar):
     show_bookmarks_requested = Signal()
     show_downloads_requested = Signal()
     downloads_panel_requested = Signal()
-    theme_toggle_requested = Signal()
     show_history_requested = Signal()
     open_external_requested = Signal()
     reload_bypass_cache_requested = Signal()
@@ -197,14 +196,6 @@ class NavigationBar(QToolBar):
         self.proxy_panel_btn.setProperty("proxyPanelOpen", False)
         self.proxy_panel_btn.clicked.connect(self.proxy_panel_requested.emit)
         self._add_widget(self.proxy_panel_btn)
-
-        self.theme_btn = self._button("", "Switch browser theme", "utilityToolButton")
-        self.theme_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.theme_btn.setIconSize(QSize(17, 17))
-        self.theme_btn.setAccessibleName("Switch browser theme")
-        self.theme_btn.setFixedSize(34, 30)
-        self.theme_btn.clicked.connect(self.theme_toggle_requested.emit)
-        self._add_widget(self.theme_btn)
 
         self.addSeparator()
         self.profile_btn = self._action("Profiles", "fa5s.user-circle")
@@ -498,10 +489,6 @@ class NavigationBar(QToolBar):
             "fa5s.globe",
             color="#2f81f7" if proxy_open else self._icon_color(),
         ))
-        dark = bool(getattr(self.settings, "dark_mode", False))
-        self.theme_btn.setIcon(self._awesome_icon("fa5s.sun" if dark else "fa5s.moon"))
-        self.theme_btn.setToolTip("Switch to light theme" if dark else "Switch to dark theme")
-        self.theme_btn.setAccessibleName(self.theme_btn.toolTip())
         self._refresh_profile_icon()
         self._close_suggestion_popup()
 

@@ -510,6 +510,27 @@ QPushButton#tabPlusButton {
 }
 QPushButton#tabPlusButton:hover { background: #ffffff; border-color: #cbdcf2; }
 
+
+/* Compact tab strip: one balanced row with a switcher for crowded sessions. */
+QFrame#browserTabBar {
+    background: rgba(235,240,248,238);
+    border: 1px solid rgba(207,218,233,225);
+    border-radius: 9px;
+}
+QScrollArea#tabStripScroll, QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab { min-height: 30px; max-height: 30px; border-radius: 7px; border: 1px solid transparent; border-bottom: 2px solid transparent; }
+QFrame#browserTab:hover { background: rgba(255,255,255,214); border-color: rgba(187,205,230,220); }
+QFrame#browserTab[active="true"] { background: #ffffff; border: 1px solid #cbdcf3; border-bottom: 2px solid #3979d6; }
+QLabel#tabFavicon { background: transparent; border: none; }
+QLabel#tabTitle { color: #536277; background: transparent; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #20324b; font-weight: 650; }
+QPushButton#tabCloseButton { min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; }
+QPushButton#tabCloseButton:hover { background: #d94d58; color: white; }
+QPushButton#tabPlusButton { min-width: 26px; max-width: 26px; min-height: 24px; max-height: 24px; padding: 0; border-radius: 7px; background: transparent; border: 1px solid transparent; }
+QPushButton#tabPlusButton:hover { background: #dce9fa; border-color: #c1d6f2; }
+QPushButton#tabScrollButton, QToolButton#tabListButton { min-width: 22px; max-width: 22px; min-height: 28px; max-height: 28px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; }
+QPushButton#tabScrollButton:hover, QToolButton#tabListButton:hover { background: rgba(215,227,245,210); border-color: rgba(178,199,229,220); }
+QToolButton#tabListButton::menu-indicator { image: none; }
 """
 
 
@@ -1021,6 +1042,27 @@ QPushButton#tabPlusButton {
 }
 QPushButton#tabPlusButton:hover { background: #303a49; border-color: #4c607b; }
 
+
+/* Compact tab strip: one balanced row with a switcher for crowded sessions. */
+QFrame#browserTabBar {
+    background: rgba(31,37,47,245);
+    border: 1px solid rgba(95,109,130,135);
+    border-radius: 9px;
+}
+QScrollArea#tabStripScroll, QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab { min-height: 30px; max-height: 30px; border-radius: 7px; border: 1px solid transparent; border-bottom: 2px solid transparent; }
+QFrame#browserTab:hover { background: rgba(64,75,92,230); border-color: rgba(125,148,181,120); }
+QFrame#browserTab[active="true"] { background: rgba(49,61,78,255); border: 1px solid rgba(121,158,210,155); border-bottom: 2px solid #82aff4; }
+QLabel#tabFavicon { background: transparent; border: none; }
+QLabel#tabTitle { color: #aeb9c9; background: transparent; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #f0f5fd; font-weight: 650; }
+QPushButton#tabCloseButton { min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; }
+QPushButton#tabCloseButton:hover { background: #c53f49; color: white; }
+QPushButton#tabPlusButton { min-width: 26px; max-width: 26px; min-height: 24px; max-height: 24px; padding: 0; border-radius: 7px; background: transparent; border: 1px solid transparent; }
+QPushButton#tabPlusButton:hover { background: rgba(68,88,116,200); border-color: rgba(117,150,195,135); }
+QPushButton#tabScrollButton, QToolButton#tabListButton { min-width: 22px; max-width: 22px; min-height: 28px; max-height: 28px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; }
+QPushButton#tabScrollButton:hover, QToolButton#tabListButton:hover { background: rgba(65,79,100,225); border-color: rgba(125,148,181,135); }
+QToolButton#tabListButton::menu-indicator { image: none; }
 """
 from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
 

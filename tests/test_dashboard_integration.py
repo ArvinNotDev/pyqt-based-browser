@@ -516,11 +516,11 @@ def test_page_progress_uses_a_reserved_slot_and_resets_without_hiding():
 
 def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     from PySide6.QtWidgets import QApplication
-    from ui.browser_window import CustomTabBar
+    from ui.browser_window import CustomTabBar, TAB_HEIGHT
 
     app = QApplication.instance() or QApplication([])
     tabs = CustomTabBar()
-    tabs.resize(640, 50)
+    tabs.resize(640, 40)
     first = tabs.add_tab("First website", make_active=True)
     tabs.add_tab("Second website", make_active=False)
     tabs.add_tab("Third website", make_active=False)
@@ -531,7 +531,9 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     app.processEvents()
 
     assert not first_tab.favicon.pixmap().isNull()
-    assert first_tab.height() == 36
+    assert first_tab.height() == TAB_HEIGHT - 2
+    assert tabs.height() == TAB_HEIGHT + 4
+    assert tabs.scroll.height() == TAB_HEIGHT
 
     tabs.set_loading(first, True)
     assert first_tab._loading is True
@@ -610,3 +612,36 @@ def test_activating_a_loaded_tab_clears_stale_progress_without_hiding_slot():
     progress_bar.setRange.assert_called_once_with(0, 100)
     progress_bar.setValue.assert_called_once_with(0)
     progress_bar.hide.assert_not_called()
+
+
+
+def test_many_tabs_use_compact_scrolling_and_an_all_tabs_menu():
+    from PySide6.QtWidgets import QApplication
+    from ui.browser_window import CustomTabBar, MIN_TAB_WIDTH, TAB_HEIGHT
+
+    app = QApplication.instance() or QApplication([])
+    tabs = CustomTabBar()
+    tabs.resize(420, TAB_HEIGHT + 4)
+    for index in range(16):
+        tabs.add_tab(f"Long example website title {index + 1}", make_active=index == 0)
+    tabs.show()
+    app.processEvents()
+
+    assert tabs.height() == TAB_HEIGHT + 4
+    assert tabs.btn_left.isVisible()
+    assert tabs.btn_right.isVisible()
+    assert tabs.tab_list_button.isVisible()
+    assert tabs.plus_inside is False
+    assert all(tab.width() == MIN_TAB_WIDTH for tab in tabs.tabs)
+
+    tabs._populate_tab_list_menu()
+    tab_actions = [
+        action for action in tabs.tab_list_menu.actions()
+        if action.text() != "New tab" and not action.isSeparator()
+    ]
+    assert len(tab_actions) == 16
+    assert tab_actions[0].isChecked()
+
+    tabs.close()
+    tabs.deleteLater()
+    app.processEvents()

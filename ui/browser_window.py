@@ -82,12 +82,12 @@ except ModuleNotFoundError as exc:
         raise
     BookmarksDialog = None
 
-TAB_WIDTH = 170
-MIN_TAB_WIDTH = 126
-MAX_TAB_WIDTH = 238
-TAB_HEIGHT = 38
-TAB_SPACING = 6
-SCROLL_STEP = 180
+TAB_WIDTH = 150
+MIN_TAB_WIDTH = 92
+MAX_TAB_WIDTH = 198
+TAB_HEIGHT = 32
+TAB_SPACING = 4
+SCROLL_STEP = 220
 logger = logging.getLogger(__name__)
 register_dashboard_scheme()
 
@@ -167,13 +167,13 @@ class TabButton(QFrame):
         self._dragging = False
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(9, 3, 6, 3)
-        layout.setSpacing(7)
+        layout.setContentsMargins(7, 1, 4, 1)
+        layout.setSpacing(5)
 
         self.favicon = QLabel(self)
         self.favicon.setObjectName("tabFavicon")
         self.favicon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.favicon.setFixedSize(18, 18)
+        self.favicon.setFixedSize(16, 16)
         self.favicon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         self.label = QLabel(self._title, self)
@@ -185,8 +185,8 @@ class TabButton(QFrame):
 
         self.close_btn = QPushButton(self)
         self.close_btn.setObjectName("tabCloseButton")
-        self.close_btn.setIconSize(QSize(13, 13))
-        self.close_btn.setFixedSize(24, 24)
+        self.close_btn.setIconSize(QSize(11, 11))
+        self.close_btn.setFixedSize(20, 20)
         self.close_btn.hide()
         self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.close_btn.setToolTip("Close tab")
@@ -329,21 +329,21 @@ class CustomTabBar(QFrame):
     def __init__(self):
         super().__init__()
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedHeight(TAB_HEIGHT + 6)
+        self.setFixedHeight(TAB_HEIGHT + 4)
         self.tabs: List[TabButton] = []
         self.active_index: int = -1
         self.plus_inside = True
         self._updating = False
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(8, 3, 8, 3)
-        root.setSpacing(5)
+        root.setContentsMargins(7, 2, 7, 2)
+        root.setSpacing(3)
 
         self._dark_mode = False
         self.btn_left = QPushButton(self)
         self.btn_left.setObjectName("tabScrollButton")
         self.btn_left.setIconSize(QSize(11, 11))
-        self.btn_left.setFixedSize(25, TAB_HEIGHT - 4)
+        self.btn_left.setFixedSize(22, TAB_HEIGHT - 4)
         self.btn_left.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_left.setToolTip("Scroll tabs left")
         self.btn_left.clicked.connect(lambda: self._scroll(-SCROLL_STEP))
@@ -352,7 +352,7 @@ class CustomTabBar(QFrame):
         self.btn_right = QPushButton(self)
         self.btn_right.setObjectName("tabScrollButton")
         self.btn_right.setIconSize(QSize(11, 11))
-        self.btn_right.setFixedSize(25, TAB_HEIGHT - 4)
+        self.btn_right.setFixedSize(22, TAB_HEIGHT - 4)
         self.btn_right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_right.setToolTip("Scroll tabs right")
         self.btn_right.clicked.connect(lambda: self._scroll(SCROLL_STEP))
@@ -380,7 +380,7 @@ class CustomTabBar(QFrame):
         self.plus_tab = QPushButton(self)
         self.plus_tab.setObjectName("tabPlusButton")
         self.plus_tab.setIconSize(QSize(13, 13))
-        self.plus_tab.setFixedSize(30, TAB_HEIGHT - 8)
+        self.plus_tab.setFixedSize(26, TAB_HEIGHT - 8)
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.setAccessibleName("New tab")
         self.plus_tab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -389,7 +389,7 @@ class CustomTabBar(QFrame):
         self.external_plus = QPushButton(self)
         self.external_plus.setObjectName("tabPlusButton")
         self.external_plus.setIconSize(QSize(13, 13))
-        self.external_plus.setFixedSize(30, TAB_HEIGHT - 8)
+        self.external_plus.setFixedSize(26, TAB_HEIGHT - 8)
         self.external_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.external_plus.setToolTip("New tab")
         self.external_plus.setAccessibleName("New tab")
@@ -397,9 +397,24 @@ class CustomTabBar(QFrame):
         self.external_plus.hide()
         self.holder_layout.addWidget(self.plus_tab)
 
+        self.tab_list_button = QToolButton(self)
+        self.tab_list_button.setObjectName("tabListButton")
+        self.tab_list_button.setIconSize(QSize(12, 12))
+        self.tab_list_button.setFixedSize(22, TAB_HEIGHT - 4)
+        self.tab_list_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.tab_list_button.setAutoRaise(True)
+        self.tab_list_button.setToolTip("List all open tabs")
+        self.tab_list_button.setAccessibleName("List all open tabs")
+        self.tab_list_menu = QMenu(self.tab_list_button)
+        self.tab_list_menu.aboutToShow.connect(self._populate_tab_list_menu)
+        self.tab_list_button.setMenu(self.tab_list_menu)
+        self.tab_list_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.tab_list_button.hide()
+
         root.addWidget(self.btn_left)
         root.addWidget(self.scroll, 1)
         root.addWidget(self.btn_right)
+        root.addWidget(self.tab_list_button)
         root.addWidget(self.external_plus)
         self.apply_icon_theme(False)
 
@@ -409,6 +424,7 @@ class CustomTabBar(QFrame):
         plus_color = "#c2d0e4" if self._dark_mode else "#526985"
         self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color=color))
         self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color=color))
+        self.tab_list_button.setIcon(qta.icon("fa5s.list-ul", color=color))
         self.plus_tab.setIcon(qta.icon("fa5s.plus", color=plus_color))
         self.external_plus.setIcon(qta.icon("fa5s.plus", color=plus_color))
         for tab in self.tabs:
@@ -488,6 +504,31 @@ class CustomTabBar(QFrame):
         if 0 <= index < len(self.tabs):
             self.tabs[index].set_loading(loading)
 
+    def _populate_tab_list_menu(self) -> None:
+        """Build a quick-access list when many tabs no longer fit in one row."""
+        self.tab_list_menu.clear()
+        for index, tab in enumerate(self.tabs):
+            if tab._loading:
+                color = "#82aff4" if self._dark_mode else "#3477d4"
+                icon = qta.icon("fa5s.sync-alt", color=color)
+            elif tab._site_icon is not None:
+                icon = tab._site_icon
+            else:
+                color = "#a9b7c9" if self._dark_mode else "#68778b"
+                icon = qta.icon("fa5s.globe", color=color)
+            label = tab._title.strip() or "New Tab"
+            action = QAction(icon, label, self.tab_list_menu)
+            action.setCheckable(True)
+            action.setChecked(index == self.active_index)
+            action.setToolTip(tab._title)
+            action.triggered.connect(lambda _checked=False, target=index: self.set_active(target))
+            self.tab_list_menu.addAction(action)
+        if self.tabs:
+            self.tab_list_menu.addSeparator()
+        new_tab_action = QAction(qta.icon("fa5s.plus"), "New tab", self.tab_list_menu)
+        new_tab_action.triggered.connect(self.new_tab_requested.emit)
+        self.tab_list_menu.addAction(new_tab_action)
+
     def ensure_tab_visible(self, index: int) -> None:
         if index < 0 or index >= len(self.tabs):
             return
@@ -560,6 +601,7 @@ class CustomTabBar(QFrame):
 
             self.btn_left.setVisible(overflow)
             self.btn_right.setVisible(overflow)
+            self.tab_list_button.setVisible(overflow)
             if overflow and self.plus_inside:
                 self.holder_layout.removeWidget(self.plus_tab)
                 self.plus_tab.setParent(None)
@@ -574,7 +616,13 @@ class CustomTabBar(QFrame):
             if overflow:
                 tab_width = MIN_TAB_WIDTH
             else:
-                available = max(0, self.width() - 16 - self.plus_tab.width() - TAB_SPACING * count)
+                margins = self.layout().contentsMargins()
+                available = max(
+                    0,
+                    self.width() - margins.left() - margins.right()
+                    - self.plus_tab.width() - TAB_SPACING * count
+                    - self.layout().spacing() * max(0, count),
+                )
                 tab_width = min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, available // max(1, count)))
             for tab in self.tabs:
                 tab.setFixedWidth(tab_width)
@@ -1121,7 +1169,7 @@ class BrowserWindow(QMainWindow):
             navbar.set_downloads_panel_state(opened)
 
     def toggle_theme(self) -> None:
-        """Persist an immediate browser theme change from the toolbar."""
+        """Compatibility helper; the visible theme control lives in Settings."""
         previous = bool(self.settings.dark_mode)
         self.settings.dark_mode = not previous
         try:
