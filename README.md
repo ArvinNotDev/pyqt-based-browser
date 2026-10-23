@@ -2,7 +2,7 @@
 
 ARMA Browser is a tabbed desktop browser built with Python, PySide6, and Qt WebEngine. It brings everyday browsing controls, profile-based settings, bookmarks, history, a download center, and an optional local proxy/Tor interface into one desktop app.
 
-This README documents the features present in the source today, how to run them, and the limits to keep in mind. ARMA Browser is an actively developed source project; it is not yet distributed as a signed installer or a verified portable executable.
+This README documents the features available in the source and the current release limits. ARMA Browser is an actively developed beta. A Windows x64 one-file executable is provided through GitHub Releases; it is unsigned and should be treated as pre-release software.
 
 ## What ARMA Browser includes
 
@@ -128,6 +128,14 @@ python -m ruff check tests
 python -m pytest -ra
 ```
 
+## Windows beta executable
+
+Download **ARMA-Browser.exe** from [GitHub Releases](https://github.com/ArvinNotDev/pyqt-based-browser/releases). The Windows x64 one-file build bundles Python, PySide6/Qt WebEngine, the application assets, and the Windows Tor expert-bundle archive. A separate Python installation is not required.
+
+On first launch, Windows may take a little longer while the one-file bundle extracts its runtime. The executable is currently unsigned, so Windows SmartScreen or antivirus software may show a warning. Only run it if you trust this repository and have verified the release asset/checksum. This beta has no automatic updater.
+
+Settings, browser profiles, history, and proxy state for the frozen build are stored under `%LOCALAPPDATA%\ARMA Browser`. These files are separate from the executable and are retained between launches.
+
 ## Source releases
 
 The release workflow creates a versioned source ZIP and a SHA-256 sidecar from a Git tag. To build the same archive locally from a tag:
@@ -136,9 +144,9 @@ The release workflow creates a versioned source ZIP and a SHA-256 sidecar from a
 ./scripts/package-source.ps1 -Tag v1.2.3
 ```
 
-The archive includes the tracked Windows and Linux x64 Tor bundles. There is no signed installer or standalone executable yet. A frozen build needs a consistent user-data/resource layout and a clean-machine Qt WebEngine and Tor smoke check before it can be described as reproducible.
+The source archive includes the tracked Windows and Linux x64 Tor bundles. The executable is a Windows beta build; Linux users can still run from source using the instructions above.
 
-See [packaging and release notes](docs/PACKAGING.md) and the [release checklist](docs/RELEASE_CHECKLIST.md) before publishing a version.
+See [packaging and release notes](docs/PACKAGING.md) and the [release checklist](docs/RELEASE_CHECKLIST.md) for limitations and validation details.
 
 ## Current scope and troubleshooting
 
