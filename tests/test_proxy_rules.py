@@ -1,6 +1,7 @@
 import json
 import importlib
 import io
+from pathlib import Path
 from email.message import Message
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -114,3 +115,15 @@ def test_non_excluded_hosts_use_tor_socks_proxy(monkeypatch, proxy_module):
     handler.send_response.assert_called_once_with(200, "Connection Established")
     handler._tunnel.assert_called_once()
     remote.close.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["game-files.crazygames.com", "shellshockersio.game-files.crazygames.com"],
+)
+def test_crazygames_game_assets_use_direct_route(host, monkeypatch, proxy_module):
+    rules_path = Path(__file__).resolve().parents[1] / "proxy" / "exclude_hosts.json"
+    proxy_module.exclude_hosts = json.loads(rules_path.read_text(encoding="utf-8"))
+    monkeypatch.setattr(proxy_module, "PROXY_INTO_TOR", True)
+
+    assert proxy_module.route_uses_tor(host) is False
