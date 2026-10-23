@@ -319,6 +319,39 @@ QPushButton#tabScrollButton:hover {
     background: rgba(255,255,255,175);
     border-color: rgba(190,207,232,165);
 }
+
+
+/* Compact top-row quick actions and longer, deliberate separators. */
+QToolBar#NavigationBar::separator {
+    width: 1px;
+    min-height: 24px;
+    max-height: 24px;
+    margin: 3px 7px;
+    background: rgba(126,145,172,145);
+}
+QToolButton#utilityToolButton[proxyPanelOpen="true"] {
+    color: #245da3;
+    background: rgba(178,207,248,185);
+    border-color: rgba(115,159,222,220);
+}
+QFrame#browserTabBar { padding: 0; }
+QPushButton#tabPlusButton {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 30px;
+    border-radius: 9px;
+    font-size: 16px;
+}
+QPushButton#tabCloseButton {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    border-radius: 7px;
+    padding: 0;
+}
+
 """
 
 DARK_CHROME_POLISH = """
@@ -635,6 +668,39 @@ QPushButton#tabScrollButton:hover {
     background: rgba(67,80,101,155);
     border-color: rgba(147,169,201,75);
 }
+
+
+/* Compact top-row quick actions and longer, deliberate separators. */
+QToolBar#NavigationBar::separator {
+    width: 1px;
+    min-height: 24px;
+    max-height: 24px;
+    margin: 3px 7px;
+    background: rgba(165,182,207,90);
+}
+QToolButton#utilityToolButton[proxyPanelOpen="true"] {
+    color: #f0f6ff;
+    background: rgba(64,91,130,215);
+    border-color: rgba(130,175,244,155);
+}
+QFrame#browserTabBar { padding: 0; }
+QPushButton#tabPlusButton {
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 30px;
+    border-radius: 9px;
+    font-size: 16px;
+}
+QPushButton#tabCloseButton {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    border-radius: 7px;
+    padding: 0;
+}
+
 """
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]

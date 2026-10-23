@@ -2,6 +2,8 @@ import os
 import re
 import time
 import json
+import ctypes
+from ctypes import wintypes
 import logging
 import heapq
 import sys
@@ -127,8 +129,9 @@ class TabButton(QFrame):
         self.close_btn = QPushButton()
         self.close_btn.setObjectName("tabCloseButton")
         self.close_btn.setIcon(qta.icon("fa5s.times", color="#8592a5"))
-        self.close_btn.setIconSize(QSize(10, 10))
-        self.close_btn.setFixedSize(18, 18)
+        self.close_btn.setIconSize(QSize(12, 12))
+        self.close_btn.setFixedSize(22, 22)
+        self.close_btn.hide()
         self.close_btn.setFocusPolicy(Qt.NoFocus)
         self.close_btn.setToolTip("Close tab")
         self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
@@ -154,11 +157,13 @@ class TabButton(QFrame):
         self.requested_preview.emit()
 
     def enterEvent(self, event):
+        self.close_btn.show()
         self._hover_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event):
         self._hover_timer.stop()
+        self.close_btn.hide()
         super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -204,7 +209,7 @@ class CustomTabBar(QFrame):
 
     def __init__(self):
         super().__init__()
-        self.setFixedHeight(TAB_HEIGHT + 4)
+        self.setFixedHeight(TAB_HEIGHT + 6)
         self.tabs: List[TabButton] = []
         self.active_index: int = -1
         self.plus_inside = True
@@ -219,7 +224,7 @@ class CustomTabBar(QFrame):
         self.btn_left.setObjectName("tabScrollButton")
         self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color="#68778b"))
         self.btn_left.setIconSize(QSize(11, 11))
-        self.btn_left.setFixedSize(26, TAB_HEIGHT)
+        self.btn_left.setFixedSize(24, TAB_HEIGHT - 4)
         self.btn_left.setFocusPolicy(Qt.NoFocus)
         self.btn_left.clicked.connect(lambda: self._scroll(-SCROLL_STEP))
         self.btn_left.hide()
@@ -228,7 +233,7 @@ class CustomTabBar(QFrame):
         self.btn_right.setObjectName("tabScrollButton")
         self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color="#68778b"))
         self.btn_right.setIconSize(QSize(11, 11))
-        self.btn_right.setFixedSize(26, TAB_HEIGHT)
+        self.btn_right.setFixedSize(24, TAB_HEIGHT - 4)
         self.btn_right.setFocusPolicy(Qt.NoFocus)
         self.btn_right.clicked.connect(lambda: self._scroll(SCROLL_STEP))
         self.btn_right.hide()
@@ -252,7 +257,7 @@ class CustomTabBar(QFrame):
         self.plus_tab.setObjectName("tabPlusButton")
         self.plus_tab.setIcon(qta.icon("fa5s.plus", color="#536782"))
         self.plus_tab.setIconSize(QSize(13, 13))
-        self.plus_tab.setFixedSize(38, TAB_HEIGHT)
+        self.plus_tab.setFixedSize(28, TAB_HEIGHT - 4)
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.setFocusPolicy(Qt.NoFocus)
         self.plus_tab.setToolTip("New tab")
@@ -262,7 +267,7 @@ class CustomTabBar(QFrame):
         self.external_plus.setObjectName("tabPlusButton")
         self.external_plus.setIcon(qta.icon("fa5s.plus", color="#536782"))
         self.external_plus.setIconSize(QSize(13, 13))
-        self.external_plus.setFixedSize(38, TAB_HEIGHT)
+        self.external_plus.setFixedSize(28, TAB_HEIGHT - 4)
         self.external_plus.setFocusPolicy(Qt.NoFocus)
         self.external_plus.setToolTip("New tab")
         self.external_plus.clicked.connect(lambda: self.new_tab_requested.emit())
@@ -755,6 +760,9 @@ class BrowserWindow(QMainWindow):
         self.dock.setFloating(False)
         self.dock.setFeatures(QDockWidget.DockWidgetClosable)
         self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
+        # This panel is controlled by the globe button; it is not a closable
+        # secondary window. The browser remains in charge of its visibility.
+        self.dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
         if self.settings.proxy_panel_visible:
             self._ensure_proxy_panel()
@@ -868,6 +876,10 @@ class BrowserWindow(QMainWindow):
         if not self.dock.isVisible():
             self._ensure_proxy_panel()
             self.dock.setVisible(True)
+        else:
+            self.dock.setVisible(False)
+        if hasattr(self, "navbar"):
+            self.navbar.set_proxy_panel_state(self.dock.isVisible())
             self.dock.raise_()
         else:
             self.dock.setVisible(False)
@@ -2601,6 +2613,40 @@ class BrowserWindow(QMainWindow):
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
+    def nativeEvent(self, eventType, message):
+        """Expose native caption/maximize hit targets so Windows Snap layouts work."""
+        if sys.platform == "win32":
+            try:
+                native = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+                if native.message == 0x0084:  # WM_NCHITTEST
+                    packed = int(native.lParam)
+                    point = QPoint(
+                        ctypes.c_short(packed & 0xFFFF).value,
+                        ctypes.c_short((packed >> 16) & 0xFFFF).value,
+                    )
+                    maximize = getattr(getattr(self, "title_bar", None), "maximize_button", None)
+                    if maximize is not None:
+                        maximize_rect = QRect(maximize.mapToGlobal(QPoint(0, 0)), maximize.size())
+                        if maximize_rect.contains(point):
+                            return True, 9  # HTMAXBUTTON: native Snap Layouts hover target
+                    title_bar = getattr(self, "title_bar", None)
+                    if title_bar is not None:
+                        title_rect = QRect(title_bar.mapToGlobal(QPoint(0, 0)), title_bar.size())
+                        if title_rect.contains(point):
+                            buttons = (
+                                title_bar.minimize_button,
+                                title_bar.maximize_button,
+                                title_bar.close_button,
+                            )
+                            if not any(
+                                QRect(button.mapToGlobal(QPoint(0, 0)), button.size()).contains(point)
+                                for button in buttons
+                            ):
+                                return True, 2  # HTCAPTION: native move/snap/Win+Arrow support
+            except (AttributeError, TypeError, ValueError, OSError):
+                logger.debug("Native window hit test was unavailable.", exc_info=True)
+        return super().nativeEvent(eventType, message)
+
     def closeEvent(self, event):
         active_downloads = []
         for manager in self._download_managers.values():

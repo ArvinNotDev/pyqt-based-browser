@@ -174,6 +174,26 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.clicked.connect(self.bookmark_requested.emit)
         self._add_widget(self.bookmark_btn)
 
+        self.downloads_btn = self._button("", "Open downloads manager", "utilityToolButton")
+        self.downloads_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.downloads_btn.setIcon(self._awesome_icon("fa5s.download"))
+        self.downloads_btn.setIconSize(QSize(17, 17))
+        self.downloads_btn.setAccessibleName("Downloads manager")
+        self.downloads_btn.setFixedSize(34, 30)
+        self.downloads_btn.clicked.connect(self.show_downloads_requested.emit)
+        self._add_widget(self.downloads_btn)
+
+        self.proxy_panel_btn = self._button("", "Show or hide Tor proxy", "utilityToolButton")
+        self.proxy_panel_btn.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.proxy_panel_btn.setIcon(self._awesome_icon("fa5s.globe"))
+        self.proxy_panel_btn.setIconSize(QSize(17, 17))
+        self.proxy_panel_btn.setAccessibleName("Show or hide Tor proxy")
+        self.proxy_panel_btn.setFixedSize(34, 30)
+        self.proxy_panel_btn.setCheckable(True)
+        self.proxy_panel_btn.setProperty("proxyPanelOpen", False)
+        self.proxy_panel_btn.clicked.connect(self.proxy_panel_requested.emit)
+        self._add_widget(self.proxy_panel_btn)
+
         self.addSeparator()
         self.profile_btn = self._action("Profiles", "fa5s.user-circle")
         self._navigation_icon_names[self.profile_btn] = "fa5s.user-circle"
@@ -456,8 +476,24 @@ class NavigationBar(QToolBar):
         self.bookmark_btn.setIcon(
             self._awesome_icon("fa5s.star" if self._bookmark_active else "fa5.star")
         )
+        self.downloads_btn.setIcon(self._awesome_icon("fa5s.download"))
+        self.proxy_panel_btn.setIcon(self._awesome_icon("fa5s.globe"))
         self._refresh_profile_icon()
         self._close_suggestion_popup()
+
+    def set_proxy_panel_state(self, opened: bool) -> None:
+        button = getattr(self, "proxy_panel_btn", None)
+        if button is None:
+            return
+        button.blockSignals(True)
+        button.setChecked(bool(opened))
+        button.setProperty("proxyPanelOpen", bool(opened))
+        button.setToolTip("Hide Tor proxy panel" if opened else "Show Tor proxy panel")
+        button.setAccessibleName(button.toolTip())
+        button.style().unpolish(button)
+        button.style().polish(button)
+        button.blockSignals(False)
+        button.update()
 
     def set_dark_mode(self, dark: bool):
         self.settings.dark_mode = bool(dark)
