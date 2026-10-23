@@ -112,10 +112,17 @@ if __name__ == "__main__":
     _load_startup_settings(selected_profile)
 
     # No Tor proxy is configured for an ordinary browser session.
+    from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QApplication, QMessageBox
     from ui.browser_window import BrowserWindow
 
     app = QApplication([sys.argv[0], *qt_arguments])
+    # Some platform/style fonts report an unspecified point size (-1). Normalize
+    # the application default before constructing custom controls and dialogs.
+    app_font = QFont(app.font())
+    if app_font.pointSize() <= 0:
+        app_font.setPointSize(10)
+        app.setFont(app_font)
     app.setApplicationName("ARMA Browser")
     app.setApplicationDisplayName("ARMA Browser")
     try:
