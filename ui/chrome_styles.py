@@ -705,8 +705,8 @@ QPushButton#tabCloseButton {
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]
 
-/* Final geometry pass: clip WebEngine pages, keep tabs inside their strip, and
-   round the actual custom-window content rather than relying on CSS decoration. */
+# Final geometry pass: clip WebEngine pages, keep tabs inside their strip, and
+# round the actual custom-window content rather than relying on CSS decoration.
 LIGHT_CHROME_POLISH += """
 QWidget#customTitleBar {
     border-top-left-radius: 17px;

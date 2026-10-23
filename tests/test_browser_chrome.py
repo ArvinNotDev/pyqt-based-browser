@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from ui.browser_window import TAB_HEIGHT, CustomTabBar, TabButton, _rounded_region
+from ui.browser_window import TAB_HEIGHT, CustomTabBar, _rounded_region
 from ui.title_bar import CustomTitleBar
 
 
