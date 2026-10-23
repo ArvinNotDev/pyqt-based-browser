@@ -1227,6 +1227,8 @@ class BrowserWindow(QMainWindow):
             self.title_bar.sync_maximize_button()
             self._update_resize_handles()
             self._sync_window_frame()
+            # Qt can change native window styles during maximize/fullscreen transitions.
+            self._queue_window_frame_refresh()
 
     def _sync_window_frame(self) -> None:
         if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
@@ -3312,7 +3314,9 @@ class BrowserWindow(QMainWindow):
     
     def _apply_native_window_styles(self) -> None:
         """Restore Windows resize/maximize styles without adding a visible title bar."""
-        if sys.platform != "win32":
+        # Do not add a resize frame while genuinely fullscreen. The state-change
+        # refresh reapplies resize styles after returning to a windowed state.
+        if sys.platform != "win32" or self.isFullScreen():
             return
         try:
             hwnd = int(self.winId())
