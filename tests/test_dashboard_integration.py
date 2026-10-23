@@ -1,10 +1,13 @@
 import json
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Thread
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, QUrl, QUrlQuery
+from PySide6.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 from PySide6.QtWidgets import QApplication
-from PySide6.QtWebEngineCore import QWebEngineProfile
+from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEngineProfile
 
 from managers.dashboard_manager import DEFAULTS as DASHBOARD_DEFAULTS, PRESETS
 from ui.browser_window import (
@@ -15,6 +18,7 @@ from ui.browser_window import (
 )
 from ui.dashboard.internal_page import DashboardSchemeHandler
 from ui.dashboard.bridge import DashboardBridge
+from proxy.set_proxy import manage_proxy
 
 
 def test_startup_home_and_new_tab_routes_use_configured_page():
@@ -234,6 +238,64 @@ def test_internal_dashboard_scheme_serves_a_reloadable_document():
     assert page._dashboard_active is False
     page._dashboard_bridge.dispatch("probe", "{}")
     browser._handle_dashboard_action.assert_called_once()
+
+    proxy_requests = []
+
+    class ProxyHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            proxy_requests.append(self.path)
+            body = b"<html><title>proxy-enabled</title></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    proxy_server = ThreadingHTTPServer(("127.0.0.1", 0), ProxyHandler)
+    Thread(target=proxy_server.serve_forever, daemon=True).start()
+    had_system_proxy_factory = QNetworkProxyFactory.usesSystemConfiguration()
+    proxy_loaded = []
+    proxy_errors = []
+    configured_proxy = None
+    proxy_loop = QEventLoop()
+    try:
+        # A Tor-mode restart applies the proxy before creating WebEngine profiles.
+        manage_proxy(None, "127.0.0.1", proxy_server.server_port, "set")
+        configured_proxy = QNetworkProxy.applicationProxy()
+        proxy_profile = QWebEngineProfile("tor-proxy-test", app)
+        proxy_page = BrowserPage(browser, proxy_profile, None)
+        proxy_page.loadFinished.connect(
+            lambda ok: (proxy_loaded.append(ok), proxy_loop.quit())
+        )
+        proxy_page.loadingChanged.connect(
+            lambda info: proxy_errors.append(
+                (
+                    info.errorDomain(), info.errorCode(), info.errorString(),
+                    repr(info.responseHeaders()),
+                )
+            ) if info.status() == QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus else None
+        )
+        QTimer.singleShot(8000, proxy_loop.quit)
+        proxy_page.setUrl(QUrl("http://example.test/tor-opt-in"))
+        proxy_loop.exec()
+
+        assert proxy_loaded == [True], (
+            f"proxy request failed: {proxy_page.url()} {proxy_requests} {proxy_errors} "
+            f"proxy={configured_proxy.hostName()}:{configured_proxy.port()}"
+        )
+        assert proxy_page.title() == "proxy-enabled"
+        assert "http://example.test/tor-opt-in" in proxy_requests
+    finally:
+        manage_proxy(None, "127.0.0.1", proxy_server.server_port, "clear")
+        assert QNetworkProxyFactory.usesSystemConfiguration() == had_system_proxy_factory
+        proxy_server.shutdown()
+        proxy_server.server_close()
+
+    proxy_page.deleteLater()
+    proxy_profile.deleteLater()
     page.deleteLater()
     profile.deleteLater()
     app.processEvents()
