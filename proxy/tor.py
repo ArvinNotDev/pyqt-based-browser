@@ -69,15 +69,21 @@ class TorRunner:
         name = os.path.basename(os.path.normpath(bundle_path))
         return resource_path(os.path.join(BUNDLE_DIR, name + ".tar.gz"))
 
-    def _verify_archive(self, archive):
-        if check_hash(archive, go_online=False):
+    def _verify_archive(self, archive, cancel_event=None):
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Tor bundle verification was cancelled.")
+        if check_hash(archive, go_online=False, cancel_event=cancel_event):
             return True
-        return check_hash(archive, go_online=True)
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Tor bundle verification was cancelled.")
+        return check_hash(archive, go_online=True, cancel_event=cancel_event)
 
-    def update_path(self, base_path=None, token=None):
+    def update_path(self, base_path=None, token=None, cancel_event=None):
         candidates = [base_path] if base_path else get_own_bundles() + list_downloaded_bundles()
         bundle_root = os.path.realpath(resource_path(BUNDLE_DIR))
         for candidate in candidates:
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Tor startup was cancelled.")
             if not candidate:
                 continue
             candidate = os.path.abspath(os.fspath(candidate))
@@ -88,7 +94,9 @@ class TorRunner:
             if not check_bundle_compatibility(bundle_name + ".tar.gz"):
                 continue
             archive = candidate if is_archive else self._bundle_archive(candidate)
-            if not os.path.isfile(archive) or not self._verify_archive(archive):
+            if not os.path.isfile(archive) or not self._verify_archive(archive, cancel_event=cancel_event):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise InterruptedError("Tor startup was cancelled.")
                 logger.warning("Skipping Tor bundle without a valid Tor Project checksum")
                 continue
             bundle_dir = (
@@ -99,7 +107,7 @@ class TorRunner:
                 continue
             if is_archive and not os.path.isdir(bundle_dir):
                 try:
-                    extract_tar_gz_file(archive, bundle_dir)
+                    extract_tar_gz_file(archive, bundle_dir, cancel_event=cancel_event)
                 except (OSError, ValueError, tarfile.TarError) as exc:
                     logger.warning("Could not extract Tor bundle (%s)", type(exc).__name__)
                     continue

@@ -24,6 +24,7 @@ from proxy.ui_.emojis import CHANGE_IDENTITY, LOGS, WHAT_IS_MY_IP, TAP_TO_CONNEC
 from proxy.config import CONFIG
 import json
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,8 @@ class ProxyWindow(QWidget):
         # All background checks and Tor tasks share this window-owned pool.
         self.thread_pool = QThreadPool(self)
         self.thread_pool.setMaxThreadCount(3)
+        self._shutdown_prepared = False
+        self._worker_cancel_event = threading.Event()
         self.data = Data()
         self.running = False
         self.connected = False
@@ -240,17 +243,30 @@ class ProxyWindow(QWidget):
 
     
     def whatismyip_clicked(self):
-        self.worker = Worker(lambda: what_is_my_ip(proxy=f"http://127.0.0.1:{self.proxy_port}"))
+        if self._shutdown_prepared:
+            return
+        self.worker = Worker(
+            lambda cancel_event=None: what_is_my_ip(
+                proxy=f"http://127.0.0.1:{self.proxy_port}",
+                timeout=4,
+                cancel_event=cancel_event,
+            ),
+            cancel_event=self._worker_cancel_event,
+        )
         self.worker.signals.finished.connect(self._on_ip_result)
         self.worker.signals.error.connect(self._on_ip_error)
         self.thread_pool.start(self.worker)
         self.btn_whatismyip.setDisabled(True)
 
     def _on_ip_result(self, address):
+        if self._shutdown_prepared:
+            return
         self.tor_ip_label.setText("ip: " + address)
         self.btn_whatismyip.setEnabled(True)
 
     def _on_ip_error(self, _error):
+        if self._shutdown_prepared:
+            return
         self.tor_ip_label.setText("ip: error")
         self.btn_whatismyip.setEnabled(True)
         
@@ -282,16 +298,18 @@ class ProxyWindow(QWidget):
         animation.start()
 
     def change_identity_(self):
-        if self._identity_busy or not self.connected:
+        if self._shutdown_prepared or self._identity_busy or not self.connected:
             return
         self._identity_busy = True
         self.btn_change_identity.setEnabled(False)
-        worker = Worker(self.change_identity)
+        worker = Worker(self.change_identity, cancel_event=self._worker_cancel_event)
         worker.signals.finished.connect(self._on_identity_finished)
         worker.signals.error.connect(self._on_identity_error)
         self.thread_pool.start(worker)
 
     def _on_identity_finished(self, result):
+        if self._shutdown_prepared:
+            return
         self._identity_busy = False
         self.btn_change_identity.setEnabled(bool(self.connected))
         if isinstance(result, dict) and result.get("wait", 0) > 0:
@@ -305,11 +323,15 @@ class ProxyWindow(QWidget):
             self.logs_widget.update_log("Tor did not accept the identity request.", level="warning")
 
     def _on_identity_error(self, error):
+        if self._shutdown_prepared:
+            return
         self._identity_busy = False
         self.btn_change_identity.setEnabled(bool(self.connected))
         self.logs_widget.update_log(f"Identity change failed: {error}", level="error")
 
-    def change_identity(self):
+    def change_identity(self, cancel_event=None):
+        if self._shutdown_prepared or (cancel_event is not None and cancel_event.is_set()):
+            return False
         if not self.connected:
             logger.warning("Identity change requested while Tor is not connected.")
             return False
@@ -388,6 +410,8 @@ class ProxyWindow(QWidget):
                 self.btn_whatismyip.setEnabled(False)
 
     def _toggle(self):
+        if self._shutdown_prepared:
+            return
         browser = self._parent._parent
         if self.running:
             self.connect_btn.set_disconnecting()
@@ -402,13 +426,15 @@ class ProxyWindow(QWidget):
         self.btn_status.setText("checking ports ...")
         self.set_btn_status_style("connecting")
 
-        worker = Worker(self._check_ports_worker)
+        worker = Worker(self._check_ports_worker, cancel_event=self._worker_cancel_event)
         worker.signals.finished.connect(self._on_ports_checked)
         worker.signals.error.connect(self._on_ports_check_error)
         self.thread_pool.start(worker)
 
     def _on_ports_check_error(self, error):
         """Restore the connect control when the background port check fails."""
+        if self._shutdown_prepared:
+            return
         logger.error("Proxy port check failed: %s", error)
         self.btn_status.setText("port check failed")
         self.set_btn_status_style("disconnected")
@@ -417,6 +443,8 @@ class ProxyWindow(QWidget):
 
     # ===== slot that runs on main thread with the result =====
     def _on_ports_checked(self, result):
+        if self._shutdown_prepared:
+            return
         """
         result == (ok, ports, messages)
         This runs in the GUI thread so it's safe to touch UI and self.proxy/self.tor.
@@ -481,7 +509,12 @@ class ProxyWindow(QWidget):
             if self._tor_start_token is None:
                 raise RuntimeError("Tor is already starting or running")
             self.btn_status.setText("preparing Tor . . .")
-            worker = Worker(self._prepare_and_start_tor, self._tor_start_token, CONFIG["tor_path"])
+            worker = Worker(
+                self._prepare_and_start_tor,
+                self._tor_start_token,
+                CONFIG["tor_path"],
+                cancel_event=self._worker_cancel_event,
+            )
             worker.signals.finished.connect(self._on_tor_prepared)
             worker.signals.error.connect(self._on_tor_prepare_error)
             self._tor_start_worker = worker
@@ -499,10 +532,14 @@ class ProxyWindow(QWidget):
             # always re-enable the button
             self.connect_btn.setEnabled(True)
 
-    def _prepare_and_start_tor(self, token, selected_path):
+    def _prepare_and_start_tor(self, token, selected_path, cancel_event=None):
         try:
-            if not self.tor.update_path(selected_path, token=token):
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Tor startup was cancelled.")
+            if not self.tor.update_path(selected_path, token=token, cancel_event=cancel_event):
                 raise RuntimeError("No checksum-verified compatible Tor bundle is available")
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Tor startup was cancelled.")
             if not self.tor.start(token=token):
                 raise RuntimeError("Tor start was cancelled")
             return json.dumps({"token": token, "ok": True})
@@ -514,6 +551,8 @@ class ProxyWindow(QWidget):
             })
 
     def _on_tor_prepared(self, result):
+        if self._shutdown_prepared:
+            return
         try:
             data = json.loads(result)
             token = data["token"]
@@ -534,6 +573,8 @@ class ProxyWindow(QWidget):
         self.logs_widget.update_log("Tor startup requested; waiting for bootstrap.")
 
     def _on_tor_prepare_error(self, error):
+        if self._shutdown_prepared:
+            return
         logger.error("Tor startup worker failed: %s", error)
         if self.running:
             self._enter_tor_failure("Tor startup worker failed")
@@ -592,7 +633,7 @@ class ProxyWindow(QWidget):
         self._enter_tor_failure(message)
 
    # ===== helper worker (runs in background) =====
-    def _check_ports_worker(self):
+    def _check_ports_worker(self, cancel_event=None):
         """
         Pure worker: no GUI ops here.
         Returns (ok: bool, ports: dict, messages: list[str])
@@ -610,6 +651,8 @@ class ProxyWindow(QWidget):
         ]
 
         for cfg_key, checked_key, human in checks:
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Port checking was cancelled.")
             # read checked flag (use try/except because CONFIG may not have key)
             try:
                 raw_checked = CONFIG[checked_key]
@@ -693,7 +736,12 @@ class ProxyWindow(QWidget):
     def _stop_services(self, reload_pages=True):
         if self._stopping:
             return
-        if not self.running and not self.connected and not self.proxy.started:
+        tor_has_resources = any((
+            getattr(self.tor, "thread", None) is not None,
+            getattr(self.tor, "proc", None) is not None,
+            getattr(self.tor, "manager", None) is not None,
+        ))
+        if not self.running and not self.connected and not self.proxy.started and not tor_has_resources:
             return
         self._stopping = True
         self._tor_start_token = None
@@ -735,4 +783,37 @@ class ProxyWindow(QWidget):
         self.connect_btn.set_connected(False)
         self.connect_btn.setEnabled(True)
         self._stopping = False
-        
+
+    def prepare_shutdown(self, reload_pages=False):
+        """Cancel workers and idempotently stop every owned Tor/proxy resource."""
+        if self._shutdown_prepared:
+            return
+        self._shutdown_prepared = True
+        self._worker_cancel_event.set()
+        self.thread_pool.clear()
+        self.stop_timers()
+        try:
+            self._stop_services(reload_pages=reload_pages)
+        except Exception:
+            logger.exception("Proxy services raised while preparing for shutdown")
+        if any((
+            getattr(self.tor, "thread", None) is not None,
+            getattr(self.tor, "proc", None) is not None,
+            getattr(self.tor, "manager", None) is not None,
+        )):
+            try:
+                self.tor.stop()
+            except Exception:
+                logger.exception("Tor supervisor did not stop cleanly")
+        if getattr(self.proxy, "started", False) or getattr(self.proxy, "server", None) is not None:
+            try:
+                self.proxy.stop()
+            except Exception:
+                logger.exception("Local proxy did not stop cleanly")
+        try:
+            self.thread_pool.waitForDone(2500)
+        except RuntimeError:
+            pass
+        self.thread_pool.clear()
+        self.connect_btn.stop_animations()
+

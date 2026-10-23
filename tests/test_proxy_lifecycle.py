@@ -143,11 +143,9 @@ def test_cancelled_tor_version_lookup_does_not_start_network_request(monkeypatch
     updater = importlib.import_module("proxy.updater")
     token = updater.CancellationToken()
     token.set()
-    get = monkeypatch.spy(updater.requests, "get") if hasattr(monkeypatch, "spy") else None
-    if get is None:
-        from unittest.mock import Mock
-        get = Mock(side_effect=AssertionError("network must not start after cancellation"))
-        monkeypatch.setattr(updater.requests, "get", get)
+    from unittest.mock import Mock
+    get = Mock(side_effect=AssertionError("network must not start after cancellation"))
+    monkeypatch.setattr(updater.requests, "get", get)
 
     with pytest.raises(updater.DownloadCancelledError):
         updater.get_tor_versions(cancel_event=token)
