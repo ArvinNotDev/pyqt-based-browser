@@ -6,6 +6,8 @@ import logging
 import os
 from typing import Any
 
+from PySide6.QtCore import QStandardPaths
+
 from managers.profile_manager import Profile
 from managers.storage import atomic_write_json, backup_corrupt_file, validate_profile_name
 
@@ -13,6 +15,16 @@ from managers.storage import atomic_write_json, backup_corrupt_file, validate_pr
 logger = logging.getLogger(__name__)
 _META_KEY = "__pyqt_browser_meta_v1__"
 _LEGACY_FLAT_KEY = "__pyqt_browser_legacy_flat_settings_v1__"
+
+
+def default_download_directory() -> str:
+    """Return the operating system's user Downloads location."""
+    location = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DownloadLocation
+    )
+    if not location:
+        location = os.path.join(os.path.expanduser("~"), "Downloads")
+    return os.path.abspath(os.path.expanduser(location))
 
 
 @dataclass
@@ -27,7 +39,7 @@ class Settings:
     save_history: bool = True
     save_cookies: bool = True
     private_mode: bool = False
-    download_folder: str = "./downloads"
+    download_folder: str = field(default_factory=default_download_directory)
     show_dev_tools: bool = False
     hardware_acceleration: bool = True
     proxy_panel_visible: bool = True
@@ -229,7 +241,7 @@ class Settings:
             "save_history": True,
             "save_cookies": True,
             "private_mode": False,
-            "download_folder": "./downloads",
+            "download_folder": default_download_directory(),
             "show_dev_tools": False,
             "hardware_acceleration": True,
             "proxy_panel_visible": True,
@@ -258,6 +270,10 @@ class Settings:
                 valid_values["startup_page"] = "dashboard"
             elif isinstance(values.get("homepage"), str) and values["homepage"].strip():
                 valid_values["startup_page"] = "homepage"
+        if isinstance(values, dict) and values.get("download_folder") in {"./downloads", ".\\downloads"}:
+            # Replace the old project-relative default while preserving any
+            # explicitly selected custom destination.
+            valid_values["download_folder"] = default_download_directory()
         for key, value in valid_values.items():
             setattr(self, key, value)
 
