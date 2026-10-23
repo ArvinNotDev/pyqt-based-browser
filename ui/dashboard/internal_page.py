@@ -10,19 +10,27 @@ from PySide6.QtWebEngineCore import (
 
 DASHBOARD_SCHEME = b"arma"
 DASHBOARD_URL = "arma://dashboard/"
+DASHBOARD_DEFAULT_PORT = 443
+_scheme_registered = False
 
 
 def register_dashboard_scheme() -> None:
-    """Register the local browser origin before QApplication is constructed."""
+    """Register ARMA's secure local origin once, before any WebEngine profile exists."""
+    global _scheme_registered
+    if _scheme_registered:
+        return
+
     scheme = QWebEngineUrlScheme(DASHBOARD_SCHEME)
     scheme.setSyntax(QWebEngineUrlScheme.Syntax.HostAndPort)
-    scheme.setDefaultPort(-1)
+    # HostAndPort schemes require a concrete default port in Chromium. A negative
+    # value causes registration to be rejected and handler-installation warnings.
+    scheme.setDefaultPort(DASHBOARD_DEFAULT_PORT)
     scheme.setFlags(
         QWebEngineUrlScheme.Flag.SecureScheme
         | QWebEngineUrlScheme.Flag.LocalScheme
     )
     QWebEngineUrlScheme.registerScheme(scheme)
-
+    _scheme_registered = True
 
 
 class DashboardSchemeHandler(QWebEngineUrlSchemeHandler):
