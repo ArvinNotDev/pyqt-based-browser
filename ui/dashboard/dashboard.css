@@ -19,7 +19,9 @@ button { cursor: pointer; }
 .wallpaper, .shade { position: fixed; inset: -8px; pointer-events: none; }
 .wallpaper { z-index: -2; background-position: center; background-size: cover; filter: blur(var(--softness)); transform: scale(1.025); transition: filter .4s ease, background .5s ease; }
 .shade { z-index: -1; background: linear-gradient(180deg, rgba(8,14,23,.34), rgba(8,14,23,var(--overlay)) 36%, rgba(8,14,23,calc(var(--overlay) + .17))); }
-.page { max-width: 1180px; width: calc(100% - 76px); margin: 0 auto; min-height: 100vh; padding: 32px 0 18px; display: flex; flex-direction: column; }
+.page { max-width: 1180px; width: calc(100% - 76px); margin: 0 auto; min-height: 100vh; padding: 32px 0 18px; display: flex; flex-direction: column; opacity: 0; transform: translateY(10px); }
+html.dashboard-ready .page { animation: dashboard-arrive 440ms cubic-bezier(.2,.75,.25,1) both; }
+@keyframes dashboard-arrive { to { opacity: 1; transform: translateY(0); } }
 .topline { display: flex; justify-content: space-between; align-items: flex-start; }
 .greeting { font-size: 15px; font-weight: 600; letter-spacing: .02em; text-shadow: 0 2px 18px rgba(0,0,0,.25); }
 .date { margin-top: 4px; color: var(--muted); font-size: 12px; letter-spacing: .025em; }
