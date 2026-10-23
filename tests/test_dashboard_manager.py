@@ -134,3 +134,19 @@ def test_dashboard_widget_sizes_are_profile_scoped_normalized_and_validated(tmp_
         loaded.update({"widget_sizes": {"unknown": "wide"}})
     with pytest.raises(ValueError):
         loaded.update({"widget_sizes": []})
+
+
+
+def test_malformed_saved_widget_sizes_fall_back_without_discarding_other_preferences(tmp_path):
+    import json
+
+    base = tmp_path / "profiles"
+    manager = DashboardManager("Guest", base_dir=base)
+    manager.update({"notes": "keep this", "widget_sizes": {"notes": "wide"}})
+    payload = json.loads(manager.file_path.read_text(encoding="utf-8"))
+    payload["widget_sizes"]["notes"] = ["invalid"]
+    manager.file_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = DashboardManager("Guest", base_dir=base)
+    assert loaded.data["notes"] == "keep this"
+    assert loaded.data["widget_sizes"]["notes"] == "standard"

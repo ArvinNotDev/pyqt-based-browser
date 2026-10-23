@@ -152,7 +152,7 @@ class DashboardManager:
         if isinstance(widget_sizes, dict):
             result["widget_sizes"].update({
                 name: size for name, size in widget_sizes.items()
-                if name in result["widget_sizes"] and size in WIDGET_SIZES
+                if name in result["widget_sizes"] and isinstance(size, str) and size in WIDGET_SIZES
             })
         result["shortcuts"] = normalize_shortcuts(data.get("shortcuts", DEFAULT_SHORTCUTS))
         notes = data.get("notes")
