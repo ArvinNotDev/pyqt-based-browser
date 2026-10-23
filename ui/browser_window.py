@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainterPath, QRegion
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainterPath, QRegion, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -343,6 +343,8 @@ class TabButton(QFrame):
         self.setMaximumWidth(MAX_TAB_WIDTH)
         self.setFixedHeight(TAB_HEIGHT - 4)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self._title = title or "New Tab"
         self._active = False
         self._dark_mode = False
@@ -373,6 +375,8 @@ class TabButton(QFrame):
         self.close_btn.setIconSize(QSize(11, 11))
         self.close_btn.setFixedSize(18, 18)
         self.close_btn.hide()
+        self.close_btn.setMouseTracking(True)
+        self.close_btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.close_btn.setToolTip("Close tab")
         self.close_btn.setAccessibleName("Close tab")
@@ -423,17 +427,35 @@ class TabButton(QFrame):
         if not self._dragging:
             self.requested_preview.emit()
 
+    def _sync_close_button_visibility(self) -> None:
+        if self._dragging:
+            self.close_btn.hide()
+            return
+        local_cursor = self.mapFromGlobal(QCursor.pos())
+        self.close_btn.setVisible(self.rect().contains(local_cursor))
+
     def enterEvent(self, event) -> None:
-        self.close_btn.show()
         if not self._dragging:
+            self.close_btn.show()
             self._hover_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
         self._hover_timer.stop()
-        if not self._dragging:
-            self.close_btn.hide()
+        # Qt may report Leave as the pointer crosses the child close button.
+        # Recheck the cursor after event dispatch before deciding to hide it.
+        QTimer.singleShot(0, self._sync_close_button_visibility)
         super().leaveEvent(event)
+
+    def hoverEnterEvent(self, event) -> None:
+        if not self._dragging:
+            self.close_btn.show()
+        super().hoverEnterEvent(event)
+
+    def hoverLeaveEvent(self, event) -> None:
+        self._hover_timer.stop()
+        QTimer.singleShot(0, self._sync_close_button_visibility)
+        super().hoverLeaveEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -442,6 +464,9 @@ class TabButton(QFrame):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) and not self._dragging:
+            # Some windowing backends deliver a move before the hover enter.
+            self.close_btn.show()
         if event.buttons() & Qt.MouseButton.LeftButton:
             current = event.position().toPoint()
             if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
@@ -470,6 +495,12 @@ class TabButton(QFrame):
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
+        if obj is self.close_btn:
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                if not self._dragging:
+                    self.close_btn.show()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                QTimer.singleShot(0, self._sync_close_button_visibility)
         if event.type() == QEvent.Type.ContextMenu:
             self.context_requested.emit(event.globalPos())
             return True
@@ -893,7 +924,7 @@ class BrowserPage(QWebEnginePage):
         )
         if view is None or view is not browser.current_view():
             return
-        browser.statusBar().showMessage(
+        _show_status_message(browser, 
             "This page could not decode an audio asset. Try Browser menu → Open in default browser; audio codec support may differ.",
             10000,
         )
@@ -935,6 +966,107 @@ class BrowserPage(QWebEnginePage):
         if 0 <= index < len(self.browser.views):
             return self.browser.views[index].page()
         return None
+
+
+class _StatusMessageOverlay(QFrame):
+    """Non-interactive status toast positioned over the active web page."""
+
+    def __init__(self, parent: QWidget, *, dark: bool = False):
+        super().__init__(parent)
+        self.setObjectName("browserStatusOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMaximumWidth(460)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(13, 8, 15, 8)
+        self.label = QLabel(self)
+        self.label.setObjectName("browserStatusOverlayText")
+        self.label.setWordWrap(True)
+        self.label.setMinimumWidth(0)
+        layout.addWidget(self.label)
+
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+        parent.installEventFilter(self)
+        self.set_theme(dark)
+
+    def set_theme(self, dark: bool) -> None:
+        if dark:
+            self.setStyleSheet(
+                "QFrame#browserStatusOverlay { background: rgba(24,31,43,242); "
+                "color: #edf4ff; border: 1px solid rgba(133,164,212,190); "
+                "border-radius: 11px; } "
+                "QLabel#browserStatusOverlayText { background: transparent; "
+                "color: #edf4ff; font-size: 12px; font-weight: 550; }"
+            )
+        else:
+            self.setStyleSheet(
+                "QFrame#browserStatusOverlay { background: rgba(250,252,255,246); "
+                "color: #25364c; border: 1px solid rgba(159,177,202,205); "
+                "border-radius: 11px; } "
+                "QLabel#browserStatusOverlayText { background: transparent; "
+                "color: #25364c; font-size: 12px; font-weight: 550; }"
+            )
+
+    def showMessage(self, message: str, timeout: int = 0) -> None:
+        text = str(message or "").strip()
+        if not text:
+            self.clearMessage()
+            return
+        parent = self.parentWidget()
+        max_width = 460
+        self.label.setText(text)
+        if parent is not None:
+            max_width = max(190, min(460, parent.width() - 28))
+            self.setMaximumWidth(max_width)
+            self.label.setMaximumWidth(max(150, max_width - 30))
+        self.adjustSize()
+        if parent is not None:
+            width = min(max_width, max(190, self.sizeHint().width()))
+            self.resize(width, min(100, self.sizeHint().height()))
+            self._position()
+        self.show()
+        self.raise_()
+        self._timer.stop()
+        if int(timeout) > 0:
+            self._timer.start(int(timeout))
+
+    def clearMessage(self) -> None:
+        self._timer.stop()
+        self.hide()
+
+    def _position(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        x = min(15, max(0, parent.width() - self.width() - 8))
+        y = max(8, parent.height() - self.height() - 14)
+        self.move(x, y)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.parentWidget() and event.type() in (
+            QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show,
+        ):
+            if self.isVisible():
+                QTimer.singleShot(0, self._position)
+        return super().eventFilter(watched, event)
+
+
+def _show_status_message(window, message: str, timeout: int = 0) -> None:
+    """Route legacy status-bar calls to the overlay; retain fallback for unit-test doubles."""
+    display = getattr(window, "_show_status_overlay", None)
+    if callable(display):
+        display(message, timeout)
+        return
+    status_bar_getter = getattr(window, "statusBar", None)
+    if callable(status_bar_getter):
+        status_bar = status_bar_getter()
+        show_message = getattr(status_bar, "showMessage", None)
+        if callable(show_message):
+            show_message(message, timeout)
 
 
 class BrowserWindow(QMainWindow):
@@ -1038,6 +1170,7 @@ class BrowserWindow(QMainWindow):
 
         self.views: List[QWebEngineView] = []
         self._page_load_overlays: Dict[QWebEngineView, _PageLoadOverlay] = {}
+        self._status_overlays: Dict[object, _StatusMessageOverlay] = {}
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
         self._snapshots: Dict[QWebEngineView, QPixmap] = {}
         self._recorded_history_urls: Dict[QWebEngineView, str] = {}
@@ -1046,6 +1179,8 @@ class BrowserWindow(QMainWindow):
         self.view_container.setObjectName("browserContentCard")
         self.view_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.view_container.setAutoFillBackground(False)
+        # Hide the old bottom status strip; notifications now float over the page.
+        self.statusBar().hide()
         self.view_layout = QVBoxLayout(self.view_container)
         # This is a layout host, not a visible card. Let the page meet the browser
         # shell directly so the viewport has one clean rounded edge, not two boxes.
@@ -1366,10 +1501,10 @@ class BrowserWindow(QMainWindow):
         except (OSError, ValueError, TypeError):
             self.settings.dark_mode = previous
             logger.exception("Could not save browser theme")
-            self.statusBar().showMessage("Could not save browser theme.", 3500)
+            _show_status_message(self, "Could not save browser theme.", 3500)
             return
         self.apply_theme()
-        self.statusBar().showMessage("Dark theme enabled." if self.settings.dark_mode else "Light theme enabled.", 1800)
+        _show_status_message(self, "Dark theme enabled." if self.settings.dark_mode else "Light theme enabled.", 1800)
 
     def moveEvent(self, event):
         super().moveEvent(event)
@@ -1524,7 +1659,7 @@ class BrowserWindow(QMainWindow):
             proxy_routing.save_exclude()
         except (OSError, ValueError, UnicodeError) as error:
             logger.exception("Could not update direct route exception for %s", host)
-            self.statusBar().showMessage(f"Could not update site connection: {error}", 5000)
+            _show_status_message(self, f"Could not update site connection: {error}", 5000)
             self._sync_site_connection_action(view.url().toString())
             return
         self._sync_site_connection_action(view.url().toString())
@@ -1538,7 +1673,7 @@ class BrowserWindow(QMainWindow):
             message = (
                 f"Direct-route preference saved for {host}; it applies when Tor routing is enabled."
             )
-        self.statusBar().showMessage(message, 3500)
+        _show_status_message(self, message, 3500)
 
     def _install_browser_shortcuts(self) -> None:
         """Install Chrome-style browser shortcuts that Gaming mode can pause."""
@@ -1604,7 +1739,7 @@ class BrowserWindow(QMainWindow):
         )
         self.navbar.menu_button.style().unpolish(self.navbar.menu_button)
         self.navbar.menu_button.style().polish(self.navbar.menu_button)
-        self.statusBar().showMessage(
+        _show_status_message(self, 
             "Gaming mode on · browser shortcuts paused" if enabled else "Gaming mode off",
             2500,
         )
@@ -1642,10 +1777,10 @@ class BrowserWindow(QMainWindow):
             self.new_tab(view.url().toString())
         elif selected is copy_action:
             QApplication.clipboard().setText(view.url().toString())
-            self.statusBar().showMessage("Page address copied.", 2000)
+            _show_status_message(self, "Page address copied.", 2000)
         elif selected is mute_action:
             page.setAudioMuted(not page.isAudioMuted())
-            self.statusBar().showMessage(
+            _show_status_message(self, 
                 "Tab audio unmuted." if not page.isAudioMuted() else "Tab audio muted.",
                 2000,
             )
@@ -1812,7 +1947,7 @@ class BrowserWindow(QMainWindow):
             self.bookmarks_bar.set_bookmarks(self.bookmarks_manager.list_bookmarks())
         except Exception:
             logger.exception("Could not refresh bookmarks for profile %s", self.selected_profile)
-            self.statusBar().showMessage("Could not refresh bookmarks.", 3000)
+            _show_status_message(self, "Could not refresh bookmarks.", 3000)
         self._sync_dashboard_tabs()
 
     def _update_bookmarks_bar_visibility(self, value=None) -> None:
@@ -1839,7 +1974,7 @@ class BrowserWindow(QMainWindow):
             self.new_tab(bookmark["url"])
         elif selected is copy_url:
             QApplication.clipboard().setText(bookmark["url"])
-            self.statusBar().showMessage("Bookmark address copied.", 2000)
+            _show_status_message(self, "Bookmark address copied.", 2000)
         elif selected is edit_action:
             self._edit_bookmark(bookmark)
         elif selected is remove_action:
@@ -1865,12 +2000,12 @@ class BrowserWindow(QMainWindow):
                     self.bookmarks_manager.is_bookmarked(current.url().toString())
                 )
         except (OSError, ValueError, TypeError) as error:
-            self.statusBar().showMessage(f"Could not update bookmark: {error}", 5000)
+            _show_status_message(self, f"Could not update bookmark: {error}", 5000)
 
     def _remove_bookmark(self, bookmark: dict) -> None:
         try:
             if not self.bookmarks_manager.remove_bookmark(bookmark["id"]):
-                self.statusBar().showMessage("This bookmark no longer exists.", 3000)
+                _show_status_message(self, "This bookmark no longer exists.", 3000)
             self._refresh_bookmarks()
             current = self.current_view()
             if current is not None:
@@ -1878,11 +2013,11 @@ class BrowserWindow(QMainWindow):
                     self.bookmarks_manager.is_bookmarked(current.url().toString())
                 )
         except (OSError, ValueError, TypeError) as error:
-            self.statusBar().showMessage(f"Could not remove bookmark: {error}", 5000)
+            _show_status_message(self, f"Could not remove bookmark: {error}", 5000)
 
     def _add_current_bookmark(self, *args):
         if self.bookmarks_manager is None:
-            self.statusBar().showMessage("Bookmarks are unavailable.", 3000)
+            _show_status_message(self, "Bookmarks are unavailable.", 3000)
             return
         view = self.current_view()
         if view is None:
@@ -1899,11 +2034,11 @@ class BrowserWindow(QMainWindow):
             self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url))
         except Exception:
             logger.exception("Could not toggle bookmark for %s", url)
-            self.statusBar().showMessage("Could not update bookmark.", 3000)
+            _show_status_message(self, "Could not update bookmark.", 3000)
 
     def show_bookmarks(self, *args):
         if BookmarksDialog is None or self.bookmarks_manager is None:
-            self.statusBar().showMessage("Bookmarks are unavailable.", 3000)
+            _show_status_message(self, "Bookmarks are unavailable.", 3000)
             return
         try:
             dialog = BookmarksDialog(self.bookmarks_manager, self)
@@ -1912,7 +2047,7 @@ class BrowserWindow(QMainWindow):
             self._refresh_bookmarks()
         except Exception:
             logger.exception("Could not open bookmarks")
-            self.statusBar().showMessage("Could not open bookmarks.", 3000)
+            _show_status_message(self, "Could not open bookmarks.", 3000)
 
     def show_downloads(self, *args):
         self.navigate("arma://downloads/")
@@ -2150,7 +2285,7 @@ class BrowserWindow(QMainWindow):
         else:
             self._downloads_panel_mode = next_mode
             self.downloads_panel.set_docked(next_mode == "split")
-        self.statusBar().showMessage(
+        _show_status_message(self, 
             "Downloads will now stay beside the page." if next_mode == "split"
             else "Downloads will now overlay the page.", 2500
         )
@@ -2521,7 +2656,7 @@ class BrowserWindow(QMainWindow):
         if host is None:
             raise ValueError("Only supported ARMA internal pages can be loaded here.")
         if host == "dashboard" and self.dashboard_manager is None:
-            self.statusBar().showMessage("Dashboard preferences are unavailable.", 4000)
+            _show_status_message(self, "Dashboard preferences are unavailable.", 4000)
             return
         page = view.page()
         page._enable_dashboard_bridge()
@@ -2714,10 +2849,10 @@ class BrowserWindow(QMainWindow):
                         )
                     else:
                         message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
-                    self.statusBar().showMessage(message, 6500)
+                    _show_status_message(self, message, 6500)
                 else:
                     message = "Setting saved." if incremental_setting else "Browser settings saved."
-                    self.statusBar().showMessage(message, 2200)
+                    _show_status_message(self, message, 2200)
                 if incremental_setting:
                     page.runJavaScript(
                         "window.armaSettingSaved && window.armaSettingSaved("
@@ -2769,7 +2904,7 @@ class BrowserWindow(QMainWindow):
                 else:
                     return
                 self.navbar.history = history.history
-                self.statusBar().showMessage("History updated.", 2000)
+                _show_status_message(self, "History updated.", 2000)
                 self._load_internal_page(view, "arma://history/")
                 return
 
@@ -2814,12 +2949,12 @@ class BrowserWindow(QMainWindow):
                             raise ValueError("The file could not be deleted. Only files inside the configured download folder can be deleted.")
                     else:
                         return
-                self.statusBar().showMessage("Download list updated.", 2000)
+                _show_status_message(self, "Download list updated.", 2000)
                 self._load_internal_page(view, "arma://downloads/")
                 return
         except (OSError, ValueError, TypeError, RuntimeError) as error:
             logger.info("Internal page action %s was rejected: %s", action, error)
-            self.statusBar().showMessage(str(error), 5500)
+            _show_status_message(self, str(error), 5500)
             if incremental_setting and setting_name:
                 page.runJavaScript(
                     "window.armaSettingSaved && window.armaSettingSaved("
@@ -2962,7 +3097,7 @@ class BrowserWindow(QMainWindow):
                 resolved_url = resolve_address_input(raw_url, self.settings.default_search_engine)
             except URLInputError as exc:
                 logger.warning("Rejected tab URL %r: %s", raw_url, exc)
-                self.statusBar().showMessage(str(exc), 5000)
+                _show_status_message(self, str(exc), 5000)
                 resolved_url = "about:blank"
         url_q = QUrl(resolved_url)
 
@@ -3217,7 +3352,7 @@ class BrowserWindow(QMainWindow):
                 placeholder.loading_detail_label.setText(message)
                 placeholder.loading_progress.hide()
                 placeholder.retry_button.show()
-            self.statusBar().showMessage(f"Could not load page: {message}", 6000)
+            _show_status_message(self, f"Could not load page: {message}", 6000)
         except (AttributeError, RuntimeError):
             logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
 
@@ -3443,6 +3578,24 @@ class BrowserWindow(QMainWindow):
         self.new_tab()
 
 
+    def _show_status_overlay(self, message: str, timeout: int = 0) -> None:
+        view = self.current_view()
+        parent = view if view is not None else getattr(self, "view_container", None)
+        if parent is None:
+            return
+        overlays = getattr(self, "_status_overlays", None)
+        if overlays is None:
+            overlays = {}
+            self._status_overlays = overlays
+        overlay = overlays.get(parent)
+        if overlay is None:
+            overlay = _StatusMessageOverlay(
+                parent, dark=bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+            )
+            overlays[parent] = overlay
+        overlay.set_theme(bool(getattr(getattr(self, "settings", None), "dark_mode", False)))
+        overlay.showMessage(message, timeout)
+
     def open_current_page_externally(self) -> None:
         """Open the current web address in the operating system's default browser."""
         view = self.current_view()
@@ -3450,12 +3603,12 @@ class BrowserWindow(QMainWindow):
             return
         url = view.url()
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
-            self.statusBar().showMessage("Only web pages can be opened externally.", 3000)
+            _show_status_message(self, "Only web pages can be opened externally.", 3000)
             return
         if QDesktopServices.openUrl(url):
-            self.statusBar().showMessage("Opened in the default browser.", 2500)
+            _show_status_message(self, "Opened in the default browser.", 2500)
         else:
-            self.statusBar().showMessage("Could not open the default browser.", 4000)
+            _show_status_message(self, "Could not open the default browser.", 4000)
 
     def reload_current_page_bypassing_cache(self) -> None:
         """Retry the active page without reusing resources from the HTTP cache."""
@@ -3464,18 +3617,18 @@ class BrowserWindow(QMainWindow):
             return
         url = view.url()
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
-            self.statusBar().showMessage(
+            _show_status_message(self, 
                 "Only web pages can be reloaded without cache.", 3000
             )
             return
         view.page().triggerAction(QWebEnginePage.WebAction.ReloadAndBypassCache)
-        self.statusBar().showMessage("Reloading without the local cache…", 2500)
+        _show_status_message(self, "Reloading without the local cache…", 2500)
 
     def navigate(self, url: str):
         if isinstance(url, QUrl):
             url = url.toString()
         if not isinstance(url, str):
-            self.statusBar().showMessage("The selected address is invalid.", 5000)
+            _show_status_message(self, "The selected address is invalid.", 5000)
             return
         internal_host = BrowserWindow._internal_host(url)
         if internal_host is not None:
@@ -3487,7 +3640,7 @@ class BrowserWindow(QMainWindow):
         try:
             resolved_url = resolve_address_input(url, self.settings.default_search_engine)
         except URLInputError as exc:
-            self.statusBar().showMessage(str(exc), 5000)
+            _show_status_message(self, str(exc), 5000)
             logger.info("Rejected address bar input %r: %s", url, exc)
             return
         view = self.current_view()

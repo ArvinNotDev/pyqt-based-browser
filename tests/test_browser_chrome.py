@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from ui.browser_window import TAB_HEIGHT, CustomTabBar, _rounded_region
+from ui.browser_window import TAB_HEIGHT, CustomTabBar, TabButton, _rounded_region
 from ui.title_bar import CustomTitleBar
 
 
@@ -83,3 +83,30 @@ def test_custom_maximize_control_toggles_and_updates_its_accessible_state(qapp):
     assert title_bar.maximize_button.accessibleName() == "Maximize"
 
     host.close()
+
+
+
+def test_tab_close_button_is_visible_immediately_on_hover_and_stays_visible_over_button(qapp):
+    host = QWidget()
+    host_layout = QVBoxLayout(host)
+    tab = TabButton("Hover test")
+    host_layout.addWidget(tab)
+    host.resize(240, 70)
+    host.show()
+    qapp.processEvents()
+
+    QTest.mouseMove(tab, QPoint(34, 10))
+    qapp.processEvents()
+    assert not tab.close_btn.isHidden()
+
+    QTest.mouseMove(tab.close_btn, tab.close_btn.rect().center())
+    qapp.processEvents()
+    assert not tab.close_btn.isHidden()
+
+    QTest.mouseMove(host, QPoint(230, 60))
+    qapp.processEvents()
+    assert tab.close_btn.isHidden()
+
+    host.close()
+    host.deleteLater()
+    qapp.processEvents()
