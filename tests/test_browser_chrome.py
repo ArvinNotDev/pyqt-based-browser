@@ -9,7 +9,9 @@ from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from ui.browser_window import TAB_HEIGHT, CustomTabBar, TabButton, _rounded_region
+from ui.browser_window import (
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _rounded_region,
+)
 from ui.title_bar import CustomTitleBar
 
 
@@ -109,4 +111,27 @@ def test_tab_close_button_is_visible_immediately_on_hover_and_stays_visible_over
 
     host.close()
     host.deleteLater()
+    qapp.processEvents()
+
+
+
+def test_status_message_is_a_bottom_left_overlay_not_a_status_bar(qapp):
+    page = QWidget()
+    page.resize(640, 420)
+    page.show()
+    qapp.processEvents()
+
+    overlay = _StatusMessageOverlay(page, dark=True)
+    overlay.showMessage("Opened in the default browser.", 2500)
+    qapp.processEvents()
+
+    assert overlay.isVisible()
+    assert overlay.label.text() == "Opened in the default browser."
+    assert overlay.x() < 40
+    assert overlay.y() > page.height() // 2
+    assert overlay.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+    overlay.hide()
+    page.close()
+    page.deleteLater()
     qapp.processEvents()

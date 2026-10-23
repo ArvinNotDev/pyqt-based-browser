@@ -447,15 +447,13 @@ class TabButton(QFrame):
         QTimer.singleShot(0, self._sync_close_button_visibility)
         super().leaveEvent(event)
 
-    def hoverEnterEvent(self, event) -> None:
-        if not self._dragging:
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.HoverEnter and not self._dragging:
             self.close_btn.show()
-        super().hoverEnterEvent(event)
-
-    def hoverLeaveEvent(self, event) -> None:
-        self._hover_timer.stop()
-        QTimer.singleShot(0, self._sync_close_button_visibility)
-        super().hoverLeaveEvent(event)
+        elif event.type() == QEvent.Type.HoverLeave:
+            self._hover_timer.stop()
+            QTimer.singleShot(0, self._sync_close_button_visibility)
+        return super().event(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
