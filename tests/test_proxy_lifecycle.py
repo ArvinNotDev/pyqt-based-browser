@@ -118,3 +118,49 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
 def test_invalid_port_is_not_reported_as_available():
     proxy_module = importlib.import_module("proxy.proxy")
     assert proxy_module.is_port_free("127.0.0.1", 65536) is False
+
+
+
+def test_tor_bundle_cancellation_closes_registered_response():
+    from unittest.mock import Mock
+
+    from proxy.updater import CancellationToken, DownloadCancelledError
+
+    token = CancellationToken()
+    response = Mock()
+    token.register_response(response)
+
+    token.set()
+
+    response.close.assert_called_once_with()
+    with pytest.raises(DownloadCancelledError):
+        token.check()
+
+
+def test_cancelled_tor_version_lookup_does_not_start_network_request(monkeypatch):
+    import importlib
+
+    updater = importlib.import_module("proxy.updater")
+    token = updater.CancellationToken()
+    token.set()
+    get = monkeypatch.spy(updater.requests, "get") if hasattr(monkeypatch, "spy") else None
+    if get is None:
+        from unittest.mock import Mock
+        get = Mock(side_effect=AssertionError("network must not start after cancellation"))
+        monkeypatch.setattr(updater.requests, "get", get)
+
+    with pytest.raises(updater.DownloadCancelledError):
+        updater.get_tor_versions(cancel_event=token)
+    get.assert_not_called()
+
+
+def test_cancelled_bundle_extraction_exits_before_touching_archive(tmp_path):
+    import threading
+
+    from proxy.utils import extract_tar_gz_file
+
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(InterruptedError, match="cancelled"):
+        extract_tar_gz_file(tmp_path / "not-created.tar.gz", tmp_path / "bundle", cancel_event=cancelled)
+    assert not (tmp_path / "bundle").exists()
