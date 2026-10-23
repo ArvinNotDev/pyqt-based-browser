@@ -24,6 +24,8 @@ class _DownloadsModeHarness:
     _finish_mode_switch_to_overlay = BrowserWindow._finish_mode_switch_to_overlay
     _finish_mode_switch_overlay_animation = BrowserWindow._finish_mode_switch_overlay_animation
     _finish_downloads_mode_transition = BrowserWindow._finish_downloads_mode_transition
+    _show_downloads_overlay_dismiss_area = BrowserWindow._show_downloads_overlay_dismiss_area
+    _hide_downloads_overlay_dismiss_area = BrowserWindow._hide_downloads_overlay_dismiss_area
 
 
 def _make_mode_harness(start_mode="overlay"):
