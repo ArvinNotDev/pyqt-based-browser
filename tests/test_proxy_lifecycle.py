@@ -93,7 +93,7 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     runner.ClientUseIPv4 = 1
     runner.ClientUseIPv6 = 0
     runner.bridge = True
-    runner.bridges = "obfs4 192.0.2.10:443 fingerprint cert=example"
+    runner.bridges = "obfs4 192.0.2.10:443 0123456789ABCDEF0123456789ABCDEF01234567 cert=example"
     lyrebird_path = bundle_root / "pluggable_transports" / ("lyrebird.exe" if os.name == "nt" else "lyrebird")
     lyrebird_path.parent.mkdir(parents=True)
     lyrebird_path.touch()
