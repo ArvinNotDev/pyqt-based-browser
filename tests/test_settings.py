@@ -16,7 +16,9 @@ def test_defaults_are_independent_and_stable():
     first = Settings()
     second = Settings()
 
-    assert first.homepage == "https://www.google.com"
+    assert first.homepage == "arma://dashboard/"
+    assert first.startup_page == "dashboard"
+    assert first.new_tab_page == "dashboard"
     assert first.default_search_engine == "https://www.google.com/search?q="
     assert (first.window_width, first.window_height) == (1280, 720)
     assert first.dark_mode is False
@@ -60,8 +62,47 @@ def test_loading_older_settings_keeps_new_defaults_and_ignores_unknown_keys(tmp_
     settings.load("Guest")
 
     assert settings.homepage == "https://old.example/"
+    assert settings.startup_page == "homepage"
     assert settings.hardware_acceleration is True
     assert not hasattr(settings, "future_option")
+
+
+def test_old_default_homepage_migrates_but_custom_homepage_is_preserved(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    settings_file.write_text(
+        json.dumps({
+            "Guest": {"homepage": "https://www.google.com"},
+            "Work": {"homepage": "https://work.example/start"},
+        }),
+        encoding="utf-8",
+    )
+    settings = Settings(file_path=str(settings_file))
+    settings.load("Guest")
+    assert settings.homepage == "arma://dashboard/"
+    settings.load("Work")
+    assert settings.homepage == "https://work.example/start"
+    assert settings.startup_page == "homepage"
+
+
+def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    settings = Settings(file_path=str(settings_file))
+    settings.startup_page = "homepage"
+    settings.new_tab_page = "homepage"
+    settings.save("Guest")
+
+    loaded = Settings(file_path=str(settings_file))
+    loaded.load("Guest")
+    assert loaded.startup_page == "homepage"
+    assert loaded.new_tab_page == "homepage"
+
+    settings_file.write_text(
+        json.dumps({"Guest": {"startup_page": "javascript", "new_tab_page": "broken"}}),
+        encoding="utf-8",
+    )
+    loaded.load("Guest")
+    assert loaded.startup_page == "dashboard"
+    assert loaded.new_tab_page == "dashboard"
 
 
 def test_save_recovers_from_malformed_json(tmp_path):
