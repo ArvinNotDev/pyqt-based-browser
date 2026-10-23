@@ -6,11 +6,24 @@ import ntpath
 import shutil
 import tempfile
 
+from app_paths import is_frozen, user_data_path
+
 logger = logging.getLogger(__name__)
 MAX_TAR_MEMBERS = 10000
 MAX_UNPACKED_BUNDLE_BYTES = 1024 * 1024 * 1024
 
 def resource_path(relative_path):
+    """Resolve bundled resources and mutable proxy files to their correct locations.
+
+    PyInstaller's one-file extraction directory is temporary. Proxy configuration,
+    host rules, and logs therefore live in the user's persistent data directory in
+    frozen builds, while bundled Tor archives remain read-only package resources.
+    """
+    normalized = os.fspath(relative_path).replace("\\", "/")
+    mutable_files = {"config.json", "blocked_hosts.json", "exclude_hosts.json", "tor_log.txt"}
+    if is_frozen() and normalized in mutable_files:
+        return user_data_path("proxy", os.path.basename(normalized))
+
     if getattr(sys, "_MEIPASS", False):
         base = sys._MEIPASS
     else:
