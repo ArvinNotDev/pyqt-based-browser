@@ -7,7 +7,9 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
+import weakref
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -25,7 +27,7 @@ from proxy.utils import resource_path
 
 logger = logging.getLogger(__name__)
 
-REQUEST_TIMEOUT = (10, 30)
+REQUEST_TIMEOUT = (3, 8)
 MAX_BUNDLE_BYTES = 512 * 1024 * 1024
 MAX_DOWNLOAD_SECONDS = 600
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
@@ -33,6 +35,59 @@ _BUNDLE_RE = re.compile(
     r"^tor-expert-bundle-(windows|linux)-(x86_64|i686)-([A-Za-z0-9][A-Za-z0-9.+-]{0,63})\.tar\.gz$"
 )
 _CHECKSUM_FILES = ("sha256sums-signed-build.txt", CHECKSUM_FILE, "sha256sums-unsigned-build.txt")
+
+
+class DownloadCancelledError(InterruptedError):
+    """Raised when a Tor bundle operation is cancelled during application shutdown."""
+
+
+class CancellationToken:
+    """Cooperative cancellation token that closes any HTTP responses in flight."""
+
+    def __init__(self):
+        self._event = threading.Event()
+        self._lock = threading.RLock()
+        self._responses = weakref.WeakSet()
+
+    def is_set(self) -> bool:
+        return self._event.is_set()
+
+    def check(self) -> None:
+        if self.is_set():
+            raise DownloadCancelledError("Tor bundle operation was cancelled.")
+
+    def register_response(self, response) -> None:
+        with self._lock:
+            already_cancelled = self._event.is_set()
+            if not already_cancelled:
+                self._responses.add(response)
+        if already_cancelled:
+            try:
+                response.close()
+            finally:
+                raise DownloadCancelledError("Tor bundle operation was cancelled.")
+
+    def set(self) -> None:
+        self._event.set()
+        with self._lock:
+            responses = tuple(self._responses)
+        for response in responses:
+            try:
+                response.close()
+            except Exception:
+                logger.debug("Could not close a cancelled Tor bundle response.", exc_info=True)
+
+
+def _check_cancelled(cancel_event=None) -> None:
+    if cancel_event is None:
+        return
+    check = getattr(cancel_event, "check", None)
+    if callable(check):
+        check()
+        return
+    is_set = getattr(cancel_event, "is_set", None)
+    if callable(is_set) and is_set():
+        raise DownloadCancelledError("Tor bundle operation was cancelled.")
 
 
 def bundle_path(filename):
@@ -74,29 +129,56 @@ def _official_base(base_url):
     return base_url.rstrip("/") + "/"
 
 
-def _get_response(url, *, stream=False):
-    response = requests.get(url, stream=stream, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    final = urlsplit(response.url)
-    if (
-        final.scheme.lower() != "https"
-        or final.hostname != "dist.torproject.org"
-        or final.port not in (None, 443)
-        or final.username is not None
-        or final.password is not None
-    ):
+def _get_response(url, *, stream=False, cancel_event=None, timeout=REQUEST_TIMEOUT):
+    _check_cancelled(cancel_event)
+    response = requests.get(url, stream=stream, timeout=timeout)
+    try:
+        register = getattr(cancel_event, "register_response", None)
+        if callable(register):
+            register(response)
+        else:
+            _check_cancelled(cancel_event)
+        response.raise_for_status()
+        final = urlsplit(response.url)
+        if (
+            final.scheme.lower() != "https"
+            or final.hostname != "dist.torproject.org"
+            or final.port not in (None, 443)
+            or final.username is not None
+            or final.password is not None
+        ):
+            raise ValueError("Tor bundle request redirected away from the official host")
+        return response
+    except Exception:
         response.close()
-        raise ValueError("Tor bundle request redirected away from the official host")
-    return response
+        raise
 
 
-def get_tor_versions(url=TOR_BUNDLE_BASE_URL):
+def _read_response_text(response, cancel_event=None, *, max_bytes=16 * 1024 * 1024):
+    """Read small directory/checksum responses in chunks so cancellation is observed."""
+    chunks = []
+    received = 0
+    for chunk in response.iter_content(chunk_size=16 * 1024):
+        _check_cancelled(cancel_event)
+        if not chunk:
+            continue
+        received += len(chunk)
+        if received > max_bytes:
+            raise ValueError("Tor bundle metadata response exceeds the configured size limit")
+        chunks.append(chunk)
+    _check_cancelled(cancel_event)
+    return b"".join(chunks).decode(response.encoding or "utf-8", errors="replace")
+
+
+def get_tor_versions(url=TOR_BUNDLE_BASE_URL, *, cancel_event=None):
     versions = []
     try:
+        _check_cancelled(cancel_event)
         url = _official_base(url)
-        with _get_response(url) as response:
-            soup = BeautifulSoup(response.text, "html.parser")
+        with _get_response(url, stream=True, cancel_event=cancel_event) as response:
+            soup = BeautifulSoup(_read_response_text(response, cancel_event), "html.parser")
         for link in soup.find_all("a"):
+            _check_cancelled(cancel_event)
             candidate = link.get("href", "").strip("/")
             if candidate and _VERSION_RE.fullmatch(candidate) and ".." not in candidate:
                 versions.append(candidate)
@@ -119,14 +201,18 @@ def _supported_bundle_name(name):
     return ARCHITECTURE == 32 and machine in ("i386", "i486", "i586", "i686", "x86")
 
 
-def get_bundle_links(version, base_url=TOR_BUNDLE_BASE_URL):
+def get_bundle_links(version, base_url=TOR_BUNDLE_BASE_URL, *, cancel_event=None):
     links = []
     try:
+        _check_cancelled(cancel_event)
         version = _validate_version(version)
         base_url = _official_base(base_url)
-        with _get_response(urljoin(base_url, version + "/")) as response:
-            soup = BeautifulSoup(response.text, "html.parser")
+        with _get_response(
+            urljoin(base_url, version + "/"), stream=True, cancel_event=cancel_event
+        ) as response:
+            soup = BeautifulSoup(_read_response_text(response, cancel_event), "html.parser")
         for link in soup.find_all("a"):
+            _check_cancelled(cancel_event)
             name = os.path.basename(link.get("href", ""))
             if _supported_bundle_name(name):
                 links.append(name)
@@ -135,11 +221,16 @@ def get_bundle_links(version, base_url=TOR_BUNDLE_BASE_URL):
     return sorted(set(links))
 
 
-def sha256_file(filename):
+def sha256_file(filename, *, cancel_event=None):
     digest = hashlib.sha256()
     with open(filename, "rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+        while True:
+            _check_cancelled(cancel_event)
+            chunk = stream.read(1024 * 1024)
+            if not chunk:
+                break
             digest.update(chunk)
+    _check_cancelled(cancel_event)
     return digest.hexdigest()
 
 
@@ -159,19 +250,21 @@ def _extract_expected_hash(text, filename):
     return None
 
 
-def _fetch_checksum(version, base_url=TOR_BUNDLE_BASE_URL, filename=None):
+def _fetch_checksum(version, base_url=TOR_BUNDLE_BASE_URL, filename=None, *, cancel_event=None):
     version = _validate_version(version)
     base_url = _official_base(base_url)
     last_error = None
     for checksum_file in _CHECKSUM_FILES:
+        _check_cancelled(cancel_event)
         url = urljoin(base_url, f"{version}/{checksum_file}")
         try:
-            with _get_response(url) as response:
-                text = response.text
+            with _get_response(url, stream=True, cancel_event=cancel_event) as response:
+                text = _read_response_text(response, cancel_event)
             if text.strip() and (filename is None or _extract_expected_hash(text, filename) is not None):
                 return text
         except requests.RequestException as exc:
             last_error = exc
+    _check_cancelled(cancel_event)
     if last_error:
         raise ValueError("Tor Project checksum file is unavailable") from last_error
     raise ValueError("Tor Project checksum file is empty")
@@ -211,15 +304,16 @@ def get_version_by_bundle(filename, with_slash=False):
     return version + "/" if with_slash else version
 
 
-def check_hash(filename, base_url=TOR_BUNDLE_BASE_URL, go_online=False):
+def check_hash(filename, base_url=TOR_BUNDLE_BASE_URL, go_online=False, *, cancel_event=None):
     try:
+        _check_cancelled(cancel_event)
         path = bundle_path(filename)
         name = os.path.basename(path)
         version = get_version_by_bundle(name)
         if not os.path.isfile(path):
             return False
         if go_online:
-            checksum_text = _fetch_checksum(version, base_url, name)
+            checksum_text = _fetch_checksum(version, base_url, name, cancel_event=cancel_event)
         else:
             cache_path = _checksum_cache_path(version)
             if not os.path.isfile(cache_path):
@@ -227,13 +321,16 @@ def check_hash(filename, base_url=TOR_BUNDLE_BASE_URL, go_online=False):
             with open(cache_path, "r", encoding="utf-8") as stream:
                 checksum_text = stream.read()
         expected = _extract_expected_hash(checksum_text, name)
-        return expected is not None and sha256_file(path) == expected
+        return expected is not None and sha256_file(path, cancel_event=cancel_event) == expected
+    except DownloadCancelledError:
+        raise
     except (OSError, ValueError, requests.RequestException) as exc:
         logger.warning("Tor bundle checksum verification failed (%s)", type(exc).__name__)
         return False
 
 
-def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL):
+def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL, *, cancel_event=None):
+    _check_cancelled(cancel_event)
     create_bundle_dir()
     name = os.path.basename(os.fspath(filename))
     if name != os.fspath(filename) or not _BUNDLE_RE.fullmatch(name):
@@ -245,11 +342,13 @@ def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL):
     path = bundle_path(name)
 
     if os.path.exists(path):
-        if check_hash(path, base_url=base_url, go_online=True):
+        if check_hash(path, base_url=base_url, go_online=True, cancel_event=cancel_event):
+            _check_cancelled(cancel_event)
             return path
         raise ValueError("Existing Tor bundle failed checksum verification; it was left untouched")
 
-    checksum_text = _fetch_checksum(version, base_url, name)
+    checksum_text = _fetch_checksum(version, base_url, name, cancel_event=cancel_event)
+    _check_cancelled(cancel_event)
     expected = _extract_expected_hash(checksum_text, name)
     if expected is None:
         raise ValueError("Tor Project checksum does not contain this bundle")
@@ -262,12 +361,13 @@ def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL):
             "wb", dir=os.path.dirname(path), prefix=".tor-download-", suffix=".tmp", delete=False
         ) as stream:
             temp_path = stream.name
-            with _get_response(url, stream=True) as response:
+            with _get_response(url, stream=True, cancel_event=cancel_event, timeout=(5, 10)) as response:
                 content_length = response.headers.get("Content-Length")
                 if content_length and int(content_length) > MAX_BUNDLE_BYTES:
                     raise ValueError("Tor bundle exceeds the configured size limit")
                 received = 0
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    _check_cancelled(cancel_event)
                     if time.monotonic() - started_at > MAX_DOWNLOAD_SECONDS:
                         raise TimeoutError("Tor bundle download exceeded its time limit")
                     if not chunk:
@@ -276,12 +376,15 @@ def download_file(filename, version, base_url=TOR_BUNDLE_BASE_URL):
                     if received > MAX_BUNDLE_BYTES:
                         raise ValueError("Tor bundle exceeds the configured size limit")
                     stream.write(chunk)
+            _check_cancelled(cancel_event)
             stream.flush()
             os.fsync(stream.fileno())
-        if sha256_file(temp_path) != expected:
+        if sha256_file(temp_path, cancel_event=cancel_event) != expected:
             raise ValueError("Downloaded Tor bundle checksum does not match Tor Project data")
+        _check_cancelled(cancel_event)
         os.replace(temp_path, path)
         temp_path = None
+        _check_cancelled(cancel_event)
         _save_checksum(checksum_text, version)
         logger.info("Downloaded and checksum-verified Tor bundle %s", name)
         return path

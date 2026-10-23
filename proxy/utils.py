@@ -9,6 +9,14 @@ import tempfile
 from app_paths import is_frozen, user_data_path
 
 logger = logging.getLogger(__name__)
+
+
+def _check_cancelled(cancel_event=None):
+    is_set = getattr(cancel_event, "is_set", None)
+    if callable(is_set) and is_set():
+        raise InterruptedError("Tor bundle extraction was cancelled.")
+
+
 MAX_TAR_MEMBERS = 10000
 MAX_UNPACKED_BUNDLE_BYTES = 1024 * 1024 * 1024
 
@@ -30,8 +38,9 @@ def resource_path(relative_path):
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
 
-def extract_tar_gz_file(filename, dst):
-    """Extract a Tor bundle after validating every archive member path."""
+def extract_tar_gz_file(filename, dst, *, cancel_event=None):
+    """Extract a Tor bundle safely, checking cancellation while validating/extracting."""
+    _check_cancelled(cancel_event)
     destination = os.path.abspath(dst)
     parent = os.path.dirname(destination)
     os.makedirs(parent, exist_ok=True)
@@ -42,12 +51,14 @@ def extract_tar_gz_file(filename, dst):
     try:
         with tarfile.open(filename, "r:gz") as tar:
             members = tar.getmembers()
+            _check_cancelled(cancel_event)
             if len(members) > MAX_TAR_MEMBERS:
                 raise ValueError("Archive contains too many members")
             if sum(max(0, member.size) for member in members) > MAX_UNPACKED_BUNDLE_BYTES:
                 raise ValueError("Archive exceeds the extraction size limit")
             seen = set()
             for member in members:
+                _check_cancelled(cancel_event)
                 name = member.name
                 drive, _ = ntpath.splitdrive(name)
                 if (not name or drive or name.startswith(("/", "\\")) or "\\" in name):
@@ -73,7 +84,10 @@ def extract_tar_gz_file(filename, dst):
                 if not (member.isdir() or member.isfile()):
                     raise ValueError("Archive contains a link or special file")
 
-            tar.extractall(path=staging, members=members)
+            for member in members:
+                _check_cancelled(cancel_event)
+                tar.extract(member, path=staging)
+        _check_cancelled(cancel_event)
         os.replace(staging, destination)
         return destination
     except Exception as e:
