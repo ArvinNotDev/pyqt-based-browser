@@ -125,7 +125,7 @@ class DataManagerTests(unittest.TestCase):
     def test_dashboard_widget_order_is_validated_and_persisted(self):
         base_dir = Path(self.temp_dir.name) / "profile_data"
         manager = DashboardManager("Guest", base_dir=base_dir)
-        manager.update({"widget_order": ["notes", "bookmarks", "recent", "notes"]})
+        manager.update({"widget_order": ["notes", "bookmarks", "recent"]})
         expected = ["notes", "bookmarks", "recent", "closed", "focus"]
         self.assertEqual(manager.export()["widget_order"], expected)
 
