@@ -105,8 +105,14 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     assert "ControlPort 127.0.0.1:9051" in config
     assert "DNSPort 127.0.0.1:9053" in config
     assert "UseBridges 1" in config
-    plugin_command = runner._torrc_quote(runner.lyrebird_path)
-    assert f"ClientTransportPlugin meek_lite,obfs4,snowflake,webtunnel exec {plugin_command}" in config
+    plugin_lines = [
+        line for line in config.splitlines()
+        if line.startswith("ClientTransportPlugin meek_lite,obfs4,snowflake,webtunnel exec ")
+    ]
+    assert len(plugin_lines) == 1
+    # TorManager quotes the transport path only when needed; asserting the
+    # real selected path covers both space-free POSIX paths and quoted Windows paths.
+    assert runner.lyrebird_path in plugin_lines[0]
 
 
 def test_invalid_port_is_not_reported_as_available():
