@@ -242,3 +242,78 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   body.light .glass { background: rgba(246,249,255,.96); }
 }
 
+/* Final layout guardrails: prevent the search controls and widget grid from
+   painting outside their cards when QtWebEngine's viewport is unusually narrow. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { min-width: 280px; min-height: 100%; }
+body { overflow-x: hidden; }
+.page {
+  width: min(calc(100% - 48px), 1180px);
+  max-width: 1180px;
+  min-width: 0;
+}
+.hero, .shortcuts-section, .lower-grid, .section-heading, .panel-heading {
+  min-width: 0;
+  max-width: 100%;
+}
+.search {
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  flex-shrink: 1;
+}
+.search input { flex-basis: 0; }
+.search select { text-overflow: ellipsis; }
+.lower-grid {
+  align-items: start;
+  grid-auto-rows: minmax(min-content, auto);
+}
+.panel, .widget, .section-heading > div, .panel-heading > div {
+  min-width: 0;
+  max-width: 100%;
+}
+.panel { overflow: hidden; }
+.link-list, .link-row, .shortcut, .shortcut-title, .shortcut-url {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.glass {
+  background-clip: padding-box;
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  backdrop-filter: blur(26px) saturate(160%);
+}
+.search.glass {
+  border-radius: 19px;
+  border-color: rgba(255,255,255,.37);
+  box-shadow:
+    0 22px 55px rgba(8,16,29,.22),
+    inset 0 1px 0 rgba(255,255,255,.38),
+    inset 0 -1px 0 rgba(255,255,255,.09);
+}
+.panel.glass {
+  border-radius: 19px;
+  box-shadow:
+    0 14px 36px rgba(8,16,29,.12),
+    inset 0 1px 0 rgba(255,255,255,.30),
+    inset 0 -1px 0 rgba(255,255,255,.06);
+}
+body.light .panel.glass {
+  border-color: rgba(255,255,255,.72);
+  box-shadow:
+    0 14px 36px rgba(30,50,70,.10),
+    inset 0 1px 0 rgba(255,255,255,.78),
+    inset 0 -1px 0 rgba(255,255,255,.30);
+}
+@media (max-width: 760px) {
+  .page { width: calc(100% - 32px); }
+  .lower-grid { grid-template-columns: minmax(0, 1fr); }
+  .search { border-radius: 15px; }
+}
+@media (max-width: 430px) {
+  .page { width: calc(100% - 24px); }
+  .search { gap: 4px; padding-left: 10px; }
+  .search select { flex: 0 1 62px; width: 62px; }
+  .clear-search, .search-submit { flex: 0 0 30px; width: 30px; }
+}
+
