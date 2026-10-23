@@ -228,7 +228,10 @@ def test_bookmark_bar_uses_compact_dropdown_and_activates_saved_bookmarks(qapp):
     assert emitted == ["https://example.com/0", "https://updated.example"]
 
     bar.set_bookmarks([])
-    assert bar.empty_label.isVisible()
+    assert any(
+        action.text() == "No bookmarks yet" and not action.isEnabled()
+        for action in bar._more_menu.actions()
+    )
 
 
 def test_download_dialog_maps_all_manager_states_and_actions(qapp, tmp_path):

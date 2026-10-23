@@ -277,6 +277,34 @@ QToolTip {
     border-radius: 7px;
     padding: 5px 8px;
 }
+
+
+/* Compact frosted browser chrome. */
+QToolBar#NavigationBar { border-radius: 12px; padding: 1px 8px; spacing: 4px; }
+QLineEdit#urlBar { border-radius: 10px; min-height: 26px; max-height: 30px; padding: 4px 12px; }
+QFrame#browserTabBar {
+    background: rgba(220,228,240,140);
+    border: 1px solid rgba(255,255,255,180);
+    border-bottom-color: rgba(195,207,225,205);
+    border-radius: 10px;
+}
+QFrame#browserTab {
+    color: #68778b; background: rgba(255,255,255,72);
+    border: 1px solid rgba(255,255,255,105); border-radius: 8px;
+}
+QFrame#browserTab:hover { color: #344761; background: rgba(255,255,255,175); border-color: rgba(190,207,232,165); }
+QFrame#browserTab[active="true"] {
+    color: #253a56; background: rgba(255,255,255,235);
+    border: 1px solid rgba(187,205,231,235); border-top: 2px solid #5c94e5;
+}
+QToolButton#bookmarkMenuButton {
+    color: #53647c; background: rgba(255,255,255,92);
+    border: 1px solid rgba(255,255,255,150); border-radius: 9px;
+    padding: 3px 8px; min-width: 76px; min-height: 26px;
+}
+QToolButton#bookmarkMenuButton:hover { background: rgba(255,255,255,205); border-color: rgba(192,210,237,190); }
+QMenu#bookmarksPopupMenu { padding: 6px; }
+QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
 """
 
 DARK_CHROME_POLISH = """
@@ -551,28 +579,34 @@ QToolTip {
     border-radius: 7px;
     padding: 5px 8px;
 }
+
+
+/* Compact obsidian-glass browser chrome. */
+QToolBar#NavigationBar { border-radius: 12px; padding: 1px 8px; spacing: 4px; }
+QLineEdit#urlBar { border-radius: 10px; min-height: 26px; max-height: 30px; padding: 4px 12px; }
+QFrame#browserTabBar {
+    background: rgba(18,23,31,150);
+    border: 1px solid rgba(255,255,255,32);
+    border-bottom-color: rgba(255,255,255,22);
+    border-radius: 10px;
+}
+QFrame#browserTab {
+    color: #a9b7c9; background: rgba(50,60,75,75);
+    border: 1px solid rgba(255,255,255,30); border-radius: 8px;
+}
+QFrame#browserTab:hover { color: #dbe5f2; background: rgba(67,80,101,155); border-color: rgba(147,169,201,75); }
+QFrame#browserTab[active="true"] {
+    color: #edf4ff; background: rgba(55,66,83,235);
+    border: 1px solid rgba(152,178,214,110); border-top: 2px solid #80b3fb;
+}
+QToolButton#bookmarkMenuButton {
+    color: #c7d4e6; background: rgba(50,60,75,145);
+    border: 1px solid rgba(255,255,255,38); border-radius: 9px;
+    padding: 3px 8px; min-width: 76px; min-height: 26px;
+}
+QToolButton#bookmarkMenuButton:hover { color: #edf4ff; background: rgba(75,94,123,205); border-color: rgba(130,175,244,110); }
+QMenu#bookmarksPopupMenu { padding: 6px; }
+QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
 """
 
 __all__ = ["LIGHT_CHROME_POLISH", "DARK_CHROME_POLISH"]
-
-
-/* Compact toolbar bookmarks popover, instead of a second full-width strip. */
-QToolButton#bookmarkMenuButton {
-    color: #53647c;
-    background: rgba(255,255,255,92);
-    border: 1px solid rgba(255,255,255,120);
-    border-radius: 9px;
-    padding: 3px 8px;
-    min-width: 76px;
-    min-height: 26px;
-}
-QToolButton#bookmarkMenuButton:hover {
-    background: rgba(255,255,255,205);
-    border-color: rgba(192,210,237,190);
-}
-QToolButton#bookmarkMenuButton:pressed { background: rgba(207,226,252,210); }
-QMenu#bookmarksPopupMenu { padding: 6px; }
-QMenu#bookmarksPopupMenu::item { padding: 8px 28px 8px 12px; border-radius: 7px; }
-
-QToolButton#bookmarkMenuButton { color: #c7d4e6; background: rgba(50,60,75,145); border-color: rgba(255,255,255,32); }
-QToolButton#bookmarkMenuButton:hover { color: #edf4ff; background: rgba(75,94,123,205); border-color: rgba(130,175,244,110); }
