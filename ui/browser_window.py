@@ -598,6 +598,8 @@ class BrowserWindow(QMainWindow):
         shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self.navbar)
         if self.bookmarks_bar is not None:
+            # The bookmark strip belongs to the start page, not every website.
+            self.bookmarks_bar.hide()
             shell_layout.addWidget(self.bookmarks_bar)
         shell_layout.addWidget(self.tabbar)
         shell_layout.addWidget(self.progress_bar)
@@ -1186,6 +1188,16 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage("Could not refresh bookmarks.", 3000)
         self._sync_dashboard_tabs()
 
+    def _update_bookmarks_bar_visibility(self, value=None) -> None:
+        """Show the compact bookmark strip only while the active tab is the dashboard."""
+        bar = getattr(self, "bookmarks_bar", None)
+        if bar is None:
+            return
+        if value is None:
+            view = self.current_view() if hasattr(self, "current_view") else None
+            value = view.url() if view is not None else None
+        bar.setVisible(self._is_dashboard_address(value))
+
     def _show_bookmark_context_menu(self, bookmark: dict, global_pos: QPoint) -> None:
         """Show bookmark actions for both visible and overflow entries."""
         if self.bookmarks_manager is None:
@@ -1737,8 +1749,8 @@ class BrowserWindow(QMainWindow):
             elif action == "update_preferences":
                 allowed = {
                     "overlay", "blur", "glass", "accent", "clock_24h",
-                    "show_seconds", "animations", "density", "widgets", "focus_minutes",
-                    "break_minutes",
+                    "show_seconds", "animations", "density", "widgets", "widget_order",
+                    "focus_minutes", "break_minutes",
                 }
                 manager.update({key: value for key, value in payload.items() if key in allowed})
             elif action == "set_wallpaper":
@@ -1906,6 +1918,7 @@ class BrowserWindow(QMainWindow):
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
+        self._update_bookmarks_bar_visibility(view.url())
         self.navbar.url_bar.setText(view.url().toString())
         self._sync_site_connection_action(view.url().toString())
         if self.bookmarks_manager is not None:
@@ -1938,6 +1951,7 @@ class BrowserWindow(QMainWindow):
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():
+            self._update_bookmarks_bar_visibility(url)
             self.navbar.url_bar.setText(url.toString())
             self._sync_site_connection_action(url.toString())
             if self.bookmarks_manager is not None:
