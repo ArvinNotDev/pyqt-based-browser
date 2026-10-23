@@ -39,6 +39,27 @@ def test_dashboard_homepage_is_internal_and_not_sent_to_search():
     assert not BrowserWindow._is_dashboard_address("arma://other/")
 
 
+def test_closing_the_last_tab_opens_a_fresh_dashboard_tab():
+    view = Mock()
+    view.url.return_value = QUrl("about:blank")
+    placeholder = Mock()
+    browser = SimpleNamespace(
+        views=[view],
+        current_index=0,
+        tabbar=SimpleNamespace(remove_tab=Mock()),
+        _placeholders={view: placeholder},
+        view_layout=SimpleNamespace(removeWidget=Mock()),
+        _snapshots={},
+        _recorded_history_urls={},
+        new_tab=Mock(),
+    )
+
+    BrowserWindow.request_close_tab(browser, 0)
+
+    assert browser.views == []
+    browser.new_tab.assert_called_once_with(DASHBOARD_URL)
+
+
 def test_recently_closed_tabs_are_scoped_to_profile_and_private_session():
     browser = SimpleNamespace(
         selected_profile="Guest",
@@ -81,6 +102,31 @@ def test_private_dashboard_uses_memory_notes_and_hides_history():
     assert state["notes"] == "private session note"
     assert state["quick_notes"] == ["temporary note"]
     assert state["recent"] == []
+
+
+def test_dashboard_recent_pages_selects_only_the_six_most_recent():
+    browser = SimpleNamespace(
+        selected_profile="Guest",
+        settings=SimpleNamespace(
+            private_mode=False,
+            save_history=True,
+            dark_mode=True,
+            default_search_engine="https://search.example/?q=",
+        ),
+        dashboard_manager=SimpleNamespace(export=lambda: {}),
+        bookmarks_manager=None,
+        history=SimpleNamespace(history={
+            f"https://page-{day}.example/": [{"date": f"2026-10-{day:02}", "time": "12:00"}]
+            for day in range(1, 13)
+        }),
+        _closed_tabs_for_current_session=lambda: [],
+    )
+
+    recent = BrowserWindow._dashboard_state(browser)["recent"]
+
+    assert [item["url"] for item in recent] == [
+        f"https://page-{day}.example/" for day in range(12, 6, -1)
+    ]
 
 
 def test_dashboard_actions_are_rejected_from_external_pages():
