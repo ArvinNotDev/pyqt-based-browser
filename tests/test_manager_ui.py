@@ -4,7 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
@@ -40,6 +40,9 @@ def test_navigation_bar_stays_fixed_when_entering_long_or_rtl_search(qapp):
     assert navbar.url_bar.layoutDirection() == Qt.LeftToRight
     assert navbar.url_bar.geometry() == starting_geometry
     assert navbar.menu_button.text() == "⋮"
+    assert navbar.menu_button.toolButtonStyle() == Qt.ToolButtonIconOnly
+    assert not navbar.menu_button.icon().isNull()
+    assert navbar.menu_button.size() == QSize(36, 32)
     assert navbar.menu_button.menu() is None
     assert navbar.menu_button.geometry().right() < navbar.width()
     navbar.close()
