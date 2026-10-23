@@ -276,6 +276,41 @@ QFrame#downloadsPanel, QFrame#downloadCard, QFrame#settingsCard { background-col
 QWidget#BookmarksBar { background-color: rgba(247,249,253,222); }
 QLineEdit#urlBar { background-color: rgba(255,255,255,240); border-color: rgba(207,218,232,235); }
 QToolTip { background-color: rgba(255,255,255,248); border-color: rgba(195,207,224,230); }
+
+/* Browser chrome: balanced spacing, crisp focus, and restrained glass highlights. */
+QToolBar#NavigationBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,238), stop:1 rgba(236,242,250,232));
+    border: 1px solid rgba(255,255,255,238);
+    border-bottom-color: rgba(204,216,232,220);
+    border-radius: 14px;
+    spacing: 4px;
+    padding: 2px 8px;
+}
+QToolBar::separator { background: rgba(133,150,173,105); margin: 8px 4px; }
+QToolButton#navigationToolButton, QToolButton#utilityToolButton {
+    border-radius: 10px;
+    padding: 4px 8px;
+    min-width: 28px;
+    min-height: 28px;
+}
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover {
+    background-color: rgba(218,229,245,200);
+    border-color: rgba(184,204,232,190);
+}
+QLineEdit#urlBar {
+    background-color: rgba(255,255,255,248);
+    border: 1px solid rgba(201,214,233,228);
+    border-radius: 17px;
+    padding: 5px 14px;
+    min-height: 28px;
+    selection-background-color: #cfe0fb;
+}
+QLineEdit#urlBar:focus {
+    background-color: rgba(255,255,255,255);
+    border: 1px solid #3979d6;
+}
+QWidget#browserTabBar { border-radius: 14px; }
+QWidget#browserContentCard { border-radius: 14px; }
 """
 
 
@@ -553,4 +588,39 @@ QFrame#downloadsPanel, QFrame#downloadCard, QFrame#settingsCard { background-col
 QWidget#BookmarksBar { background-color: rgba(27,31,38,232); }
 QLineEdit#urlBar { background-color: rgba(43,49,59,248); border-color: rgba(75,87,104,238); }
 QToolTip { background-color: rgba(37,43,52,250); border-color: rgba(90,104,124,230); }
+
+/* Browser chrome: balanced spacing, crisp focus, and restrained glass highlights. */
+QToolBar#NavigationBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(45,52,63,244), stop:1 rgba(28,33,42,240));
+    border: 1px solid rgba(255,255,255,38);
+    border-bottom-color: rgba(255,255,255,25);
+    border-radius: 14px;
+    spacing: 4px;
+    padding: 2px 8px;
+}
+QToolBar::separator { background: rgba(151,168,191,85); margin: 8px 4px; }
+QToolButton#navigationToolButton, QToolButton#utilityToolButton {
+    border-radius: 10px;
+    padding: 4px 8px;
+    min-width: 28px;
+    min-height: 28px;
+}
+QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover {
+    background-color: rgba(75,91,113,158);
+    border-color: rgba(138,168,207,85);
+}
+QLineEdit#urlBar {
+    background-color: rgba(18,23,31,248);
+    border: 1px solid rgba(90,106,128,220);
+    border-radius: 17px;
+    padding: 5px 14px;
+    min-height: 28px;
+    selection-background-color: #354f74;
+}
+QLineEdit#urlBar:focus {
+    background-color: rgba(22,29,39,255);
+    border: 1px solid #82aff4;
+}
+QWidget#browserTabBar { border-radius: 14px; }
+QWidget#browserContentCard { border-radius: 14px; }
 """
