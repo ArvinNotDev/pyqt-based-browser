@@ -4,6 +4,7 @@
   let state = window.armaBootstrap || {};
   let editingIndex = -1;
   let draggedIndex = -1;
+  let draggedWidget = null;
   let notesTimer = 0;
   let focusTimer = 0;
   let focusRemaining = (Number(state.focus_minutes) || 25) * 60;
@@ -52,6 +53,74 @@
       const element = byId(`${name}-widget`);
       if (element) element.hidden = Boolean(state.widgets && state.widgets[name] === false);
     }
+    applyWidgetOrder();
+  }
+
+  function applyWidgetOrder() {
+    const host = byId('lower-grid');
+    if (!host) return;
+    const defaultOrder = ['bookmarks', 'recent', 'closed', 'notes', 'focus'];
+    const savedOrder = Array.isArray(state.widget_order) ? state.widget_order : defaultOrder;
+    const seen = new Set();
+    const order = [
+      ...savedOrder.filter(name => defaultOrder.includes(name) && !seen.has(name) && seen.add(name)),
+      ...defaultOrder.filter(name => !seen.has(name))
+    ];
+    order.forEach(name => {
+      const widget = byId(`${name}-widget`);
+      if (widget) host.appendChild(widget);
+    });
+  }
+
+  function installWidgetReordering() {
+    const host = byId('lower-grid');
+    if (!host) return;
+    host.querySelectorAll('.widget').forEach(widget => {
+      const handle = widget.querySelector('.panel-heading');
+      if (!handle) return;
+      handle.classList.add('widget-drag-handle');
+      handle.draggable = true;
+      handle.title = 'Drag to rearrange this card';
+      handle.addEventListener('dragstart', event => {
+        if (event.target.closest('button, a, input, textarea, select')) {
+          event.preventDefault();
+          return;
+        }
+        draggedWidget = widget.id;
+        widget.classList.add('dragging');
+        if (event.dataTransfer) {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', widget.id);
+        }
+      });
+      handle.addEventListener('dragend', () => {
+        draggedWidget = null;
+        host.querySelectorAll('.widget').forEach(item => item.classList.remove('dragging', 'drag-over'));
+      });
+      widget.addEventListener('dragover', event => {
+        if (!draggedWidget || draggedWidget === widget.id) return;
+        event.preventDefault();
+        if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+        widget.classList.add('drag-over');
+      });
+      widget.addEventListener('dragleave', event => {
+        if (!widget.contains(event.relatedTarget)) widget.classList.remove('drag-over');
+      });
+      widget.addEventListener('drop', event => {
+        event.preventDefault();
+        widget.classList.remove('drag-over');
+        if (!draggedWidget || draggedWidget === widget.id) return;
+        const source = byId(draggedWidget);
+        if (!source || !host.contains(source)) return;
+        const rect = widget.getBoundingClientRect();
+        const after = event.clientY > rect.top + rect.height / 2;
+        host.insertBefore(source, after ? widget.nextElementSibling : widget);
+        const order = [...host.querySelectorAll('.widget')].map(item => item.id.replace(/-widget$/, ''));
+        state.widget_order = order;
+        send('update_preferences', { widget_order: order });
+        showToast('Dashboard layout saved.');
+      });
+    });
   }
 
   function setGreetingAndTime() {
@@ -390,5 +459,6 @@
     if (activeNotes) byId('notes').value = note;
   };
   window.showDashboardToast = showToast;
+  installWidgetReordering();
   render();
 })();
