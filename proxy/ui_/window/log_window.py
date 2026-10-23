@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 import re
 
 import qtawesome as qta
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QTextCharFormat, QTextCursor, QTextFormat
 
 
@@ -21,6 +22,8 @@ class LogWindow(QWidget):
         super().__init__(parent)
         self.parent_ = parent
         self.setObjectName("logsDrawer")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAutoFillBackground(True)
         self.setMinimumWidth(0)
         self.setMinimumHeight(0)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -61,6 +64,8 @@ class LogWindow(QWidget):
 
         self.text_edit = QTextEdit(self)
         self.text_edit.setObjectName("logText")
+        self.text_edit.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.text_edit.setAutoFillBackground(True)
         self.text_edit.setReadOnly(True)
         self.text_edit.document().setMaximumBlockCount(2000)
         self.text_edit.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
@@ -79,10 +84,10 @@ class LogWindow(QWidget):
         muted = "#9ba7b5" if dark else "#657386"
         editor = "#171c23" if dark else "#ffffff"
         self.setStyleSheet(f"""
-            QWidget#logsDrawer {{ background: {surface}; border-right: 1px solid {border}; }}
+            QWidget#logsDrawer {{ background-color: {surface}; border: none; border-right: 1px solid {border}; }}
             QLabel#logTitle {{ background: transparent; color: {text}; font-size: 11px; font-weight: 800; letter-spacing: 1px; }}
             QLabel#logSubtitle {{ background: transparent; color: {muted}; font-size: 10px; }}
-            QTextEdit#logText {{ background: {editor}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 8px; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 10px; }}
+            QTextEdit#logText {{ background-color: {editor}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 8px; font-family: Consolas, 'Cascadia Mono', monospace; font-size: 10px; selection-background-color: {"#375c8a" if dark else "#cde1f7"}; }}
             QPushButton#logIconButton {{ background: transparent; border: 1px solid {border}; border-radius: 7px; }}
             QPushButton#logIconButton:hover {{ background: rgba(71, 163, 242, 0.14); border-color: #47a3f2; }}
         """)

@@ -103,6 +103,44 @@ class _DownloadsOverlayDismissArea(QFrame):
         event.accept()
 
 
+class _ProxyPanelHost(QFrame):
+    """Opaque, resizable proxy pane aligned with the browser tabs and viewport."""
+
+    visibilityChanged = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("proxyDock")
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(420)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self._panel_layout = QVBoxLayout(self)
+        self._panel_layout.setContentsMargins(0, 0, 0, 0)
+        self._panel_layout.setSpacing(0)
+        self._hosted_widget = None
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def setWidget(self, widget):
+        if self._hosted_widget is widget:
+            return
+        if self._hosted_widget is not None:
+            self._panel_layout.removeWidget(self._hosted_widget)
+            self._hosted_widget.setParent(None)
+        self._hosted_widget = widget
+        if widget is not None:
+            widget.setParent(self)
+            self._panel_layout.addWidget(widget)
+
+    def setVisible(self, visible):
+        visible = bool(visible)
+        was_hidden = self.isHidden()
+        super().setVisible(visible)
+        # Only explicit pane toggles emit this signal; minimization/hiding the
+        # whole browser window must not silently change the saved preference.
+        if was_hidden == visible:
+            self.visibilityChanged.emit(visible)
+
+
 class TabButton(QFrame):
     clicked = Signal()
     closed = Signal()
@@ -653,9 +691,19 @@ class BrowserWindow(QMainWindow):
         self.title_bar = CustomTitleBar(self)
         shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self.navbar)
-        shell_layout.addWidget(self.tabbar)
-        shell_layout.addWidget(self.progress_bar)
-        self.content_row = QWidget(root)
+
+        # Keep tabs and the website viewport together in the left workspace.
+        # The proxy is a sibling of this workspace, not a dock around the
+        # outside of the custom browser shell.
+        self.browser_workspace = QWidget(shell)
+        self.browser_workspace.setObjectName("browserWorkspace")
+        browser_workspace_layout = QVBoxLayout(self.browser_workspace)
+        browser_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        browser_workspace_layout.setSpacing(0)
+        browser_workspace_layout.addWidget(self.tabbar)
+        browser_workspace_layout.addWidget(self.progress_bar)
+
+        self.content_row = QWidget(self.browser_workspace)
         content_layout = QHBoxLayout(self.content_row)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
@@ -689,7 +737,33 @@ class BrowserWindow(QMainWindow):
         self._downloads_splitter_animating = False
         self._downloads_splitter_animation = None
         content_layout.addWidget(self.downloads_splitter, 1)
-        shell_layout.addWidget(self.content_row, 1)
+        browser_workspace_layout.addWidget(self.content_row, 1)
+
+        self.browser_proxy_splitter = QSplitter(Qt.Orientation.Horizontal, shell)
+        self.browser_proxy_splitter.setObjectName("browserProxySplitter")
+        self.browser_proxy_splitter.setChildrenCollapsible(False)
+        self.browser_proxy_splitter.setHandleWidth(7)
+        self.browser_proxy_splitter.setStretchFactor(0, 1)
+        self.browser_proxy_splitter.setStretchFactor(1, 0)
+        self.browser_proxy_splitter.addWidget(self.browser_workspace)
+
+        self.dock = _ProxyPanelHost(self.browser_proxy_splitter)
+        self.dock.setMinimumWidth(270)
+        self.dock.setMaximumWidth(420)
+        self._proxy_placeholder = None
+        if self.proxy_panel is not None:
+            self.dock.setWidget(self.proxy_panel)
+        else:
+            self._proxy_placeholder = QWidget(self.dock)
+            self._proxy_placeholder.setObjectName("deferredProxyPlaceholder")
+            self.dock.setWidget(self._proxy_placeholder)
+        self.browser_proxy_splitter.addWidget(self.dock)
+        self.browser_proxy_splitter.setSizes([
+            max(1, self.settings.window_width - 340), 330
+        ])
+        self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
+        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+        shell_layout.addWidget(self.browser_proxy_splitter, 1)
         layout.addWidget(shell, 1)
         self.setCentralWidget(root)
         QTimer.singleShot(0, self._collapse_downloads_splitter)
@@ -751,28 +825,11 @@ class BrowserWindow(QMainWindow):
             QTimer.singleShot(100, self.proxy_panel.proxyWidget._toggle)
         self._last_progress_ts = 0
         
-        self.dock = QDockWidget("Proxy", self)
-        self.dock.setObjectName("proxyDock")
-        self.dock.setMinimumWidth(300)
-        self.dock.setMaximumWidth(400)
-        self._proxy_placeholder = None
-        if self.proxy_panel is not None:
-            self.dock.setWidget(self.proxy_panel)
-        else:
-            # A tiny placeholder avoids constructing the proxy UI on every normal launch.
-            self._proxy_placeholder = QWidget(self.dock)
-            self._proxy_placeholder.setObjectName("deferredProxyPlaceholder")
-            self.dock.setWidget(self._proxy_placeholder)
-        self.dock.setFloating(False)
-        self.dock.setFeatures(QDockWidget.DockWidgetClosable)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        # This panel is controlled by the globe button; it is not a closable
-        # secondary window. The browser remains in charge of its visibility.
-        self.dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
         if self.settings.proxy_panel_visible:
             self._ensure_proxy_panel()
-        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+            self.browser_proxy_splitter.setSizes([
+                max(1, self.width() - 350), 330
+            ])
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
@@ -876,12 +933,18 @@ class BrowserWindow(QMainWindow):
         self._proxy_placeholder = None
         if placeholder is not None:
             placeholder.deleteLater()
+        panel.apply_theme("dark" if bool(self.settings.dark_mode) else "light")
         return panel
 
     def show_proxy(self):
-        if not self.dock.isVisible():
+        visible = not self.dock.isVisible()
+        if visible:
             self._ensure_proxy_panel()
+            self.dock.setMinimumWidth(270)
             self.dock.setVisible(True)
+            total_width = max(1, self.browser_proxy_splitter.width())
+            pane_width = min(360, max(290, int(total_width * 0.32)))
+            self.browser_proxy_splitter.setSizes([max(1, total_width - pane_width), pane_width])
         else:
             self.dock.setVisible(False)
         if hasattr(self, "navbar"):

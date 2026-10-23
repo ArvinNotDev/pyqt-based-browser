@@ -11,6 +11,9 @@ class PulseButton(QPushButton):
         self.setFixedSize(264, 264)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
+        self.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0; margin: 0; }")
         self._state = "disconnected"
         self.connected = False
         self.hovered = False
@@ -94,6 +97,13 @@ class PulseButton(QPushButton):
             self.setFixedSize(target, target)
             self.update()
 
+    def stop_animations(self):
+        """Stop all animations before the owning Tor panel shuts down."""
+        for name in ("outer_anim", "halo_anim", "_connected_feedback_timer"):
+            item = getattr(self, name, None)
+            if item is not None:
+                item.stop()
+
     def set_disconnecting(self):
         self._set_state("stopping", "DISCONNECTING…")
         self.setToolTip("Stopping Tor and the local proxy.")
@@ -158,7 +168,9 @@ class PulseButton(QPushButton):
         painter.setPen(QColor("#ffffff"))
         font = painter.font()
         font.setBold(True)
-        font.setPointSize(max(10, int((13 if self._state in {"connecting", "stopping"} else 14) * scale)))
+        logical_size = 13 if self._state in {"connecting", "stopping"} else 14
+        # Explicitly supply a positive point size (never inherit a native -1).
+        font.setPointSize(max(10, int(round(logical_size * scale))))
         painter.setFont(font)
         painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
         painter.end()

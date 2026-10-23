@@ -227,7 +227,9 @@ class ProxyWindow(QWidget):
     def stop_timers(self):
         self.timer.stop()
         self.timer_data_usage.stop()
-        self.connect_btn._idle_timer.stop()
+        stop_animations = getattr(self.connect_btn, "stop_animations", None)
+        if callable(stop_animations):
+            stop_animations()
 
     
     def change_data_usage(self):
