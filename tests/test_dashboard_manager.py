@@ -143,9 +143,11 @@ def test_malformed_saved_widget_sizes_fall_back_without_discarding_other_prefere
     base = tmp_path / "profiles"
     manager = DashboardManager("Guest", base_dir=base)
     manager.update({"notes": "keep this", "widget_sizes": {"notes": "wide"}})
-    payload = json.loads(manager.file_path.read_text(encoding="utf-8"))
+    with open(manager.file_path, "r", encoding="utf-8") as stream:
+        payload = json.load(stream)
     payload["widget_sizes"]["notes"] = ["invalid"]
-    manager.file_path.write_text(json.dumps(payload), encoding="utf-8")
+    with open(manager.file_path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream)
 
     loaded = DashboardManager("Guest", base_dir=base)
     assert loaded.data["notes"] == "keep this"
