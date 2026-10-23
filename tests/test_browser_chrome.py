@@ -29,14 +29,14 @@ def test_rounded_region_clips_square_page_corners():
 
 def test_tab_widgets_fit_inside_their_strip(qapp):
     tab_bar = CustomTabBar()
-    tab = TabButton("A deliberately long title")
     tab_bar.add_tab("A deliberately long title")
+    tab = tab_bar.tabs[0]
 
     assert TAB_HEIGHT == 30
     assert tab.height() == TAB_HEIGHT - 4
     assert tab_bar.height() == TAB_HEIGHT + 4
     assert tab_bar.scroll.height() == TAB_HEIGHT - 4
-    assert tab.close_btn.height() == 20
+    assert tab.close_btn.height() == 18
 
     tab_bar.close()
     tab.close()

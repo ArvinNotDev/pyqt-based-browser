@@ -814,3 +814,29 @@ QToolButton#windowCloseButton:hover {
     background: #d94e58; border-color: #d94e58;
 }
 """
+
+/* Ensure Qt's stylesheet box model does not expand controls beyond fixed geometry. */
+LIGHT_CHROME_POLISH += """
+QPushButton#tabScrollButton, QToolButton#tabListButton {
+    min-height: 22px; max-height: 22px;
+    min-width: 22px; max-width: 22px;
+    padding: 0; border-radius: 7px;
+}
+QPushButton#tabPlusButton {
+    min-height: 20px; max-height: 20px;
+    min-width: 22px; max-width: 22px;
+    padding: 0; border-radius: 8px;
+}
+"""
+DARK_CHROME_POLISH += """
+QPushButton#tabScrollButton, QToolButton#tabListButton {
+    min-height: 22px; max-height: 22px;
+    min-width: 22px; max-width: 22px;
+    padding: 0; border-radius: 7px;
+}
+QPushButton#tabPlusButton {
+    min-height: 20px; max-height: 20px;
+    min-width: 22px; max-width: 22px;
+    padding: 0; border-radius: 8px;
+}
+"""
