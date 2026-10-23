@@ -208,7 +208,8 @@ class NavigationBar(QToolBar):
         self.site_connection_action = QAction("Connect directly for this site", self)
         self.site_connection_action.setCheckable(True)
         self.site_connection_action.setToolTip(
-            "Bypass Tor for the current site when Tor routing is enabled, then reload it"
+            "Bypass ARMA's Tor route for this host and reload without cache. "
+            "This does not disable an external system VPN."
         )
         self.site_connection_action.toggled.connect(self.site_connection_toggled.emit)
         self.browser_menu.addAction(self.site_connection_action)
