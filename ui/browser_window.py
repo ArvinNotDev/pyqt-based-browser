@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainter, QColor, QCursor
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainter, QPainterPath, QColor, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
