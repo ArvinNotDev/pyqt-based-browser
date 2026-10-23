@@ -413,3 +413,13 @@ def test_external_browser_fallback_opens_only_http_and_https_pages():
     open_url.assert_not_called()
     status_bar.showMessage.assert_called_once_with("Only web pages can be opened externally.", 3000)
 
+def test_audio_decode_diagnostics_are_recognized_without_matching_unrelated_console_errors():
+    assert BrowserPage._is_audio_decode_error(
+        'Loading FSB failed for audio clip "15 EngA_08282".'
+    )
+    assert BrowserPage._is_audio_decode_error(
+        "Uncaught (in promise) EncodingError: Unable to decode audio data"
+    )
+    assert not BrowserPage._is_audio_decode_error("WebGL context restored")
+    assert not BrowserPage._is_audio_decode_error("Uncaught ReferenceError: game is not defined")
+
