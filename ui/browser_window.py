@@ -44,6 +44,8 @@ from .dashboard.internal_page import (
     DashboardSchemeHandler,
     register_dashboard_scheme,
 )
+# Custom URL schemes must be registered before QApplication/QWebEngine profiles exist.
+register_dashboard_scheme()
 from .internal_pages import render_internal_page
 from managers.history_manager import History
 from managers.dashboard_manager import DashboardManager
@@ -3308,9 +3310,14 @@ class BrowserWindow(QMainWindow):
         if self.bookmarks_manager is not None:
             self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(view.url().toString()))
         self._update_navigation_actions(view)
-        self.title_bar.set_page_title(view.title() or view.url().host() or "New tab")
+        title_bar = getattr(self, "title_bar", None)
+        set_page_title = getattr(title_bar, "set_page_title", None)
         page_title = view.title()
-        self.setWindowTitle(f"{page_title} — ARMA Browser" if page_title else "ARMA Browser")
+        if callable(set_page_title):
+            set_page_title(page_title or view.url().host() or "New tab")
+        set_window_title = getattr(self, "setWindowTitle", None)
+        if callable(set_window_title):
+            set_window_title(f"{page_title} — ARMA Browser" if page_title else "ARMA Browser")
         self.tabbar.set_active(index)
 
     def _set_tab_visibility(self):
@@ -3351,14 +3358,22 @@ class BrowserWindow(QMainWindow):
         self.tabbar.set_title(self.views.index(view), title)
         if view is self.current_view():
             window_title = f"{title} — ARMA Browser" if title else "ARMA Browser"
-            self.setWindowTitle(window_title)
-            self.title_bar.set_page_title(title or view.url().host() or "New tab")
+            set_window_title = getattr(self, "setWindowTitle", None)
+            if callable(set_window_title):
+                set_window_title(window_title)
+            title_bar = getattr(self, "title_bar", None)
+            set_page_title = getattr(title_bar, "set_page_title", None)
+            if callable(set_page_title):
+                set_page_title(title or view.url().host() or "New tab")
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():
             self._update_bookmarks_bar_visibility(url)
             if not view.title():
-                self.title_bar.set_page_title(url.host() or "New tab")
+                title_bar = getattr(self, "title_bar", None)
+                set_page_title = getattr(title_bar, "set_page_title", None)
+                if callable(set_page_title):
+                    set_page_title(url.host() or "New tab")
             self.navbar.url_bar.setText(url.toString())
             self._sync_site_connection_action(url.toString())
             if self.bookmarks_manager is not None:
