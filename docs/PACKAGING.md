@@ -1,40 +1,52 @@
 # Packaging and release process
 
-## Supported deliverable
+## Windows one-file beta
 
-The reproducible deliverable is a source ZIP built from a version tag on Windows. It contains the tracked application source, assets, pinned runtime requirements, documentation, and the tracked Windows and Linux x64 Tor archives. The customized `proxy/exclude_hosts.json` is marked `export-ignore` because it contains a domain exclusion list rather than a distribution default; the app starts with an empty exclusion list when that file is absent. The packaging script checks for required assets and rejects settings, proxy state, histories, or profile data in the ZIP. Install it into a writable directory with Python 3.10–3.13 and the commands in the README. The release workflow attaches the ZIP and a SHA-256 checksum file to the GitHub release.
+The Windows x64 beta is built on a clean `windows-latest` GitHub Actions runner from the exact commit being released. The build uses the pinned runtime dependencies and PyInstaller 6.22.3. The release contains one self-contained `ARMA-Browser.exe` plus a SHA-256 sidecar; it does not require users to install Python separately.
 
-To build the same artifact locally from a fetched tag:
+The build script is:
+
+```powershell
+./scripts/build-windows-onefile.ps1
+```
+
+The script packages the application icons, dashboard assets, the Windows Tor expert-bundle archive, PySide6/Qt WebEngine, and the runtime dependencies. It checks the output exists and is plausible in size, then writes `dist/ARMA-Browser.exe.sha256`.
+
+The one-file bootloader extracts bundled resources to a temporary directory. Frozen builds therefore store mutable settings, profiles, history, and proxy configuration under `%LOCALAPPDATA%\\ARMA Browser`, rather than attempting to persist data beside the executable or inside the temporary extraction directory. Static icons and dashboard files are resolved from the bundled resource root.
+
+The beta workflow launches the built EXE on the Windows runner and verifies that it remains running long enough to initialize its profile data. This catches basic missing-runtime or immediate-startup failures. It is not a substitute for a manual clean-machine check of Qt WebEngine rendering, downloads, or live Tor connectivity.
+
+## Beta limitations
+
+- The EXE is currently unsigned. Windows SmartScreen or antivirus software may show an origin or reputation warning.
+- The first launch may take longer while the single-file bundle extracts its runtime.
+- This release targets Windows x64 only. It does not claim support for Windows ARM64, Linux, or macOS binaries.
+- Live Tor bootstrap, bridges, and network routes are not exercised by the automated packaging smoke check. The included Windows Tor archive is provided for the optional proxy/Tor workflow, but live connectivity depends on the user's network and configuration.
+- Qt WebEngine media support depends on the codecs available in the bundled Qt build and the media used by a website.
+- There is no automatic update mechanism yet.
+
+## Source releases
+
+The source-release workflow can create a versioned source ZIP and SHA-256 sidecar from a Git tag. To build the same archive locally from a fetched tag:
 
 ```powershell
 ./scripts/package-source.ps1 -Tag v1.2.3
 ```
 
-The script requires Git and the requested tag to exist locally. `git archive` packages the committed tag, not uncommitted working-tree changes. Compare the sidecar hash with `Get-FileHash -Algorithm SHA256` after downloading.
-
-## Why there is no executable package
-
-PyInstaller was considered, but a reliable frozen layout cannot be confirmed without changing application-owned path handling and then smoke-testing the result on a clean Windows machine:
-
-- `proxy.utils.resource_path()` uses the `proxy/` source directory in source mode and the PyInstaller extraction root in frozen mode.
-- Proxy configuration and cached Tor checksum files are written under that resource root, which may be inside the packaged application.
-- Tor bundle discovery uses the resource root while extraction uses the process working directory and the relative `bundles/` path.
-- Browser profiles and some proxy state use relative working-directory paths.
-- Qt WebEngine needs its helper process and resources packaged and exercised with the actual pinned PySide6 wheel.
-
-These differences can make writes fail in protected install locations or make downloaded/extracted Tor files invisible to the app. The current release process therefore makes no PyInstaller, installer, or portable-executable claim. A follow-up executable package needs a consistent writable user-data directory, explicit read-only bundled resources, a bundle migration plan, and fresh-machine smoke coverage for startup, Qt WebEngine, icons, profiles, and Tor extraction.
+The source archive includes the tracked Windows and Linux x64 Tor archives. The customized `proxy/exclude_hosts.json` is marked `export-ignore` because it is a local exclusion list rather than a distribution default. The packaging script checks for required application assets and rejects profile data or proxy state from the source ZIP.
 
 ## Tracked Tor archives
 
-The repository contains approximately 48.5 MB of compressed Tor expert bundle archives (Windows x64 and Linux x64). They are kept in Git and included in the source release. Removing them would remove the offline bundle path; moving them to Git LFS would require coordinated clone, CI, and release download behavior. Any such change should first verify archive hashes and test both fresh Git clones and source release downloads.
+The repository includes a Windows x64 Tor expert-bundle archive and a Linux x64 archive. The Windows one-file build includes only the Windows archive. The tracked Windows archive is approximately 17 MB compressed; the Linux archive is not embedded in the Windows executable.
 
-The updater fetches Tor release metadata and checksum files when asked to refresh the list. The currently tracked archives have no matching checksum files in the repository. The current offline check treats a missing checksum file as acceptable, so it does not establish integrity for a bundled or previously downloaded archive in that case. Release operators should independently verify the published Tor checksum before relying on an archive.
+The repository's bundled Tor archive does not include a committed checksum sidecar. The app may fetch current Tor Project checksum metadata when validating the archive. Release validation should distinguish successful packaging from verified live Tor connectivity.
 
-## Release steps
+## Release checklist
 
-1. Ensure CI passes on Windows and Ubuntu for all declared Python versions.
-2. Review the release checklist in `docs/RELEASE_CHECKLIST.md`, including any expected failures and skipped tests.
-3. Create and push an annotated version tag such as `v1.2.3` after the source changes have been merged to `main`.
-4. Confirm the Windows source-release workflow published the ZIP and `.sha256` file.
-5. Download the release ZIP into a clean, writable Windows environment, verify the checksum, create a virtual environment, install `requirements.txt`, and perform the manual smoke checks.
-6. Record any live Tor or platform checks separately from the automated unit-test results.
+1. Check the current CI status and review any failed or skipped tests.
+2. Build the one-file EXE on a clean Windows runner using `scripts/build-windows-onefile.ps1`.
+3. Confirm the binary smoke check and SHA-256 generation succeed.
+4. Publish the EXE and checksum as a prerelease, clearly labeled Beta.
+5. Manually test a clean Windows environment for startup, Qt WebEngine rendering, icons, navigation, settings persistence, profiles, downloads, and shutdown.
+6. Validate Tor bootstrap and bridge behavior separately if live Tor is part of the release claim.
+
