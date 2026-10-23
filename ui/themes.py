@@ -311,6 +311,47 @@ QLineEdit#urlBar:focus {
 }
 QWidget#browserTabBar { border-radius: 14px; }
 QWidget#browserContentCard { border-radius: 14px; }
+QWidget#customTitleBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(250,252,255,245), stop:1 rgba(233,240,249,236));
+    border-bottom-color: rgba(203,216,234,170);
+}
+QLabel#titleBarLogo { border-radius: 10px; }
+QFrame#browserTab {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,205), stop:1 rgba(229,237,248,192));
+    border: 1px solid rgba(255,255,255,190);
+    border-top: 2px solid transparent;
+    border-radius: 11px;
+}
+QFrame#browserTab:hover {
+    background: rgba(255,255,255,232);
+    border-color: rgba(197,213,236,220);
+}
+QFrame#browserTab[active="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(255,255,255,255), stop:1 rgba(245,249,255,250));
+    border-color: rgba(196,213,239,242);
+    border-top-color: #3979d6;
+}
+QPushButton#tabPlusButton {
+    background: rgba(255,255,255,145);
+    border: 1px solid rgba(255,255,255,188);
+    border-radius: 11px;
+    min-width: 30px;
+    min-height: 30px;
+}
+QPushButton#tabPlusButton:hover {
+    background: rgba(219,232,251,230);
+    border-color: rgba(157,187,229,225);
+}
+QPushButton#tabCloseButton { min-width: 22px; min-height: 22px; }
+QWidget#BookmarksBar {
+    background: rgba(241,246,253,205);
+    border-bottom-color: rgba(206,218,235,170);
+}
+QToolButton#bookmarkItem, QToolButton#bookmarkMore, QToolButton#bookmarkManage {
+    border-radius: 10px;
+    padding-left: 9px;
+    padding-right: 9px;
+}
 """
 
 
@@ -623,4 +664,45 @@ QLineEdit#urlBar:focus {
 }
 QWidget#browserTabBar { border-radius: 14px; }
 QWidget#browserContentCard { border-radius: 14px; }
+QWidget#customTitleBar {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(31,37,47,250), stop:1 rgba(22,27,35,245));
+    border-bottom-color: rgba(255,255,255,28);
+}
+QLabel#titleBarLogo { border-radius: 10px; }
+QFrame#browserTab {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(54,63,77,228), stop:1 rgba(37,44,56,222));
+    border: 1px solid rgba(255,255,255,30);
+    border-top: 2px solid transparent;
+    border-radius: 11px;
+}
+QFrame#browserTab:hover {
+    background: rgba(67,79,97,235);
+    border-color: rgba(145,170,205,95);
+}
+QFrame#browserTab[active="true"] {
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(47,58,74,255), stop:1 rgba(34,42,55,252));
+    border-color: rgba(135,163,202,115);
+    border-top-color: #82aff4;
+}
+QPushButton#tabPlusButton {
+    background: rgba(44,52,65,220);
+    border: 1px solid rgba(255,255,255,32);
+    border-radius: 11px;
+    min-width: 30px;
+    min-height: 30px;
+}
+QPushButton#tabPlusButton:hover {
+    background: rgba(64,80,104,245);
+    border-color: rgba(130,175,244,115);
+}
+QPushButton#tabCloseButton { min-width: 22px; min-height: 22px; }
+QWidget#BookmarksBar {
+    background: rgba(28,34,43,220);
+    border-bottom-color: rgba(255,255,255,20);
+}
+QToolButton#bookmarkItem, QToolButton#bookmarkMore, QToolButton#bookmarkManage {
+    border-radius: 10px;
+    padding-left: 9px;
+    padding-right: 9px;
+}
 """
