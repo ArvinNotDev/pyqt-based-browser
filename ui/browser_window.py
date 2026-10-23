@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from PySide6.QtWebChannel import QWebChannel
 
@@ -1393,17 +1393,85 @@ class BrowserWindow(QMainWindow):
             logger.debug("Skipped snapshot for a view being destroyed", exc_info=True)
 
     def _make_placeholder(self, url_text: str = "") -> QWidget:
-        # lightweight placeholder shown until the QWebEngineView is ready
-        lbl = QLabel()
-        lbl.setAlignment(Qt.AlignCenter)
-        lbl.setText("Loading...")
-        lbl.setFixedHeight(400)  # minimal size hint, will expand with layout
-        # optional: add a small spinner using QMovie if desired (commented-out default)
-        # movie = QMovie(":/icons/spinner.gif")
-        # lbl.setMovie(movie)
-        # movie.start()
-        lbl.setStyleSheet("background: #f6f6f6; color: #444;")
-        return lbl
+        """Build a full-size, theme-aware first-paint screen for a new tab."""
+        dark = bool(getattr(self.settings, "dark_mode", True))
+        background = "#101722" if dark else "#edf2f8"
+        ink = "#f3f6fb" if dark else "#1e293b"
+        muted = "#98a6bb" if dark else "#65758b"
+        accent = "#8db8ff" if dark else "#3979d6"
+
+        screen = QWidget(self.view_container)
+        screen.setObjectName("pageLoadingScreen")
+        screen.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        screen.setStyleSheet(f"""
+            QWidget#pageLoadingScreen {{ background: {background}; color: {ink}; }}
+            QLabel#loadingBrand {{
+                color: {accent}; font-size: 14px; font-weight: 700;
+                letter-spacing: 2px; padding: 8px 0;
+            }}
+            QLabel#loadingTitle {{ color: {ink}; font-size: 23px; font-weight: 600; }}
+            QLabel#loadingDetail {{ color: {muted}; font-size: 12px; }}
+            QProgressBar#loadingProgress {{
+                background: {'#263244' if dark else '#dce5f1'};
+                border: none; border-radius: 3px; min-height: 4px; max-height: 4px;
+            }}
+            QProgressBar#loadingProgress::chunk {{
+                background: {accent}; border-radius: 3px;
+            }}
+            QPushButton#loadingRetry {{
+                color: {ink}; background: {'#1d2939' if dark else '#ffffff'};
+                border: 1px solid {'#344256' if dark else '#ced8e6'};
+                border-radius: 11px; padding: 8px 18px; font-size: 12px;
+            }}
+            QPushButton#loadingRetry:hover {{
+                border-color: {accent}; background: {'#26364d' if dark else '#f7faff'};
+            }}
+        """)
+
+        layout = QVBoxLayout(screen)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(11)
+        layout.addStretch(1)
+
+        brand = QLabel("ARMA")
+        brand.setObjectName("loadingBrand")
+        brand.setAlignment(Qt.AlignCenter)
+        layout.addWidget(brand)
+
+        title = QLabel("Getting things ready")
+        title.setObjectName("loadingTitle")
+        title.setAlignment(Qt.AlignCenter)
+        layout.addWidget(title)
+
+        detail_text = "Preparing your start page" if self._is_dashboard_address(url_text) else "Connecting to the website…"
+        detail = QLabel(detail_text)
+        detail.setObjectName("loadingDetail")
+        detail.setAlignment(Qt.AlignCenter)
+        detail.setWordWrap(True)
+        layout.addWidget(detail)
+
+        progress = QProgressBar()
+        progress.setObjectName("loadingProgress")
+        progress.setRange(0, 0)
+        progress.setTextVisible(False)
+        progress.setFixedWidth(190)
+        progress.setFixedHeight(4)
+        progress.setAlignment(Qt.AlignCenter)
+        layout.addWidget(progress, 0, Qt.AlignHCenter)
+
+        retry = QPushButton("Try again")
+        retry.setObjectName("loadingRetry")
+        retry.setCursor(Qt.PointingHandCursor)
+        retry.setVisible(False)
+        layout.addWidget(retry, 0, Qt.AlignHCenter)
+
+        layout.addStretch(1)
+        screen.loading_title_label = title
+        screen.loading_detail_label = detail
+        screen.loading_progress = progress
+        screen.retry_button = retry
+        screen._load_error = False
+        return screen
 
     def _startup_address(self) -> str:
         return DASHBOARD_URL if self.settings.startup_page == "dashboard" else self.settings.homepage
@@ -1637,6 +1705,7 @@ class BrowserWindow(QMainWindow):
         self._connect_page(view, page)
 
         placeholder = self._make_placeholder(url_q.toString())
+        placeholder.retry_button.clicked.connect(view.reload)
         self.views.append(view)
         self._placeholders[view] = placeholder
         self.view_layout.addWidget(placeholder)
@@ -1666,6 +1735,10 @@ class BrowserWindow(QMainWindow):
         )
         page.loadStarted.connect(
             lambda v=view, p=page: self._on_load_started(v)
+            if self._page_is_current(v, p) else None
+        )
+        page.loadingChanged.connect(
+            lambda info, v=view, p=page: self._on_loading_changed(info, v, p)
             if self._page_is_current(v, p) else None
         )
         page.loadProgress.connect(
@@ -1786,10 +1859,45 @@ class BrowserWindow(QMainWindow):
     def _on_load_started(self, view: QWebEngineView):
         if view not in self.views:
             return
+        placeholder = self._placeholders.get(view)
+        if placeholder is not None:
+            placeholder._load_error = False
+            placeholder.loading_title_label.setText("Getting things ready")
+            placeholder.loading_detail_label.setText(
+                "Preparing your start page"
+                if self._is_dashboard_address(view.url())
+                else "Connecting to the website…"
+            )
+            placeholder.loading_progress.show()
+            placeholder.retry_button.hide()
         if view is self.current_view():
             self.progress_bar.setRange(0, 0)
             self.progress_bar.show()
-            self.statusBar().showMessage("Loading...", 0)
+            self.statusBar().showMessage("Loading…", 0)
+
+    def _on_loading_changed(self, info, view: QWebEngineView, page: QWebEnginePage):
+        """Report real main-frame network failures without treating cancelled loads as errors."""
+        try:
+            if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
+                return
+            if not info.isMainFrame() or view is not self.current_view():
+                return
+            # Chromium/Qt use these codes for an aborted or superseded navigation.
+            if info.errorCode() in {-3, 102}:
+                return
+            message = (info.errorString() or "").strip()
+            if not message:
+                message = "The website could not be reached. Check the connection and try again."
+            placeholder = self._placeholders.get(view)
+            if placeholder is not None:
+                placeholder._load_error = True
+                placeholder.loading_title_label.setText("This page didn’t load")
+                placeholder.loading_detail_label.setText(message)
+                placeholder.loading_progress.hide()
+                placeholder.retry_button.show()
+            self.statusBar().showMessage(f"Could not load page: {message}", 6000)
+        except (AttributeError, RuntimeError):
+            logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
 
     def _on_load_progress(self, progress: int, view):
         if view is not self.current_view():
@@ -1816,7 +1924,10 @@ class BrowserWindow(QMainWindow):
             self.progress_bar.setRange(0, 100)
             self.progress_bar.setValue(100)
             QTimer.singleShot(300, lambda v=view: self._hide_progress_if_current(v))
-            self.statusBar().showMessage("Loaded" if ok else "Load failed", 1500 if ok else 3000)
+            # loadFinished(False) also occurs for cancelled or superseded navigations.
+            # A real main-frame network failure is reported by _on_loading_changed.
+            if ok:
+                self.statusBar().showMessage("Page loaded", 1200)
 
         if ok and self.history is not None:
             url_text = view.url().toString()
@@ -1833,6 +1944,11 @@ class BrowserWindow(QMainWindow):
         placeholder = self._placeholders.get(view)
         if placeholder is None:
             view.setVisible(view is self.current_view())
+            return
+        if not ok and getattr(placeholder, "_load_error", False):
+            # Keep the useful, retryable loading surface instead of fading to a blank page.
+            placeholder.setVisible(view is self.current_view())
+            view.hide()
             return
 
         view_effect = QGraphicsOpacityEffect(view)
