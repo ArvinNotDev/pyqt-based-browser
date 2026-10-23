@@ -4,7 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
