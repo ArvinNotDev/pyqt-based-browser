@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QWidgetAction,
 )
 
+from app_paths import resource_path, user_data_path
+
 from .profile_dialog import CustomizeProfile
 from .settings import Settings
 from .themes import dark_theme, light_theme
@@ -122,7 +124,7 @@ class NavigationBar(QToolBar):
         self.suggestion_list: QListWidget | None = None
         self._popup_filter: _SuggestionPopupFilter | None = None
 
-        icon_path = os.path.join("assets", "icons")
+        icon_path = resource_path("assets", "icons")
         self.back_btn = self._action("Back", os.path.join(icon_path, "back.png"))
         self.forward_btn = self._action("Forward", os.path.join(icon_path, "forward.png"))
         self.reload_btn = self._action("Reload", os.path.join(icon_path, "reload.png"))
@@ -395,7 +397,7 @@ class NavigationBar(QToolBar):
         if not self.profile:
             self.history = {}
             return {}
-        path = os.path.join("profile_data", self.profile, "history.json")
+        path = user_data_path("profile_data", self.profile, "history.json")
         try:
             with open(path, "r", encoding="utf-8") as history_file:
                 data = json.load(history_file)
@@ -492,18 +494,18 @@ class NavigationBar(QToolBar):
         self.menu_button.update()
 
     def _profile_image_path(self, profile_name: str) -> str:
-        return os.path.join("profile_data", profile_name, "profile", "image.png")
+        return user_data_path("profile_data", profile_name, "profile", "image.png")
 
     def _refresh_profile_icon(self):
         image_path = self._profile_image_path(self.profile)
         if os.path.isfile(image_path):
             icon = QIcon(image_path)
         elif getattr(self.settings, "dark_mode", False):
-            icon = self._tinted_icon(os.path.join("assets", "icons", "profile.png"), "#c7ced8")
+            icon = self._tinted_icon(resource_path("assets", "icons", "profile.png"), "#c7ced8")
         else:
-            icon = QIcon(os.path.join("assets", "icons", "profile.png"))
+            icon = QIcon(resource_path("assets", "icons", "profile.png"))
         if icon.isNull():
-            default_path = os.path.join("assets", "icons", "profile.png")
+            default_path = resource_path("assets", "icons", "profile.png")
             icon = (
                 self._tinted_icon(default_path, "#c7ced8")
                 if getattr(self.settings, "dark_mode", False)
