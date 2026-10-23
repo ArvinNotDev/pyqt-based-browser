@@ -30,7 +30,7 @@ class SettingsRecoveryTests(unittest.TestCase):
         guest = Settings(file_path=str(self.settings_path))
         guest.load("Guest")
 
-        self.assertEqual(guest.homepage, "https://www.google.com")
+        self.assertEqual(guest.homepage, "arma://dashboard/")
         self.assertFalse(guest.private_mode)
         backups = self._backups()
         self.assertEqual(len(backups), 1)
@@ -87,7 +87,7 @@ class SettingsRecoveryTests(unittest.TestCase):
 
         settings.load("Guest")
 
-        self.assertEqual(settings.homepage, "https://www.google.com")
+        self.assertEqual(settings.homepage, "arma://dashboard/")
         self.assertTrue(settings.save_history)
         self.assertEqual(len(self._backups()), 1)
         self.assertEqual(self._backups()[0].read_text(encoding="utf-8"), original)
