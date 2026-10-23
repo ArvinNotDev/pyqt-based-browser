@@ -488,8 +488,9 @@ class BrowserWindow(QMainWindow):
         self._gaming_mode_active = False
         self._closing = False
 
+        # History JSON can grow over time; defer disk parsing until the first
+        # browser frame has had a chance to appear.
         self.history: Optional[History] = None
-        self._refresh_history()
 
         self.storage_path = os.path.join(os.getcwd(), "profile_data")
         if not self.settings.private_mode:
@@ -657,6 +658,16 @@ class BrowserWindow(QMainWindow):
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
+        QTimer.singleShot(120, self._initialize_deferred_history)
+
+    def _initialize_deferred_history(self) -> None:
+        """Load profile history after startup rendering, then refresh lightweight consumers."""
+        if self._closing or self.history is not None:
+            return
+        if self.settings.private_mode or not self.settings.save_history:
+            return
+        self._refresh_history()
+        self._sync_dashboard_tabs()
 
     def _restore_startup_tabs(self) -> None:
         for url in self._restored_tabs:
