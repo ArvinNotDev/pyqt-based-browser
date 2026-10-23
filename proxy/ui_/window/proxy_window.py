@@ -213,7 +213,6 @@ class ProxyWindow(QWidget):
         return min(available, max(220, min(360, int(available * 0.84))))
 
     @staticmethod
-    def _initial_port(config_key):    @staticmethod
     def _initial_port(config_key):
         value = CONFIG[config_key]
         if CONFIG[config_key + "_checked"] and isinstance(value, int) and 1 <= value <= 65535:
