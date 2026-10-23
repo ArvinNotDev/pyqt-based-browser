@@ -350,6 +350,8 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         views=[view],
         current_view=lambda: view,
         _placeholders={view: placeholder},
+        progress_bar=Mock(),
+        tabbar=SimpleNamespace(set_loading=Mock()),
         statusBar=lambda: SimpleNamespace(showMessage=Mock()),
     )
 
@@ -375,6 +377,9 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
     placeholder.loading_progress.hide.assert_called_once_with()
     placeholder.retry_button.show.assert_called_once_with()
+    browser.progress_bar.setRange.assert_called_once_with(0, 100)
+    browser.progress_bar.setValue.assert_called_once_with(0)
+    browser.tabbar.set_loading.assert_called_once_with(0, False)
 
 def test_proxy_panel_is_created_only_when_requested():
     placeholder = Mock()

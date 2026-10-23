@@ -2951,6 +2951,10 @@ class BrowserWindow(QMainWindow):
             tabbar = getattr(self, "tabbar", None)
             if view in self.views and tabbar is not None:
                 tabbar.set_loading(self.views.index(view), False)
+            progress_bar = getattr(self, "progress_bar", None)
+            if progress_bar is not None:
+                progress_bar.setRange(0, 100)
+                progress_bar.setValue(0)
             placeholder = self._placeholders.get(view)
             if placeholder is None and view in self.views:
                 # A page can fail after an earlier successful load removed its placeholder.
