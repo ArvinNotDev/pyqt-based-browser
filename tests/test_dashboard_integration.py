@@ -391,3 +391,25 @@ def test_dashboard_scheme_has_a_valid_default_port_and_registers_idempotently():
     scheme = QWebEngineUrlScheme.schemeByName(DASHBOARD_SCHEME)
     assert scheme.defaultPort() == DASHBOARD_DEFAULT_PORT == 443
 
+def test_external_browser_fallback_opens_only_http_and_https_pages():
+    web_view = SimpleNamespace(url=lambda: QUrl("https://game.example/"))
+    status_bar = SimpleNamespace(showMessage=Mock())
+    browser = SimpleNamespace(
+        current_view=lambda: web_view,
+        statusBar=lambda: status_bar,
+    )
+
+    with patch("ui.browser_window.QDesktopServices.openUrl", return_value=True) as open_url:
+        BrowserWindow.open_current_page_externally(browser)
+
+    open_url.assert_called_once_with(QUrl("https://game.example/"))
+    status_bar.showMessage.assert_called_once_with("Opened in the default browser.", 2500)
+
+    status_bar.showMessage.reset_mock()
+    web_view.url = lambda: QUrl("arma://dashboard/")
+    with patch("ui.browser_window.QDesktopServices.openUrl") as open_url:
+        BrowserWindow.open_current_page_externally(browser)
+
+    open_url.assert_not_called()
+    status_bar.showMessage.assert_called_once_with("Only web pages can be opened externally.", 3000)
+
