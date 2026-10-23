@@ -74,6 +74,8 @@
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
         const image = document.createElement('img');
         image.alt = '';
+        image.loading = 'lazy';
+        image.decoding = 'async';
         image.src = `${parsed.origin}/favicon.ico`;
         image.onerror = () => { image.remove(); icon.textContent = icon.dataset.fallback; };
         icon.textContent = '';
@@ -109,6 +111,8 @@
       const image = document.createElement('img');
       try { image.src = `${new URL(shortcut.url).origin}/favicon.ico`; } catch (_) { image.src = ''; }
       image.alt = '';
+      image.loading = 'lazy';
+      image.decoding = 'async';
       image.onerror = () => { image.remove(); icon.textContent = (shortcut.title || '↗').trim().charAt(0).toUpperCase(); };
       icon.appendChild(image);
       const title = document.createElement('span');
