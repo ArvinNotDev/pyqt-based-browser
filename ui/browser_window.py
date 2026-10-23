@@ -1481,6 +1481,7 @@ class BrowserWindow(QMainWindow):
 
         panel = self.downloads_panel
         splitter = self.downloads_splitter
+        self._stop_downloads_panel_animation()
         self._downloads_mode_transitioning = True
         panel.mode_button.setEnabled(False)
         panel.close_button.setEnabled(False)
