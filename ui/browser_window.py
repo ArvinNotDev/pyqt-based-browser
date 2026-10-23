@@ -4,12 +4,14 @@ import time
 import json
 import logging
 import heapq
+import sys
+import tempfile
 from functools import lru_cache
 from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QPropertyAnimation,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QPropertyAnimation, QProcess,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
@@ -42,6 +44,7 @@ from .dashboard.bridge import DashboardBridge
 from .themes import light_theme, dark_theme
 from .url_utils import URLInputError, resolve_address_input
 from proxy import proxy as proxy_routing
+from proxy.set_proxy import manage_proxy
 from proxy.ui import Window
 
 try:
@@ -435,34 +438,47 @@ class BrowserPage(QWebEnginePage):
 
 
 class BrowserWindow(QMainWindow):
-    def __init__(self, proxy_port: Optional[int] = None):
+    def __init__(self, tor_mode: bool = False, restored_session: Optional[dict] = None):
         super().__init__()
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         proxy_routing.load_exclude()
         self.proxy_panel = Window(self, None)
-        proxy_widget = self.proxy_panel.proxyWidget
-        if proxy_port is not None:
-            # main.py chooses this port and sets Chromium's flag before Qt starts.
-            proxy_widget.proxy_port = proxy_port
-            proxy_widget.proxy.port = proxy_port
-        else:
-            logger.warning(
-                "BrowserWindow was created without a preconfigured Chromium proxy port; "
-                "launch through main.py for proxy startup before Qt initialization."
-            )
-        try:
-            proxy_widget.proxy.start()
-        except OSError:
-            logger.exception("Could not start the browser proxy listener")
-
-
+        self.tor_mode = bool(tor_mode)
+        self._pending_network_restart = None
+        self._restored_session = restored_session if isinstance(restored_session, dict) else {}
+        if self.tor_mode:
+            proxy_widget = self.proxy_panel.proxyWidget
+            try:
+                if not proxy_widget.proxy.start():
+                    raise RuntimeError("Could not start the local Tor proxy")
+                proxy_routing.set_tor_routing(True)
+                manage_proxy(None, "127.0.0.1", proxy_widget.proxy.port, "set")
+            except Exception:
+                proxy_routing.set_tor_routing(False)
+                proxy_widget.proxy.stop()
+                raise
         self.settings = Settings()
         self.settings.load_profile_settings()
         self.selected_profile = "Guest"
+        requested_profile = self._restored_session.get("profile")
+        if isinstance(requested_profile, str) and requested_profile in self.settings.profiles_list:
+            self.selected_profile = requested_profile
         if self.settings.profiles_list and self.selected_profile not in self.settings.profiles_list:
             self.selected_profile = self.settings.profiles_list[0]
         self.settings.load(self.selected_profile)
+        raw_tabs = self._restored_session.get("tabs", [])
+        self._restored_tabs = [
+            url[:8192]
+            for url in raw_tabs[:50]
+            if isinstance(url, str)
+            and len(url) <= 8192
+            and QUrl(url).isValid()
+            and QUrl(url).scheme().lower() in {"http", "https", "arma", "about", "file"}
+        ] if isinstance(raw_tabs, list) else []
+        self._restored_active_index = self._restored_session.get("active_index", 0)
+        if not isinstance(self._restored_active_index, int):
+            self._restored_active_index = 0
 
         self._closed_tab_urls: Dict[tuple[str, bool], List[str]] = {}
         self._private_dashboard_notes: Dict[str, str] = {}
@@ -618,7 +634,12 @@ class BrowserWindow(QMainWindow):
         except (AttributeError, RuntimeError):
             logger.exception("Could not connect one or more navigation actions")
 
-        QTimer.singleShot(0, lambda: self.new_tab(self._startup_address()))
+        if self._restored_tabs:
+            QTimer.singleShot(0, self._restore_startup_tabs)
+        else:
+            QTimer.singleShot(0, lambda: self.new_tab(self._startup_address()))
+        if self.tor_mode:
+            QTimer.singleShot(100, self.proxy_panel.proxyWidget._toggle)
         self._last_progress_ts = 0
         
         self.dock = QDockWidget("Proxy", self)
@@ -636,6 +657,81 @@ class BrowserWindow(QMainWindow):
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
+
+    def _restore_startup_tabs(self) -> None:
+        for url in self._restored_tabs:
+            self.new_tab(url, make_active=False)
+        if self.views:
+            index = max(0, min(self._restored_active_index, len(self.views) - 1))
+            self.tabbar.set_active(index)
+
+    def _request_network_mode(self, tor_mode: bool) -> None:
+        if bool(tor_mode) == self.tor_mode:
+            return
+        destination = "Tor" if tor_mode else "normal direct browsing"
+        answer = QMessageBox.question(
+            self,
+            "Restart ARMA Browser",
+            f"ARMA Browser must restart to switch to {destination}. Open tabs will be restored. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        urls = [
+            view.url().toString()
+            for view in self.views
+            if view.url().isValid() and view.url().toString().strip()
+        ]
+        self._pending_network_restart = {
+            "tor_mode": bool(tor_mode),
+            "session": {
+                "profile": self.selected_profile,
+                "tabs": urls,
+                "active_index": max(0, self.current_index),
+            },
+        }
+        self.close()
+
+    def _spawn_network_mode_restart(self, restart) -> bool:
+        session_path = None
+        try:
+            descriptor, session_path = tempfile.mkstemp(
+                prefix="arma-network-switch-", suffix=".json"
+            )
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump(restart["session"], stream, ensure_ascii=False)
+                stream.flush()
+                os.fsync(stream.fileno())
+
+            original_args = [
+                argument for argument in sys.argv[1:]
+                if argument != "--tor-mode"
+                and not argument.startswith(("--resume-session=", "--wait-for-parent="))
+            ]
+            if getattr(sys, "frozen", False):
+                program = sys.executable
+                arguments = original_args
+            else:
+                program = sys.executable
+                arguments = [os.path.abspath(sys.argv[0]), *original_args]
+            if restart["tor_mode"]:
+                arguments.append("--tor-mode")
+            arguments.extend((
+                f"--resume-session={session_path}",
+                f"--wait-for-parent={os.getpid()}",
+            ))
+            started, _process_id = QProcess.startDetached(program, arguments, os.getcwd())
+            if started:
+                return True
+        except (OSError, TypeError, ValueError):
+            logger.exception("Could not start the requested browser network mode")
+        if session_path:
+            try:
+                os.remove(session_path)
+            except OSError:
+                logger.warning("Could not remove the unused session handoff file")
+        return False
 
     def show_proxy(self):
         self.dock.setVisible(not self.dock.isVisible())
@@ -1984,8 +2080,20 @@ class BrowserWindow(QMainWindow):
             prompt.setStandardButtons(QMessageBox.Close | QMessageBox.Cancel)
             prompt.setDefaultButton(QMessageBox.Cancel)
             if prompt.exec() != QMessageBox.Close:
+                self._pending_network_restart = None
                 event.ignore()
                 return
+        restart = self._pending_network_restart
+        if restart and not self._spawn_network_mode_restart(restart):
+            self._pending_network_restart = None
+            QMessageBox.warning(
+                self,
+                "Network mode not changed",
+                "ARMA Browser could not restart safely. The current session is still open.",
+            )
+            event.ignore()
+            return
+        self._pending_network_restart = None
         self._closing = True
         for download_manager in self._download_managers.values():
             download_manager.shutdown()
@@ -1998,7 +2106,7 @@ class BrowserWindow(QMainWindow):
             view.deleteLater()
         try:
             self.proxy_panel.close()
-            self.proxy_panel.proxyWidget._stop_services()
+            self.proxy_panel.proxyWidget._stop_services(reload_pages=False)
             self.proxy_panel.proxyWidget.stop_timer.emit()
             for tab in self.tabbar.tabs:
                 tab._hover_timer.stop()
