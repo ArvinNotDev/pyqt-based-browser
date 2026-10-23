@@ -85,6 +85,17 @@ logger = logging.getLogger(__name__)
 register_dashboard_scheme()
 
 
+class _DownloadsOverlayTint(QFrame):
+    """Dismiss the downloads overlay when the user clicks outside its drawer."""
+
+    dismissed = Signal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.dismissed.emit()
+        event.accept()
+
+
 class TabButton(QFrame):
     clicked = Signal()
     closed = Signal()
@@ -621,12 +632,12 @@ class BrowserWindow(QMainWindow):
         self.downloads_overlay_blur.setBlurRadius(10)
         self.downloads_overlay_snapshot.setGraphicsEffect(self.downloads_overlay_blur)
         self.downloads_overlay_snapshot.hide()
-        self.downloads_overlay_tint = QFrame(self.content_row)
+        self.downloads_overlay_tint = _DownloadsOverlayTint(self.content_row)
         self.downloads_overlay_tint.setObjectName("downloadsOverlayTint")
         self.downloads_overlay_tint.setStyleSheet(
             "QFrame#downloadsOverlayTint { background: rgba(12, 18, 30, 42); border: none; }"
         )
-        self.downloads_overlay_tint.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.downloads_overlay_tint.dismissed.connect(self._close_downloads_panel)
         self.downloads_overlay_tint.hide()
         self.downloads_splitter = QSplitter(Qt.Horizontal, self.content_row)
         self.downloads_splitter.setObjectName("downloadsSplitter")
