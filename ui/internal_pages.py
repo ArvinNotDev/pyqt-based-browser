@@ -132,6 +132,112 @@ progress { width:100%; height:6px; border:0; border-radius:4px; overflow:hidden;
 .status-pill { display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:7px; background:var(--accent-soft);
  color:var(--accent); font-size:11px; font-weight:750; }
 .footer-note { margin-top:16px; color:var(--muted); font-size:11px; }
+/* Browser settings: searchable, categorized, and responsive like a native preferences view. */
+.settings-topbar { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.settings-menu-toggle { display:none; white-space:nowrap; background:var(--surface); }
+.settings-search-wrap { display:flex; align-items:center; gap:8px; flex:1; min-width:0; padding:0 11px;
+ background:var(--surface); border:1px solid var(--line); border-radius:11px; box-shadow:var(--shadow); }
+.settings-search-wrap .search-glyph { color:var(--muted); font-size:20px; line-height:1; }
+.settings-search-wrap input { border:0; background:transparent; outline:0; box-shadow:none; min-height:40px; padding:8px 0; }
+.settings-search-wrap input:focus { border:0; box-shadow:none; }
+.settings-search-wrap kbd { flex:0 0 auto; color:var(--muted); background:var(--bg); border:1px solid var(--line);
+ border-radius:5px; padding:2px 5px; font-size:10px; }
+.settings-save-status { flex:0 0 auto; color:var(--muted); font-size:11px; }
+.settings-save-status.saving { color:var(--accent); }
+.settings-save-status.error { color:var(--danger); }
+.settings-layout { display:grid; grid-template-columns:208px minmax(0,1fr); gap:16px; align-items:start; position:relative; }
+.settings-sidebar { position:sticky; top:12px; display:flex; flex-direction:column; gap:4px; padding:9px;
+ border:1px solid var(--line); background:var(--surface); border-radius:14px; box-shadow:var(--shadow); }
+.settings-sidebar-heading { display:flex; align-items:center; justify-content:space-between; padding:8px 9px 12px;
+ color:var(--muted); font-size:10px; font-weight:800; letter-spacing:1.15px; }
+.settings-menu-close { display:none; min-height:27px; width:27px; padding:0; font-size:19px; }
+.settings-category { width:100%; justify-content:flex-start; text-align:left; border-color:transparent; background:transparent;
+ min-height:39px; padding:7px 10px; font-size:12px; color:var(--muted); }
+.settings-category .category-icon { width:20px; text-align:center; color:currentColor; font-size:14px; }
+.settings-category.active { color:var(--accent); background:var(--accent-soft); border-color:color-mix(in srgb,var(--accent) 22%,transparent); }
+.settings-category[hidden] { display:none; }
+.settings-no-categories { padding:7px 10px; color:var(--muted); font-size:12px; }
+.settings-main { min-width:0; }
+.settings-section { display:none; min-width:0; }
+.settings-section.active { display:block; animation:settings-fade-in .14s ease-out; }
+@keyframes settings-fade-in { from { opacity:.78; transform:translateY(2px); } to { opacity:1; transform:translateY(0); } }
+.settings-section-head { margin:2px 1px 15px; }
+.settings-section-head h2 { font-size:22px; margin:3px 0 4px; letter-spacing:-.35px; }
+.settings-section-head p { margin:0; color:var(--muted); font-size:12px; }
+.section-kicker { color:var(--accent); letter-spacing:1.4px; font-size:9px; font-weight:800; }
+.settings-panel { border-radius:13px; }
+.settings-panel + .settings-panel { margin-top:12px; }
+.settings-panel .panel-head { padding:12px 15px; }
+.settings-panel .panel-body { padding:5px 15px; }
+.setting-list { display:flex; flex-direction:column; }
+.setting-row { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:13px 0;
+ border-bottom:1px solid var(--line); min-width:0; }
+.setting-row:last-child { border-bottom:0; }
+.setting-row[hidden] { display:none !important; }
+.setting-copy { min-width:0; display:flex; flex-direction:column; gap:3px; }
+.setting-copy > label, .setting-copy > strong { font-size:12px; font-weight:750; }
+.setting-copy small { max-width:520px; color:var(--muted); font-size:11px; line-height:1.45; }
+.setting-control:not([type=checkbox]) { width:min(320px,52%); flex:0 1 320px; }
+.setting-input-with-button { display:flex; align-items:center; gap:7px; flex:0 1 370px; min-width:0; }
+.setting-input-with-button input { flex:1; min-width:0; }
+.setting-input-with-button button { flex:0 0 auto; }
+.setting-toggle { cursor:pointer; }
+.setting-toggle .setting-control[type=checkbox] { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+.check-ui { position:relative; flex:0 0 38px; width:38px; height:22px; border-radius:999px;
+ background:var(--line); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--text) 9%,transparent); transition:background .16s ease; }
+.check-ui::after { content:""; position:absolute; width:16px; height:16px; top:3px; left:3px; border-radius:50%;
+ background:var(--surface-2); box-shadow:0 1px 3px #0002; transition:transform .16s ease; }
+.setting-control[type=checkbox]:checked + .check-ui { background:var(--accent); }
+.setting-control[type=checkbox]:checked + .check-ui::after { transform:translateX(16px); }
+.setting-control[type=checkbox]:focus-visible + .check-ui { outline:3px solid color-mix(in srgb,var(--accent) 38%,transparent); outline-offset:3px; }
+.theme-switch { position:relative; display:inline-flex; flex:0 0 auto; cursor:pointer; }
+.theme-switch input { position:absolute; width:1px; height:1px; opacity:0; }
+.theme-track { display:flex; align-items:center; width:64px; height:36px; padding:3px; border-radius:999px;
+ background:linear-gradient(135deg,#e9f0fa,#d6e2f2); border:1px solid #c7d5e8; transition:background .16s,border-color .16s; }
+.theme-thumb { display:grid; place-items:center; width:28px; height:28px; border-radius:50%; color:#b47a10;
+ background:#fff; box-shadow:0 2px 5px #172c461c; transform:translateX(0); transition:transform .17s cubic-bezier(.2,.8,.2,1),background .16s; }
+.theme-symbol { display:block; font:700 16px/1 "Segoe UI Symbol",sans-serif; transform:translateY(-.25px); }
+.theme-switch input:checked + .theme-track { background:linear-gradient(135deg,#344b68,#202d40); border-color:#536b8a; }
+.theme-switch input:checked + .theme-track .theme-thumb { transform:translateX(27px); color:#fff; background:#79a9eb; }
+.theme-switch input:focus-visible + .theme-track { outline:3px solid color-mix(in srgb,var(--accent) 35%,transparent); outline-offset:3px; }
+.settings-empty-search { padding:28px; margin-top:12px; }
+.settings-empty-search p { margin-bottom:0; color:var(--muted); }
+.settings-empty-search[hidden], .settings-backdrop[hidden] { display:none !important; }
+.settings-backdrop { position:fixed; inset:0; z-index:49; background:rgba(9,15,25,.46); backdrop-filter:blur(2px); }
+@media (max-width:1000px) {
+ .settings-layout { grid-template-columns:178px minmax(0,1fr); gap:11px; }
+ .settings-sidebar { padding:7px; }
+ .setting-row { gap:10px; }
+ .setting-control:not([type=checkbox]) { width:48%; }
+}
+@media (max-width:850px) {
+ .settings-topbar { align-items:stretch; flex-wrap:wrap; }
+ .settings-menu-toggle { display:inline-flex; align-items:center; gap:8px; }
+ .settings-search-wrap { min-width:170px; }
+ .settings-save-status { width:100%; }
+ .settings-layout { grid-template-columns:minmax(0,1fr); }
+ .settings-sidebar { display:none; position:fixed; top:12px; bottom:12px; left:12px; z-index:50;
+   width:min(286px,calc(100vw - 48px)); overflow:auto; align-self:auto; }
+ body.settings-menu-open .settings-sidebar { display:flex; animation:settings-drawer-in .16s ease-out; }
+ .settings-menu-close { display:inline-flex; }
+ .settings-sidebar-heading { position:sticky; top:0; background:var(--surface); z-index:1; }
+ @keyframes settings-drawer-in { from { opacity:.6; transform:translateX(-8px); } to { opacity:1; transform:translateX(0); } }
+ .setting-row { align-items:flex-start; }
+ .setting-control:not([type=checkbox]) { width:50%; flex-basis:50%; }
+ .setting-input-with-button { flex-basis:52%; }
+}
+@media (max-width:560px) {
+ .settings-topbar { gap:7px; }
+ .settings-menu-toggle { min-height:38px; padding:6px 8px; }
+ .settings-menu-toggle span:last-child { font-size:11px; }
+ .settings-search-wrap { min-width:0; padding:0 8px; }
+ .settings-search-wrap kbd { display:none; }
+ .settings-section-head h2 { font-size:20px; }
+ .setting-row { flex-direction:column; align-items:stretch; gap:9px; }
+ .setting-control:not([type=checkbox]), .setting-input-with-button { width:100%; max-width:none; flex-basis:auto; }
+ .theme-switch { align-self:flex-start; }
+}
+
 .toast { position:fixed; bottom:18px; left:50%; transform:translate(-50%,20px); opacity:0; pointer-events:none;
  max-width:min(600px,calc(100vw - 28px)); padding:11px 15px; border:1px solid var(--line); border-radius:11px;
  background:var(--surface-2); box-shadow:var(--shadow); transition:all .18s; z-index:20; }
@@ -228,106 +334,306 @@ def _settings_page(browser) -> str:
     )
     if current_engine not in known:
         engine_options += f'<option value="{_e(current_engine)}" selected>Saved custom search engine</option>'
+
     def checkbox(name: str, label: str, detail: str, value: bool) -> str:
         checked = " checked" if value else ""
         return (
-            f'<label class="check-row"><input type="checkbox" name="{_e(name)}"{checked}>'
-            f'<span class="check-copy"><strong>{_e(label)}</strong><small>{_e(detail)}</small></span></label>'
+            f'<label class="setting-row setting-toggle" data-search="{_e(name.replace("_", " ") + " " + label + " " + detail)}">'
+            f'<span class="setting-copy"><strong>{_e(label)}</strong><small>{_e(detail)}</small></span>'
+            f'<input class="setting-control" id="{_e(name)}" name="{_e(name)}" type="checkbox"{checked}>'
+            f'<span class="check-ui" aria-hidden="true"></span></label>'
         )
+
+    sections = (
+        ("general", "General", "home homepage startup new tab search engine", "fa-solid fa-house"),
+        ("appearance", "Appearance", "theme light dark colors appearance mode", "fa-solid fa-palette"),
+        ("privacy", "Privacy & security", "private history cookies compatibility profile", "fa-solid fa-shield-halved"),
+        ("performance", "Performance", "hardware gpu acceleration rendering restart", "fa-solid fa-gauge-high"),
+        ("downloads", "Downloads", "download directory folder proxy panel startup", "fa-solid fa-download"),
+    )
+    category_buttons = "".join(
+        f'<button type="button" class="settings-category{" active" if key == "general" else ""}" '
+        f'data-section="{key}" data-search="{_e(search + " " + label)}">'
+        f'<span class="category-icon" aria-hidden="true">{icon}</span><span>{label}</span></button>'
+        for key, label, search, icon in sections
+    )
+
     body = f"""
-<div class="layout">
-<main>
-  <form id="settings-form">
-    <section class="panel">
-      <div class="panel-head"><h3>Browsing</h3><p>Set the pages and search behavior used by this profile.</p></div>
-      <div class="panel-body">
-        <div class="form-grid">
-          <div class="field full"><label for="homepage">Homepage</label>
-            <input id="homepage" name="homepage" type="url" value="{_e(settings.homepage)}" required>
-            <span class="field-hint">Use a website URL or an ARMA internal page such as arma://dashboard/.</span>
+<div class="settings-topbar">
+  <button type="button" id="settings-menu-toggle" class="settings-menu-toggle" aria-expanded="false" aria-controls="settings-sidebar">
+    <span aria-hidden="true">☰</span><span>Categories</span>
+  </button>
+  <label class="settings-search-wrap" for="settings-search">
+    <span class="search-glyph" aria-hidden="true">⌕</span>
+    <input id="settings-search" type="search" placeholder="Search settings…" autocomplete="off" aria-label="Search settings">
+    <kbd>Ctrl K</kbd>
+  </label>
+  <span id="settings-save-status" class="settings-save-status" role="status" aria-live="polite">Changes save automatically</span>
+</div>
+
+<div class="settings-layout">
+  <div id="settings-backdrop" class="settings-backdrop" hidden></div>
+  <nav id="settings-sidebar" class="settings-sidebar" aria-label="Settings categories">
+    <div class="settings-sidebar-heading"><span>SETTINGS</span>
+      <button type="button" id="settings-menu-close" class="settings-menu-close" aria-label="Close settings categories">×</button>
+    </div>
+    {category_buttons}
+    <p id="settings-no-categories" class="settings-no-categories" hidden>No matching categories</p>
+  </nav>
+
+  <main class="settings-main">
+    <section class="settings-section active" id="section-general" data-section="general" aria-labelledby="heading-general">
+      <div class="settings-section-head"><span class="section-kicker">YOUR BROWSER</span><h2 id="heading-general">General</h2>
+        <p>Set your homepage, new-tab behavior, and search provider.</p></div>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Startup & browsing</h3><p>Changes are applied and saved to this profile as you make them.</p></div>
+        <div class="panel-body setting-list">
+          <div class="setting-row" data-search="homepage home website start page address">
+            <div class="setting-copy"><label for="homepage">Homepage</label><small>A web address or an ARMA page such as arma://dashboard/.</small></div>
+            <input class="setting-control" id="homepage" name="homepage" type="url" value="{_e(settings.homepage)}" placeholder="https://example.com">
           </div>
-          <div class="field"><label for="startup_page">Startup page</label>
-            <select id="startup_page" name="startup_page">
+          <div class="setting-row" data-search="startup page launch open browser">
+            <div class="setting-copy"><label for="startup_page">When browser opens</label><small>Choose the page shown when a new browser session starts.</small></div>
+            <select class="setting-control" id="startup_page" name="startup_page">
               <option value="dashboard"{" selected" if settings.startup_page == "dashboard" else ""}>ARMA dashboard</option>
               <option value="homepage"{" selected" if settings.startup_page == "homepage" else ""}>Homepage</option>
             </select>
           </div>
-          <div class="field"><label for="new_tab_page">New tab page</label>
-            <select id="new_tab_page" name="new_tab_page">
+          <div class="setting-row" data-search="new tab page open tab">
+            <div class="setting-copy"><label for="new_tab_page">New tab page</label><small>Choose what opens in a fresh tab.</small></div>
+            <select class="setting-control" id="new_tab_page" name="new_tab_page">
               <option value="dashboard"{" selected" if settings.new_tab_page == "dashboard" else ""}>ARMA dashboard</option>
               <option value="homepage"{" selected" if settings.new_tab_page == "homepage" else ""}>Homepage</option>
             </select>
           </div>
-          <div class="field full"><label for="search_engine">Default search engine</label>
-            <select id="search_engine" name="search_engine">{engine_options}</select>
+          <div class="setting-row" data-search="search engine google duckduckgo bing web search">
+            <div class="setting-copy"><label for="default_search_engine">Search engine</label><small>Used when you type a search instead of an address.</small></div>
+            <select class="setting-control" id="default_search_engine" name="default_search_engine">{engine_options}</select>
           </div>
         </div>
-      </div>
+      </section>
     </section>
-    <section class="panel">
-      <div class="panel-head"><h3>Privacy and appearance</h3><p>These options are saved to the current profile.</p></div>
-      <div class="panel-body">
-        <div class="check-grid">
-          {checkbox("dark_mode", "Dark appearance", "Use the dark browser theme.", settings.dark_mode)}
-          {checkbox("private_mode", "Private browsing", "Use an off-the-record profile.", settings.private_mode)}
-          {checkbox("save_history", "Save history", "Keep visited pages for this profile.", settings.save_history)}
-          {checkbox("save_cookies", "Save cookies", "Keep website cookies between runs.", settings.save_cookies)}
-          {checkbox("hardware_acceleration", "Hardware acceleration", "Use accelerated rendering where available.", settings.hardware_acceleration)}
-          {checkbox("site_compatibility_mode", "Site compatibility", "Use a more compatible browser user-agent.", settings.site_compatibility_mode)}
-          {checkbox("proxy_panel_visible", "Show Tor panel on startup", "Remember whether the Tor panel is visible.", settings.proxy_panel_visible)}
-        </div>
-      </div>
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h3>Downloads</h3><p>Choose where files from the browser are stored.</p></div>
-      <div class="panel-body">
-        <div class="field">
-          <label for="download_folder">Download folder</label>
-          <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px">
-            <input id="download_folder" name="download_folder" type="text" value="{_e(settings.download_folder)}" required>
-            <button type="button" id="browse-folder">Browse…</button>
-          </div>
-        </div>
-      </div>
-    </section>
-    <div class="form-actions">
-      <button type="button" data-action="navigate_internal" data-payload='{{"host":"history"}}'>History</button>
-      <button type="button" data-action="navigate_internal" data-payload='{{"host":"downloads"}}'>Downloads</button>
-      <button class="primary" type="submit">Save settings</button>
-    </div>
-  </form>
-  <p class="footer-note">Hardware acceleration changes may require a full browser restart to take effect.</p>
-</main>
-<aside><h2>ARMA Browser</h2>
-  <p>Settings are stored in the <strong>{_e(browser.selected_profile)}</strong> profile. Private browsing uses separate temporary storage.</p>
-  <div class="banner">Your Tor panel has its own connection settings and can be opened from the globe button in the browser toolbar.</div>
-</aside>
-</div>
-<script>
-document.getElementById('settings-form').addEventListener('submit', event => {{
-  event.preventDefault();
-  const field = name => document.getElementById(name).value;
-  const checked = name => document.querySelector('[name="' + name + '"]').checked;
-  window.armaAction('save_browser_settings', {{
-    homepage: field('homepage'),
-    startup_page: field('startup_page'),
-    new_tab_page: field('new_tab_page'),
-    default_search_engine: field('search_engine'),
-    download_folder: field('download_folder'),
-    dark_mode: checked('dark_mode'),
-    private_mode: checked('private_mode'),
-    save_history: checked('save_history'),
-    save_cookies: checked('save_cookies'),
-    hardware_acceleration: checked('hardware_acceleration'),
-    site_compatibility_mode: checked('site_compatibility_mode'),
-    proxy_panel_visible: checked('proxy_panel_visible')
-  }});
-}});
-document.getElementById('browse-folder').addEventListener('click', () => window.armaAction('browse_download_folder'));
-window.setDownloadFolder = value => {{ document.getElementById('download_folder').value = String(value || ''); }};
-</script>"""
-    return _shell(browser, "Settings", "Personalize browsing, privacy, and download behavior.", body, "settings")
 
+    <section class="settings-section" id="section-appearance" data-section="appearance" aria-labelledby="heading-appearance">
+      <div class="settings-section-head"><span class="section-kicker">PERSONALIZE</span><h2 id="heading-appearance">Appearance</h2>
+        <p>Choose the color theme for the browser chrome and built-in pages.</p></div>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Color theme</h3><p>The theme updates immediately and is remembered for this profile.</p></div>
+        <div class="panel-body setting-list">
+          <div class="setting-row theme-setting-row" data-search="dark light theme appearance color mode sun moon">
+            <div class="setting-copy"><label for="dark_mode">Dark appearance</label><small>Slide the switch to move between light and dark themes.</small></div>
+            <label class="theme-switch" aria-label="Toggle dark appearance">
+              <input class="setting-control" id="dark_mode" name="dark_mode" type="checkbox" role="switch"{" checked" if settings.dark_mode else ""}>
+              <span class="theme-track"><span class="theme-thumb"><span class="theme-symbol">{"☾" if settings.dark_mode else "☀"}</span></span></span>
+            </label>
+          </div>
+        </div>
+      </section>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Site compatibility</h3><p>Some websites behave better with a standard Chromium user-agent.</p></div>
+        <div class="panel-body setting-list">
+          {checkbox("site_compatibility_mode", "Use a standard browser identity", "Hides the QtWebEngine product marker; it does not install extensions.", settings.site_compatibility_mode)}
+        </div>
+      </section>
+    </section>
+
+    <section class="settings-section" id="section-privacy" data-section="privacy" aria-labelledby="heading-privacy">
+      <div class="settings-section-head"><span class="section-kicker">YOUR DATA</span><h2 id="heading-privacy">Privacy & security</h2>
+        <p>Control which browsing data is kept between sessions.</p></div>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Browsing data</h3><p>These switches take effect as soon as you change them.</p></div>
+        <div class="panel-body setting-list">
+          {checkbox("private_mode", "Private browsing", "Use an off-the-record profile for this browser profile.", settings.private_mode)}
+          {checkbox("save_history", "Save browsing history", "Keep visited pages for this profile.", settings.save_history)}
+          {checkbox("save_cookies", "Keep cookies between sessions", "Save website cookies between browser runs.", settings.save_cookies)}
+        </div>
+      </section>
+    </section>
+
+    <section class="settings-section" id="section-performance" data-section="performance" aria-labelledby="heading-performance">
+      <div class="settings-section-head"><span class="section-kicker">RENDERING</span><h2 id="heading-performance">Performance</h2>
+        <p>Choose how Chromium renders web pages.</p></div>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Graphics</h3><p>Hardware acceleration changes require restarting the browser to fully take effect.</p></div>
+        <div class="panel-body setting-list">
+          {checkbox("hardware_acceleration", "Use hardware acceleration", "Use the GPU where supported. A restart is needed after changing this setting.", settings.hardware_acceleration)}
+        </div>
+      </section>
+      <p class="footer-note">A browser or graphics-driver may report WebGPU as unavailable on some systems. This is a Chromium graphics capability warning; it is not the same as a page JavaScript exception.</p>
+    </section>
+
+    <section class="settings-section" id="section-downloads" data-section="downloads" aria-labelledby="heading-downloads">
+      <div class="settings-section-head"><span class="section-kicker">FILES</span><h2 id="heading-downloads">Downloads</h2>
+        <p>Manage where files are stored and whether the Tor side panel opens with the browser.</p></div>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Download location</h3><p>The download manager and its left-side drawer share this folder.</p></div>
+        <div class="panel-body setting-list">
+          <div class="setting-row" data-search="download folder directory path location save files">
+            <div class="setting-copy"><label for="download_folder">Download folder</label><small>Changes are saved after you finish typing or leave the field.</small></div>
+            <div class="setting-input-with-button"><input class="setting-control" id="download_folder" name="download_folder" type="text" value="{_e(settings.download_folder)}">
+              <button type="button" id="browse-folder" aria-label="Browse for download folder">Browse…</button></div>
+          </div>
+        </div>
+      </section>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Tor panel</h3><p>Only controls panel visibility. Tor routing must still be connected separately.</p></div>
+        <div class="panel-body setting-list">
+          {checkbox("proxy_panel_visible", "Show Tor panel when the browser opens", "Remember the Tor panel's open or closed state on startup.", settings.proxy_panel_visible)}
+        </div>
+      </section>
+    </section>
+    <div id="settings-empty-search" class="panel settings-empty-search" hidden><strong>No matching settings</strong><p>Try a different term such as “theme”, “history”, or “download”.</p></div>
+  </main>
+</div>
+
+<script>
+(() => {{
+  const sectionButtons = Array.from(document.querySelectorAll('.settings-category'));
+  const sections = Array.from(document.querySelectorAll('.settings-section'));
+  const search = document.getElementById('settings-search');
+  const sidebar = document.getElementById('settings-sidebar');
+  const toggle = document.getElementById('settings-menu-toggle');
+  const closeButton = document.getElementById('settings-menu-close');
+  const backdrop = document.getElementById('settings-backdrop');
+  const status = document.getElementById('settings-save-status');
+  const empty = document.getElementById('settings-empty-search');
+  const debounceTimers = new Map();
+  let statusTimer = null;
+
+  function mobileMenu() {{ return window.matchMedia('(max-width: 850px)').matches; }}
+  function closeMenu() {{
+    document.body.classList.remove('settings-menu-open');
+    toggle.setAttribute('aria-expanded', 'false');
+    backdrop.hidden = true;
+  }}
+  function openMenu() {{
+    if (!mobileMenu()) return;
+    document.body.classList.add('settings-menu-open');
+    toggle.setAttribute('aria-expanded', 'true');
+    backdrop.hidden = false;
+  }}
+  function chooseSection(key) {{
+    const target = sections.find(section => section.dataset.section === key);
+    if (!target || target.hidden) return;
+    sections.forEach(section => section.classList.toggle('active', section === target));
+    sectionButtons.forEach(button => {{
+      const active = button.dataset.section === key;
+      button.classList.toggle('active', active);
+      button.setAttribute('aria-current', active ? 'page' : 'false');
+    }});
+    if (mobileMenu()) closeMenu();
+  }}
+  function filterSettings(query) {{
+    const needle = String(query || '').trim().toLocaleLowerCase();
+    const matchingSections = [];
+    sections.forEach(section => {{
+      let matchingRows = 0;
+      section.querySelectorAll('.setting-row').forEach(row => {{
+        const content = (row.dataset.search || '') + ' ' + row.textContent + ' ' +
+          Array.from(row.querySelectorAll('input,select')).map(input => input.value || input.name).join(' ');
+        const matches = !needle || content.toLocaleLowerCase().includes(needle);
+        row.hidden = !matches;
+        if (matches) matchingRows += 1;
+      }});
+      const matches = !needle || matchingRows > 0 ||
+        (section.id + ' ' + (section.querySelector('h2')?.textContent || '')).toLocaleLowerCase().includes(needle);
+      if (matches) matchingSections.push(section.dataset.section);
+    }});
+    sectionButtons.forEach(button => {{
+      const haystack = (button.dataset.search || '') + ' ' + button.textContent;
+      button.hidden = Boolean(needle) && !haystack.toLocaleLowerCase().includes(needle) &&
+        !matchingSections.includes(button.dataset.section);
+    }});
+    document.querySelectorAll('.settings-sidebar-heading').forEach(element => {{
+      element.hidden = Boolean(needle) && !sectionButtons.some(button => !button.hidden);
+    }});
+    const active = sections.find(section => section.classList.contains('active'));
+    if (needle && (!active || !matchingSections.includes(active.dataset.section)) && matchingSections.length) {{
+      chooseSection(matchingSections[0]);
+    }}
+    if (needle && matchingSections.length === 0) {{
+      sections.forEach(section => section.classList.remove('active'));
+    }} else if (!needle && !sections.some(section => section.classList.contains('active'))) {{
+      chooseSection('general');
+    }}
+    empty.hidden = !needle || matchingSections.length > 0;
+    sidebar.classList.toggle('searching', Boolean(needle));
+  }}
+  function showStatus(message, error = false) {{
+    status.textContent = message;
+    status.classList.toggle('error', Boolean(error));
+    status.classList.toggle('saving', message === 'Saving…');
+    clearTimeout(statusTimer);
+    if (message !== 'Saving…') {{
+      statusTimer = setTimeout(() => {{
+        if (!status.classList.contains('error')) status.textContent = 'Changes save automatically';
+      }}, 2400);
+    }}
+  }}
+  window.armaSettingSaved = (name, message, failed = false) => {{
+    if (name === 'dark_mode') {{
+      const input = document.getElementById('dark_mode');
+      const symbol = document.querySelector('.theme-symbol');
+      if (input && symbol) symbol.textContent = input.checked ? '☾' : '☀';
+    }}
+    showStatus(message || (failed ? 'Could not save this setting' : 'Setting saved'), failed);
+  }};
+  function submitSetting(input, immediate = false) {{
+    const name = input.name;
+    if (!name) return;
+    const value = input.type === 'checkbox' ? Boolean(input.checked) : input.value;
+    if (name === 'dark_mode') {{
+      const symbol = document.querySelector('.theme-symbol');
+      if (symbol) symbol.textContent = input.checked ? '☾' : '☀';
+      window.armaSetTheme(input.checked ? 'dark' : 'light');
+    }}
+    showStatus('Saving…');
+    const send = () => window.armaAction('set_browser_setting', {{name, value}});
+    if (debounceTimers.has(name)) clearTimeout(debounceTimers.get(name));
+    if (immediate || input.type === 'checkbox' || input.tagName === 'SELECT') {{
+      send();
+    }} else {{
+      const timer = setTimeout(send, 420);
+      debounceTimers.set(name, timer);
+    }}
+  }}
+
+  sectionButtons.forEach(button => button.addEventListener('click', () => chooseSection(button.dataset.section)));
+  toggle.addEventListener('click', () => {{
+    if (document.body.classList.contains('settings-menu-open')) closeMenu();
+    else openMenu();
+  }});
+  closeButton.addEventListener('click', closeMenu);
+  backdrop.addEventListener('click', closeMenu);
+  search.addEventListener('input', () => filterSettings(search.value));
+  search.addEventListener('keydown', event => {{
+    if (event.key === 'Escape') {{ search.value = ''; filterSettings(''); search.blur(); }}
+  }});
+  document.addEventListener('keydown', event => {{
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {{
+      event.preventDefault(); search.focus(); if (mobileMenu()) openMenu();
+    }}
+    if (event.key === 'Escape') closeMenu();
+  }});
+  document.querySelectorAll('.setting-control').forEach(input => {{
+    if (input.type === 'checkbox' || input.tagName === 'SELECT') {{
+      input.addEventListener('change', () => submitSetting(input, true));
+    }} else {{
+      input.addEventListener('input', () => submitSetting(input, false));
+      input.addEventListener('blur', () => submitSetting(input, true));
+    }}
+  }});
+  document.getElementById('browse-folder').addEventListener('click', () => window.armaAction('browse_download_folder'));
+  window.setDownloadFolder = value => {{
+    const input = document.getElementById('download_folder');
+    input.value = String(value || '');
+    submitSetting(input, true);
+  }};
+  window.addEventListener('resize', () => {{ if (!mobileMenu()) closeMenu(); }});
+  chooseSection('general');
+}})();
+</script>"""
+    return _shell(browser, "Settings", "Personalize browsing, privacy, performance, and files.", body, "settings")
 
 def _history_page(browser) -> str:
     history = getattr(browser, "history", None)
