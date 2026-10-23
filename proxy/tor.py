@@ -7,6 +7,11 @@ import subprocess
 import tarfile
 import tempfile
 import threading
+import time
+from pathlib import Path
+
+from torproxy.paths import user_directories
+from torproxy.tor_manager import TorManager, TorManagerError, TorSettings
 
 from proxy.config import BUNDLE_DIR, IS_WINDOWS
 from proxy.proxy import ProxyHandler, ThreadedHTTPServer, worker_data_usage_tracker
@@ -29,7 +34,7 @@ class TorRunner:
     def __init__(self, socks_port, contorl_port, dns_port):
         self.proc = None
         self.thread = None
-        self.log_file = resource_path("tor_log.txt")
+        self.log_file = str(user_directories("ARMA Browser Tor").logs / "tor.log")
         self.socks_port = int(socks_port)
         self.bridge = False
         self.bridges = ""
@@ -55,6 +60,10 @@ class TorRunner:
         self._launch_error = None
         self._torrc_path = None
         self._lifecycle_generation = 0
+        self.manager = None
+        self.state = "STOPPED"
+        self.last_error = None
+        self._last_status_report = None
 
     def _bundle_archive(self, bundle_path):
         name = os.path.basename(os.path.normpath(bundle_path))
@@ -134,66 +143,63 @@ class TorRunner:
         escaped = value.replace("\\", "\\\\").replace('"', '\\"')
         return f'"{escaped}"'
 
+    def _make_manager(self):
+        """Build a supervised Tor manager with validated ports and current bridge parsing."""
+        if not self.path_set or not self.tor_path:
+            raise TorManagerError(
+                "No verified compatible Tor bundle is configured. Open Bundles to select one."
+            )
+        directories = user_directories("ARMA Browser Tor").ensure()
+        try:
+            max_circuit = int(self.MaxCircuitDirtiness or 600)
+        except (TypeError, ValueError):
+            max_circuit = 600
+        try:
+            new_circuit = int(self.NewCircuitPeriod or 60)
+        except (TypeError, ValueError):
+            new_circuit = 60
+        max_circuit = min(86400, max(10, max_circuit))
+        new_circuit = min(86400, max(10, new_circuit))
+        return TorManager(TorSettings(
+            executable=Path(self.tor_path),
+            socks_port=int(self.socks_port),
+            control_port=int(self.contorl_port),
+            dns_port=int(self.dns_port) if self.dns_port is not None else None,
+            data_directory=directories.data / "tor",
+            geoip_path=Path(self.geoip_path) if self.geoip_path else None,
+            geoip6_path=Path(self.geoip6_path) if self.geoip6_path else None,
+            bridges_enabled=bool(self.bridge),
+            bridges=str(self.bridges or ""),
+            max_circuit_dirtiness_seconds=max_circuit,
+            new_circuit_period_seconds=new_circuit,
+            startup_timeout_seconds=180.0,
+            shutdown_timeout_seconds=float(PROCESS_STOP_TIMEOUT),
+            log_path=directories.logs / "tor.log",
+            webtunnel_sni_imitation=str(CONFIG["webtunnel_sni_imitation"] or ""),
+        ))
+
     def generate_torcc(self):
-        ports = (self.socks_port, self.contorl_port, self.dns_port)
-        if not all(self._valid_port(port) for port in ports) or len(set(ports)) != len(ports):
-            raise ValueError("Tor ports must be distinct values between 1 and 65535")
-        config = [
-            f"SocksPort 127.0.0.1:{self.socks_port}",
-            f"ControlPort 127.0.0.1:{self.contorl_port}",
-            f"DNSPort 127.0.0.1:{self.dns_port}",
-            f"GeoIPFile {self._torrc_quote(self.geoip_path)}",
-            f"GeoIPv6File {self._torrc_quote(self.geoip6_path)}",
-            f"Log {self.Log}",
-            f"MaxCircuitDirtiness {int(self.MaxCircuitDirtiness)}",
-            f"NewCircuitPeriod {int(self.NewCircuitPeriod)}",
-            f"ExcludeNodes {','.join(self.ExcludeNodes)}",
-            f"ExitNodes {','.join(self.ExitNodes)}",
-            f"StrictNodes {int(bool(self.StrictNodes))}",
-            f"ClientUseIPv4 {1 if self.ClientUseIPv4 else 0}",
-            f"ClientUseIPv6 {1 if self.ClientUseIPv6 else 0}",
-        ]
-        if self.bridge and self.bridges:
-            selected_type = next((kind for kind in self.bridge_types if kind in self.bridges), None)
-            if selected_type:
-                bridge_lines = []
-                for raw in self.bridges.splitlines():
-                    line = raw.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if any(ord(char) < 32 or ord(char) == 127 for char in line):
-                        raise ValueError("Bridge configuration contains control characters")
-                    if line.lower().startswith("bridge "):
-                        line = line[7:].strip()
-                    if not line.startswith(selected_type + " "):
-                        raise ValueError("Bridge type does not match the selected transport")
-                    bridge_lines.append("Bridge " + line)
-                if bridge_lines:
-                    if not os.path.isfile(self.lyrebird_path):
-                        raise ValueError("Selected bridge transport is missing")
-                    config.extend([
-                        "UseBridges 1",
-                        f"ClientTransportPlugin {selected_type} exec {self._torrc_quote(self.lyrebird_path)}",
-                        *bridge_lines,
-                    ])
-        return "\n".join(config)
+        """Render the same validated configuration that the supervisor will launch."""
+        return self._make_manager().render_torrc()
 
     def _emit_log(self, message):
         signal = getattr(self.app_window, "tor_log_signal", None)
         if signal is not None:
-            signal.emit(message)
+            signal.emit(str(message))
         else:
             logger.info("Tor: %s", message)
 
-    def _emit_status(self, percent):
+    def _emit_status(self, value):
         signal = getattr(self.app_window, "tor_status_signal", None)
         if signal is not None:
-            signal.emit(f"{percent}%")
+            signal.emit(value if isinstance(value, str) else f"{int(value)}%")
 
     def _emit_exit(self, message):
         signal = getattr(self.app_window, "tor_exit_signal", None)
         if signal is not None:
-            signal.emit(message)
+            signal.emit(str(message))
+        else:
+            logger.error("Tor supervisor failed: %s", message)
 
     def begin_start(self):
         with self._state_lock:
@@ -201,6 +207,8 @@ class TorRunner:
                 return None
             self._lifecycle_generation += 1
             self._stop_requested = False
+            self._launch_error = None
+            self.last_error = None
             return self._lifecycle_generation
 
     def start(self, token=None):
@@ -214,113 +222,149 @@ class TorRunner:
             if self.thread and self.thread.is_alive():
                 return False
             if not self.path_set:
-                raise RuntimeError("No verified compatible Tor bundle is configured")
+                raise TorManagerError("No verified compatible Tor bundle is configured.")
+            self.manager = None
+            self.state = "STARTING"
+            self._last_status_report = None
             self._launch_error = None
-            self.thread = threading.Thread(target=self._run, args=(token,), name="tor-runner", daemon=True)
+            self.last_error = None
+            self.thread = threading.Thread(
+                target=self._run, args=(token,), name="arma-tor-supervisor", daemon=True
+            )
             self.thread.start()
             return True
 
-    def _run(self, token):
-        process = None
-        try:
-            torrc_content = self.generate_torcc()
-            with tempfile.NamedTemporaryFile(
-                "w", encoding="utf-8", prefix="pyqt-browser-tor-", suffix=".torrc", delete=False
-            ) as torrc:
-                self._torrc_path = torrc.name
-                torrc.write(torrc_content)
-                torrc.flush()
-                os.fsync(torrc.fileno())
+    def _on_manager_status(self, token, state, progress, message):
+        state_value = getattr(state, "value", str(state))
+        normalized = str(state_value).upper().split(".")[-1]
+        with self._state_lock:
+            if token != self._lifecycle_generation or self._stop_requested:
+                return
+            self.state = normalized
+            if normalized == "FAILED":
+                self.last_error = str(message or "Tor startup failed")
+            elif normalized == "READY":
+                self.last_error = None
+        detail = " ".join(str(message or "").split())
+        report = (normalized, progress, detail)
+        if report != self._last_status_report:
+            self._last_status_report = report
+            suffix = f" ({int(progress)}%)" if progress is not None else ""
+            self._emit_log(f"Tor state: {normalized.lower()}{suffix}" + (f" — {detail}" if detail else ""))
 
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+        # Never tell the browser Tor is ready until ControlPort identity and the
+        # SOCKS listener have been verified together by TorManager.
+        if normalized == "READY" and progress is not None and int(progress) >= 100:
+            self._emit_status("100%")
+        elif progress is not None and int(progress) >= 100:
+            self._emit_status("Verifying Tor listeners…")
+        elif progress is not None:
+            self._emit_status(min(99, max(0, int(progress))))
+        elif normalized in {"STARTING", "BOOTSTRAPPING"}:
+            self._emit_status("Starting Tor…")
+
+    def _run(self, token):
+        manager = None
+        try:
+            manager = self._make_manager()
             with self._state_lock:
-                if self._stop_requested or token != self._lifecycle_generation:
+                if token != self._lifecycle_generation or self._stop_requested:
                     return
-                process = subprocess.Popen(
-                    [self.tor_path, "-f", self._torrc_path],
-                    cwd=os.path.dirname(self.tor_path),
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    bufsize=1,
-                    creationflags=flags,
-                )
-                self.proc = process
-            unexpected_exit = None
-            with open(self.log_file, "a", encoding="utf-8", errors="replace") as log:
-                if process.stdout is not None:
-                    for raw_line in iter(process.stdout.readline, b""):
-                        line = raw_line.decode("utf-8", errors="replace").rstrip()
-                        if not line:
-                            continue
-                        log.write(line + "\n")
-                        log.flush()
-                        self._emit_log(line)
-                        match = _BOOTSTRAP_RE.search(line)
-                        if match:
-                            self._emit_status(min(100, int(match.group(1))))
-                return_code = process.wait()
+                self.manager = manager
+            manager.start(on_status=lambda state, progress, message:
+                          self._on_manager_status(token, state, progress, message))
             with self._state_lock:
-                if not self._stop_requested:
-                    unexpected_exit = f"Tor exited with status {return_code}"
-            if unexpected_exit:
-                self._emit_exit(unexpected_exit)
+                if token != self._lifecycle_generation or self._stop_requested:
+                    return
+                self.state = "READY"
+            self.proc = getattr(manager, "process", None)
+            self._emit_status("100%")
+            self._emit_log("Tor bootstrap verified; authenticated control and SOCKS listeners are ready.")
+
+            # Retain a lightweight supervisor after bootstrap so an unexpected Tor
+            # exit is surfaced immediately and the proxy can remain fail-closed.
+            while True:
+                with self._state_lock:
+                    if token != self._lifecycle_generation or self._stop_requested:
+                        break
+                process = getattr(manager, "process", None)
+                self.proc = process
+                if process is not None and process.poll() is not None:
+                    raise TorManagerError(
+                        f"Tor exited unexpectedly (exit code {process.returncode}). "
+                        "Traffic remains blocked by the local proxy until Tor is ready again."
+                    )
+                time.sleep(0.35)
         except Exception as exc:
             self._launch_error = exc
-            logger.exception("Tor process failed (%s)", type(exc).__name__)
+            self.last_error = str(exc)
             with self._state_lock:
-                unexpected = not self._stop_requested and token == self._lifecycle_generation
-            if unexpected:
-                self._emit_exit(f"Tor could not start ({type(exc).__name__})")
+                active = token == self._lifecycle_generation and not self._stop_requested
+                if active:
+                    self.state = "FAILED"
+            if active:
+                logger.warning("Tor supervisor failed: %s", type(exc).__name__, exc_info=True)
+                self._emit_log(f"Tor startup/runtime failure: {exc}")
+                self._emit_exit(str(exc))
         finally:
-            if process is not None:
+            if manager is not None:
                 try:
-                    if process.stdout:
-                        process.stdout.close()
-                except OSError:
-                    pass
+                    manager.stop()
+                except Exception:
+                    logger.debug("Tor manager cleanup raised after stop/failure.", exc_info=True)
             with self._state_lock:
-                if self.proc is process:
+                if token == self._lifecycle_generation:
                     self.proc = None
-            self._remove_torrc()
+                    if self._stop_requested:
+                        self.state = "STOPPED"
+                if self.manager is manager:
+                    self.manager = None
 
     def _remove_torrc(self):
-        path, self._torrc_path = self._torrc_path, None
-        if path and os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError as exc:
-                logger.warning("Could not remove temporary Tor config (%s)", type(exc).__name__)
+        """Compatibility shim; TorManager securely owns the torrc lifecycle."""
+        return None
+
+    def request_new_identity(self):
+        manager = self.manager
+        if manager is None or self.state != "READY":
+            raise TorManagerError("Tor is not ready; identity changes are unavailable.")
+        return manager.request_new_identity()
 
     def stop(self):
         with self._state_lock:
             self._lifecycle_generation += 1
             self._stop_requested = True
+            manager = self.manager
             process = self.proc
             thread = self.thread
+            self.state = "STOPPING"
+        if manager is not None:
+            try:
+                manager.stop()
+            except Exception as exc:
+                logger.warning("TorManager shutdown raised (%s)", type(exc).__name__)
         if process is not None and process.poll() is None:
             try:
                 process.terminate()
                 process.wait(timeout=PROCESS_STOP_TIMEOUT)
-            except subprocess.TimeoutExpired:
-                logger.warning("Tor did not stop in time; terminating it forcefully")
+            except (OSError, subprocess.TimeoutExpired):
                 try:
                     process.kill()
                     process.wait(timeout=2)
                 except (OSError, subprocess.TimeoutExpired):
-                    logger.error("Tor process did not terminate after kill request")
-            except OSError as exc:
-                logger.warning("Could not terminate Tor process (%s)", type(exc).__name__)
+                    logger.error("Tor process did not terminate after force termination.")
         if thread and thread is not threading.current_thread():
             thread.join(timeout=THREAD_STOP_TIMEOUT)
             if thread.is_alive():
-                logger.error("Tor monitor thread did not stop within the timeout")
+                logger.error("Tor supervisor did not stop within the timeout")
         self._remove_torrc()
         with self._state_lock:
             if self.thread is thread and (thread is None or not thread.is_alive()):
                 self.thread = None
             if process is not None and process.poll() is not None and self.proc is process:
                 self.proc = None
+            self.state = "STOPPED"
+
 
 
 class Runner:

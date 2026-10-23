@@ -2,6 +2,7 @@
 # Keep one PySide6 pin: it pins matching Addons, Essentials, and shiboken6 wheels.
 PySide6==6.10.0
 qtawesome==1.4.2
+psutil>=5.9,<8
 PySocks==1.7.1
 requests==2.34.2
 beautifulsoup4==4.15.0
