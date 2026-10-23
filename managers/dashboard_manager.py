@@ -27,6 +27,8 @@ DEFAULT_SHORTCUTS = [
     {"title": "YouTube", "url": "https://www.youtube.com/"},
 ]
 
+DEFAULT_WIDGET_ORDER = ["bookmarks", "recent", "closed", "notes", "focus"]
+
 DEFAULTS = {
     "wallpaper": "aurora",
     "overlay": 20,
@@ -38,6 +40,7 @@ DEFAULTS = {
     "animations": True,
     "density": "comfortable",
     "widgets": {"bookmarks": True, "recent": True, "closed": True, "notes": True, "focus": True},
+    "widget_order": DEFAULT_WIDGET_ORDER,
     "shortcuts": DEFAULT_SHORTCUTS,
     "notes": "",
     "quick_notes": [],
@@ -131,6 +134,17 @@ class DashboardManager:
         widgets = data.get("widgets")
         if isinstance(widgets, dict):
             result["widgets"].update({key: value for key, value in widgets.items() if key in result["widgets"] and isinstance(value, bool)})
+        widget_order = data.get("widget_order")
+        if isinstance(widget_order, list):
+            seen_widgets = set()
+            normalized_order = []
+            for name in widget_order:
+                if name in DEFAULT_WIDGET_ORDER and name not in seen_widgets:
+                    normalized_order.append(name)
+                    seen_widgets.add(name)
+            result["widget_order"] = normalized_order + [
+                name for name in DEFAULT_WIDGET_ORDER if name not in seen_widgets
+            ]
         result["shortcuts"] = normalize_shortcuts(data.get("shortcuts", DEFAULT_SHORTCUTS))
         notes = data.get("notes")
         if isinstance(notes, str):
@@ -328,6 +342,14 @@ class DashboardManager:
                     for name, enabled in value.items()
                 ):
                     raise ValueError("Widget preferences must be boolean values.")
+            if key == "widget_order":
+                if (
+                    not isinstance(value, list)
+                    or len(value) > len(DEFAULT_WIDGET_ORDER)
+                    or any(not isinstance(name, str) or name not in DEFAULT_WIDGET_ORDER for name in value)
+                    or len(set(value)) != len(value)
+                ):
+                    raise ValueError("Widget order contains an invalid or duplicate widget.")
             if key == "notes" and not isinstance(value, str):
                 raise ValueError("Notes must be text.")
             if key == "quick_notes" and (
