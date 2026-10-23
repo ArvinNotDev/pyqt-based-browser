@@ -88,9 +88,13 @@ class NavigationBar(QToolBar):
     def __init__(self, profiles_list, settings: Settings | None = None, parent=None):
         super().__init__("Navigation", parent)
         self.setObjectName("NavigationBar")
+        self.setLayoutDirection(Qt.LeftToRight)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setMinimumWidth(0)
+        self.setFixedHeight(42)
         self.setMovable(False)
         self.setFloatable(False)
-        self.setContentsMargins(8, 1, 8, 1)
+        self.setContentsMargins(8, 0, 8, 0)
         self.setIconSize(QSize(16, 16))
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
@@ -141,8 +145,10 @@ class NavigationBar(QToolBar):
         self.url_bar.setObjectName("urlBar")
         self.url_bar.setPlaceholderText("Search or enter address")
         self.url_bar.setFont(QFont("Segoe UI", 10))
-        self.url_bar.setMinimumWidth(100)
-        self.url_bar.setMinimumHeight(29)
+        self.url_bar.setLayoutDirection(Qt.LeftToRight)
+        self.url_bar.setMinimumWidth(0)
+        self.url_bar.setMinimumHeight(25)
+        self.url_bar.setMaximumHeight(32)
         self.url_bar.setClearButtonEnabled(True)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.url_bar.setAccessibleName("Address and search bar")
@@ -210,9 +216,8 @@ class NavigationBar(QToolBar):
         self.menu_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         self.menu_button.setToolTip("Browser menu")
         self.menu_button.setAccessibleName("Browser menu")
-        self.menu_button.setPopupMode(QToolButton.InstantPopup)
-        self.menu_button.setMenu(self.browser_menu)
         self.menu_button.setProperty("menuOpen", False)
+        self.menu_button.clicked.connect(self._show_browser_menu)
         self.browser_menu.aboutToShow.connect(lambda: self._set_menu_open(True))
         self.browser_menu.aboutToHide.connect(lambda: self._set_menu_open(False))
         self._add_widget(self.menu_button)
@@ -438,6 +443,12 @@ class NavigationBar(QToolBar):
         rect = self.actionGeometry(self.profile_btn)
         pos = self.mapToGlobal(rect.bottomLeft() if rect.isValid() else QPoint(0, self.height()))
         self.profile_menu.popup(pos)
+
+    def _show_browser_menu(self, _checked: bool = False) -> None:
+        button = self.menu_button
+        bottom = button.mapToGlobal(QPoint(0, button.height()))
+        menu_width = self.browser_menu.sizeHint().width()
+        self.browser_menu.popup(QPoint(bottom.x() + button.width() - menu_width, bottom.y()))
 
     def _set_menu_open(self, opened: bool) -> None:
         self.menu_button.setProperty("menuOpen", bool(opened))
