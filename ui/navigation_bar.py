@@ -224,8 +224,10 @@ class NavigationBar(QToolBar):
 
         self.menu_button = QToolButton(self)
         self.menu_button.setObjectName("menuButton")
-        self.menu_button.setText("⋮")
-        self.menu_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
+        self.menu_button.setText("")
+        self.menu_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+        self.menu_button.setIconSize(QSize(18, 18))
+        self.menu_button.setFixedSize(QSize(36, 32))
         self.menu_button.setToolTip("Browser menu")
         self.menu_button.setAccessibleName("Browser menu")
         self.menu_button.setProperty("menuOpen", False)
@@ -409,10 +411,28 @@ class NavigationBar(QToolBar):
         needle = (text or "").casefold()
         return [value for value in self.history if isinstance(value, str) and needle in value.casefold()]
 
+    @staticmethod
+    def _menu_dots_icon(color: str) -> QIcon:
+        """Draw the overflow glyph geometrically so its alignment is font-independent."""
+        pixmap = QPixmap(24, 24)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(color))
+        for top in (4, 10, 16):
+            painter.drawEllipse(10, top, 4, 4)
+        painter.end()
+        return QIcon(pixmap)
+
     def apply_theme(self):
         dark = bool(getattr(self.settings, "dark_mode", False))
         theme = dark_theme if dark else light_theme
         self.setStyleSheet(theme)
+        self.menu_button.setIcon(
+            self._menu_dots_icon("#d6dfed" if dark else "#465366")
+        )
+        self.menu_button.setIconSize(QSize(18, 18))
         if dark:
             for action, path in self._navigation_icon_paths.items():
                 action.setIcon(self._tinted_icon(path, "#c7ced8"))
