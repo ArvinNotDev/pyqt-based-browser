@@ -116,6 +116,14 @@ def _runtime_arguments(arguments):
 
 
 if __name__ == "__main__":
+    # A one-file executable extracts bundled resources to a temporary directory.
+    # Mutable settings, profiles, browser storage, and proxy state must instead live
+    # in a stable, writable per-user folder.
+    if getattr(sys, "frozen", False):
+        from app_paths import app_data_dir
+
+        os.chdir(app_data_dir())
+
     qt_arguments, tor_mode, resume_path, parent_pid = _runtime_arguments(sys.argv[1:])
     if parent_pid is not None and not _wait_for_parent_exit(parent_pid):
         raise SystemExit("ARMA Browser could not safely reopen its profile after switching network mode.")
