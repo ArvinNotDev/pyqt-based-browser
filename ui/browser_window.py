@@ -1045,8 +1045,11 @@ class BrowserWindow(QMainWindow):
         self.view_container = QWidget()
         self.view_container.setObjectName("browserContentCard")
         self.view_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.view_container.setAutoFillBackground(False)
         self.view_layout = QVBoxLayout(self.view_container)
-        self.view_layout.setContentsMargins(5, 5, 5, 5)
+        # This is a layout host, not a visible card. Let the page meet the browser
+        # shell directly so the viewport has one clean rounded edge, not two boxes.
+        self.view_layout.setContentsMargins(0, 0, 0, 0)
 
         self._preview_label = QLabel(self)
         self._preview_label.setWindowFlags(Qt.ToolTip)
@@ -2916,7 +2919,7 @@ class BrowserWindow(QMainWindow):
                 allowed = {
                     "overlay", "blur", "glass", "accent", "clock_24h",
                     "show_seconds", "animations", "density", "widgets", "widget_order",
-                    "focus_minutes", "break_minutes",
+                    "widget_sizes", "focus_minutes", "break_minutes",
                 }
                 manager.update({key: value for key, value in payload.items() if key in allowed})
             elif action == "set_wallpaper":

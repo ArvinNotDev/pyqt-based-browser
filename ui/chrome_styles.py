@@ -840,3 +840,56 @@ QPushButton#tabPlusButton {
     padding: 0; border-radius: 8px;
 }
 """
+
+
+# Consolidated final refinements for settings readability, bookmark button, and a single page surface.
+LIGHT_CHROME_POLISH += """
+QToolButton#bookmarkMenuButton {
+    color: #34445b; background: rgba(255,255,255,145);
+    border: 1px solid rgba(129,151,180,100);
+    border-radius: 10px; padding: 4px 10px;
+    min-width: 100px; max-width: 126px; min-height: 26px; max-height: 30px;
+    text-align: left; font-size: 12px; font-weight: 650;
+}
+QToolButton#bookmarkMenuButton::menu-indicator { image: none; width: 0; subcontrol-origin: padding; }
+QToolButton#bookmarkMenuButton:hover { background: #ffffff; border-color: #9db4d4; color: #244f87; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
+QWebEngineView#browserPageView { border: none; padding: 0; }
+QDialog#settingsDialog { font-size: 13px; }
+QLabel#dialogTitle { font-size: 22px; font-weight: 750; }
+QLabel#settingsSubtitle { font-size: 13px; }
+QLabel#settingsSectionTitle { font-size: 19px; font-weight: 750; }
+QLabel#settingsSectionDescription { font-size: 13px; line-height: 1.4; }
+QListWidget#settingsNav { min-width: 0; padding: 3px; }
+QListWidget#settingsNav::item { text-align: left; padding: 11px 13px; font-size: 14px; font-weight: 550; }
+QLabel#settingsNote { font-size: 12px; line-height: 1.45; }
+QWidget#dashboardWidgetOptionRow { background: transparent; border: none; }
+QWidget#dashboardWidgetOptionRow QCheckBox { font-size: 13px; min-height: 32px; }
+QComboBox#dashboardWidgetSize { min-width: 118px; min-height: 30px; padding: 3px 9px; border-radius: 8px; }
+QDialog#settingsDialog QFormLayout QLabel { font-size: 13px; }
+"""
+DARK_CHROME_POLISH += """
+QToolButton#bookmarkMenuButton {
+    color: #e0e9f7; background: rgba(56,68,86,170);
+    border: 1px solid rgba(133,154,184,105);
+    border-radius: 10px; padding: 4px 10px;
+    min-width: 100px; max-width: 126px; min-height: 26px; max-height: 30px;
+    text-align: left; font-size: 12px; font-weight: 650;
+}
+QToolButton#bookmarkMenuButton::menu-indicator { image: none; width: 0; subcontrol-origin: padding; }
+QToolButton#bookmarkMenuButton:hover { background: #35465d; border-color: #7298cc; color: #f3f7ff; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
+QWebEngineView#browserPageView { border: none; padding: 0; }
+QDialog#settingsDialog { font-size: 13px; }
+QLabel#dialogTitle { font-size: 22px; font-weight: 750; }
+QLabel#settingsSubtitle { font-size: 13px; }
+QLabel#settingsSectionTitle { font-size: 19px; font-weight: 750; }
+QLabel#settingsSectionDescription { font-size: 13px; }
+QListWidget#settingsNav { min-width: 0; padding: 3px; }
+QListWidget#settingsNav::item { text-align: left; padding: 11px 13px; font-size: 14px; font-weight: 550; }
+QLabel#settingsNote { font-size: 12px; }
+QWidget#dashboardWidgetOptionRow { background: transparent; border: none; }
+QWidget#dashboardWidgetOptionRow QCheckBox { font-size: 13px; min-height: 32px; }
+QComboBox#dashboardWidgetSize { min-width: 118px; min-height: 30px; padding: 3px 9px; border-radius: 8px; }
+QDialog#settingsDialog QFormLayout QLabel { font-size: 13px; }
+"""
