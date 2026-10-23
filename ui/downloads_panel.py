@@ -305,7 +305,7 @@ class DownloadsPanel(QFrame):
             delete_file = None
         open_file.setEnabled(state == "completed")
         show_folder.setEnabled(bool(download.get("path")))
-        selected = menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
+        selected = self._exec_item_menu(menu, button)
         download_id = download.get("id")
         if selected is copy_url:
             QApplication.clipboard().setText(str(download.get("url", "")))
@@ -323,6 +323,11 @@ class DownloadsPanel(QFrame):
             self._run_manager_action("remove_download", download_id, "Could not remove this item.")
         elif selected is delete_file:
             self._delete_file(download)
+
+    @staticmethod
+    def _exec_item_menu(menu: QMenu, button: QWidget):
+        """Show a download action menu; isolated for deterministic UI tests."""
+        return menu.exec(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _delete_file(self, download: dict) -> None:
         answer = QMessageBox.question(
