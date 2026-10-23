@@ -426,8 +426,8 @@ QToolButton#downloadsModeButton:hover { background: rgba(57,121,214,24); border-
 
 /* Precision pass: fixed-centre menu control and legible frosted downloads material. */
 QToolButton#menuButton {
-    min-width: 36px; max-width: 36px;
-    min-height: 32px; max-height: 32px;
+    min-width: 34px; max-width: 34px;
+    min-height: 30px; max-height: 30px;
     padding: 0; margin: 0;
     background: rgba(255,255,255,170);
     color: #455164;
@@ -880,8 +880,8 @@ QToolButton#downloadsModeButton:hover { background: rgba(130,175,244,32); border
 
 /* Precision pass: fixed-centre menu control and legible frosted downloads material. */
 QToolButton#menuButton {
-    min-width: 36px; max-width: 36px;
-    min-height: 32px; max-height: 32px;
+    min-width: 34px; max-width: 34px;
+    min-height: 30px; max-height: 30px;
     padding: 0; margin: 0;
     background: rgba(38,47,60,222);
     color: #dce5f3;
