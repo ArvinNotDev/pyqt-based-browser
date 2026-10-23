@@ -21,6 +21,18 @@ def _load_startup_settings(profile_name=None):
     return settings
 
 
+
+def _normalize_application_font(app):
+    """Ensure Qt's application font has a usable point size on every platform."""
+    from PySide6.QtGui import QFont
+
+    app_font = QFont(app.font())
+    if app_font.pointSize() <= 0:
+        app_font.setPointSize(10)
+        app.setFont(app_font)
+    return app_font
+
+
 def _wait_for_parent_exit(pid: int, timeout: float = 60.0) -> bool:
     """Wait before opening a profile directory still owned by the old process."""
     if pid <= 0:
@@ -112,17 +124,11 @@ if __name__ == "__main__":
     _load_startup_settings(selected_profile)
 
     # No Tor proxy is configured for an ordinary browser session.
-    from PySide6.QtGui import QFont
     from PySide6.QtWidgets import QApplication, QMessageBox
     from ui.browser_window import BrowserWindow
 
     app = QApplication([sys.argv[0], *qt_arguments])
-    # Some platform/style fonts report an unspecified point size (-1). Normalize
-    # the application default before constructing custom controls and dialogs.
-    app_font = QFont(app.font())
-    if app_font.pointSize() <= 0:
-        app_font.setPointSize(10)
-        app.setFont(app_font)
+    _normalize_application_font(app)
     app.setApplicationName("ARMA Browser")
     app.setApplicationDisplayName("ARMA Browser")
     try:
