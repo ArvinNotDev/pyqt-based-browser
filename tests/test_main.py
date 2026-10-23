@@ -140,6 +140,7 @@ class StartupConfigurationTests(unittest.TestCase):
         class FakeApplication:
             def __init__(self):
                 self.current_font = QFont()
+                self.current_font.setPixelSize(13)
 
             def font(self):
                 return self.current_font
