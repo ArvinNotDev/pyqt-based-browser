@@ -60,13 +60,11 @@ class Window(QMainWindow):
         
         self.settingWidget = SettingWindow(self)
         self.stack.addWidget(self.settingWidget)
-        
+
         self.block_host_window = BlcokHostsWindow(self)
-        self.stack.addWidget(self.block_host_window)
-        
         self.exclude_host_window = ExcludeHostsWindow(self)
-        self.stack.addWidget(self.exclude_host_window)
-        
+        self.settingWidget.attach_host_pages(self.block_host_window, self.exclude_host_window)
+
         self.updater_window = UpdaterWindow(self)
         self.stack.addWidget(self.updater_window)
         
@@ -158,7 +156,7 @@ class Window(QMainWindow):
         if not 0 <= index < self.stack.count():
             return
         self.stack.setCurrentIndex(index)
-        nav_title = "Home" if index == 0 else ("Bundles" if index == 4 else "Settings")
+        nav_title = "Home" if index == 0 else ("Bundles" if index == 2 else "Settings")
         dark = self._display_mode == "dark"
         for button, icon_name in zip(
             getattr(self, "_proxy_nav_buttons", []),
@@ -175,13 +173,15 @@ class Window(QMainWindow):
         self._show_page_index(1)
 
     def _show_block_host(self):
-        self._show_page_index(2)
+        self._show_setting()
+        self.settingWidget.show_category("blocked hosts")
 
     def _show_exclude_host(self):
-        self._show_page_index(3)
+        self._show_setting()
+        self.settingWidget.show_category("excluded hosts")
 
     def _show_updater(self):
-        self._show_page_index(4)
+        self._show_page_index(2)
 
     def apply_theme(self, mode=None):
         settings = getattr(self._parent, "settings", None)

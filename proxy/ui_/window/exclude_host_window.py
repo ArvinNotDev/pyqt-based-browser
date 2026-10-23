@@ -20,10 +20,16 @@ class ExcludeHostsWindow(QWidget):
         self._parent = parent    
         main_layout = QVBoxLayout(self)
         self.setLayout(main_layout)
-        main_layout.addWidget(QLabel("Exclude host:"))
+        heading = QLabel("Excluded hosts")
+        heading.setObjectName("proxyRulesTitle")
+        description = QLabel("Sites listed here bypass Tor and use the browser's direct route.")
+        description.setWordWrap(True)
+        main_layout.addWidget(heading)
+        main_layout.addWidget(description)
         load_exclude()
 
         self.hosts_list = QListWidget()
+        self.hosts_list.setObjectName("proxyHostRulesList")
         main_layout.addWidget(self.hosts_list)
         self.hosts_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.hosts_list.customContextMenuRequested.connect(self.show_context_menu)
@@ -31,10 +37,12 @@ class ExcludeHostsWindow(QWidget):
         self._update_hosts_list()
         
         self.inp_host = QLineEdit()
+        self.inp_host.setObjectName("proxyHostInput")
         self.inp_host.setPlaceholderText("Enter a host like 'example.com'")
         main_layout.addWidget(self.inp_host)
 
-        self.btn_add = QPushButton("Add")
+        self.btn_add = QPushButton("Exclude from Tor")
+        self.btn_add.setObjectName("proxyHostAddButton")
         main_layout.addWidget(self.btn_add)
         self.btn_add.clicked.connect(self.add_to_list)
         
