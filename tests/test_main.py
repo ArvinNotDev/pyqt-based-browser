@@ -27,10 +27,13 @@ class StartupConfigurationTests(unittest.TestCase):
                         {"QTWEBENGINE_CHROMIUM_FLAGS": "--enable-features=TestFeature"},
                     ):
                         _load_startup_settings()
-                        self.assertEqual(
-                            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"],
-                            "--enable-features=TestFeature",
-                        )
+                        flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+                        # Startup also appends Chromium's focused WebGPU opt-out
+                        # because the persisted profile default is conservative;
+                        # caller-provided switches must remain untouched.
+                        self.assertIn("--enable-features=TestFeature", flags)
+                        self.assertIn("--disable-features=WebGPU", flags)
+                        self.assertEqual(flags.count("--enable-features=TestFeature"), 1)
             finally:
                 os.chdir(original_cwd)
 
