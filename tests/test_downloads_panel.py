@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from PySide6.QtWidgets import QApplication, QMenu, QPushButton
+from PySide6.QtWidgets import QApplication, QPushButton
 
 from ui.downloads_panel import DownloadsPanel
 
@@ -32,7 +32,7 @@ def test_failed_download_actions_button_opens_the_context_menu():
     def choose_copy_url(menu, *_args):
         return next(action for action in menu.actions() if action.text() == "Copy URL")
 
-    with patch.object(QMenu, "exec", choose_copy_url):
+    with patch.object(panel, "_exec_item_menu", choose_copy_url):
         primary.click()
 
     assert QApplication.clipboard().text() == download_url
