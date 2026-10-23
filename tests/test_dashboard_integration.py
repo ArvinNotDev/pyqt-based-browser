@@ -538,7 +538,7 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     assert not first_tab.favicon.pixmap().isNull()
     assert first_tab.height() == TAB_HEIGHT - 2
     assert tabs.height() == TAB_HEIGHT + 4
-    assert tabs.scroll.height() == TAB_HEIGHT
+    assert tabs.scroll.height() == TAB_HEIGHT - 2
 
     tabs.set_loading(first, True)
     assert first_tab._loading is True

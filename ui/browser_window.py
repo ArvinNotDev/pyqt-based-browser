@@ -372,7 +372,7 @@ class CustomTabBar(QFrame):
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(self.holder)
-        self.scroll.setFixedHeight(TAB_HEIGHT)
+        self.scroll.setFixedHeight(TAB_HEIGHT - 2)
         self.scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.scroll.installEventFilter(self)
         self.scroll.viewport().installEventFilter(self)
@@ -1004,8 +1004,6 @@ class BrowserWindow(QMainWindow):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
             if hasattr(self.navbar, "downloads_panel_requested"):
                 self.navbar.downloads_panel_requested.connect(self.toggle_downloads_panel)
-            if hasattr(self.navbar, "theme_toggle_requested"):
-                self.navbar.theme_toggle_requested.connect(self.toggle_theme)
             if hasattr(self.navbar, "open_external_requested"):
                 self.navbar.open_external_requested.connect(self.open_current_page_externally)
             if hasattr(self.navbar, "reload_bypass_cache_requested"):
