@@ -425,6 +425,36 @@ QToolButton#downloadsModeButton {
 QToolButton#downloadsModeButton:hover { background: rgba(57,121,214,24); border-color: #8bb4ed; }
 QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 QFrame#downloadsOverlayTint { background: rgba(12,18,30,42); border: none; }
+
+/* Precision pass: fixed-centre menu control and legible frosted downloads material. */
+QToolButton#menuButton {
+    min-width: 36px; max-width: 36px;
+    min-height: 32px; max-height: 32px;
+    padding: 0; margin: 0;
+    background: rgba(255,255,255,170);
+    color: #455164;
+    border: 1px solid rgba(190,205,225,205);
+    border-radius: 10px;
+}
+QToolButton#menuButton:hover, QToolButton#menuButton[menuOpen="true"] {
+    background: rgba(223,235,251,245);
+    border-color: rgba(112,155,214,225);
+}
+QToolButton#menuButton[gamingMode="true"] { background: rgba(218,232,252,240); border-color: #8bb4ed; }
+QFrame#downloadsPanel {
+    background: rgba(239,245,254,218);
+    border: 1px solid rgba(255,255,255,232);
+    border-radius: 18px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,205), stop:0.42 rgba(239,246,255,176),
+        stop:1 rgba(204,220,243,188));
+    border: 1px solid rgba(255,255,255,205);
+    border-radius: 16px;
+}
+QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
+QWidget#downloadsListHost { background: transparent; border: none; }
 """
 
 
@@ -851,4 +881,34 @@ QToolButton#downloadsModeButton {
 QToolButton#downloadsModeButton:hover { background: rgba(130,175,244,32); border-color: rgba(130,175,244,110); }
 QFrame#downloadsPanel { border-top-left-radius: 0; border-bottom-left-radius: 0; }
 QFrame#downloadsOverlayTint { background: rgba(6,10,18,45); border: none; }
+
+/* Precision pass: fixed-centre menu control and legible frosted downloads material. */
+QToolButton#menuButton {
+    min-width: 36px; max-width: 36px;
+    min-height: 32px; max-height: 32px;
+    padding: 0; margin: 0;
+    background: rgba(38,47,60,222);
+    color: #dce5f3;
+    border: 1px solid rgba(255,255,255,40);
+    border-radius: 10px;
+}
+QToolButton#menuButton:hover, QToolButton#menuButton[menuOpen="true"] {
+    background: rgba(63,79,102,245);
+    border-color: rgba(130,175,244,135);
+}
+QToolButton#menuButton[gamingMode="true"] { background: rgba(53,70,95,245); border-color: rgba(130,175,244,145); }
+QFrame#downloadsPanel {
+    background: rgba(19,25,34,228);
+    border: 1px solid rgba(255,255,255,45);
+    border-radius: 18px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(82,98,120,180), stop:0.42 rgba(43,54,71,194),
+        stop:1 rgba(24,31,42,210));
+    border: 1px solid rgba(255,255,255,35);
+    border-radius: 16px;
+}
+QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
+QWidget#downloadsListHost { background: transparent; border: none; }
 """
