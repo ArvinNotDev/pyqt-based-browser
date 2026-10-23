@@ -1,23 +1,26 @@
 import os
 import re
 import time
+import json
 import logging
+from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QTimer, Signal, QPoint, QRect, QPropertyAnimation,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QPropertyAnimation,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu, QMessageBox, QSplitter
+    QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
 )
 from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
+from PySide6.QtWebChannel import QWebChannel
 
 from .settings import Settings
 from .navigation_bar import NavigationBar
@@ -25,7 +28,15 @@ from .settings_window import SettingsWindow
 from .title_bar import CustomTitleBar, ResizeHandle
 from .history_window import HistoryWindow
 from .downloads_panel import DownloadsPanel
+from .dashboard.internal_page import (
+    DASHBOARD_SCHEME,
+    DASHBOARD_URL,
+    DashboardSchemeHandler,
+    register_dashboard_scheme,
+)
 from managers.history_manager import History
+from managers.dashboard_manager import DashboardManager
+from .dashboard.bridge import DashboardBridge
 from .themes import light_theme, dark_theme
 from .url_utils import URLInputError, resolve_address_input
 from proxy import proxy as proxy_routing
@@ -66,6 +77,7 @@ TAB_HEIGHT = 38
 TAB_SPACING = 4
 SCROLL_STEP = 140
 logger = logging.getLogger(__name__)
+register_dashboard_scheme()
 
 
 class TabButton(QFrame):
@@ -380,6 +392,38 @@ class BrowserPage(QWebEnginePage):
     def __init__(self, browser: "BrowserWindow", profile: QWebEngineProfile, parent):
         super().__init__(profile, parent)
         self.browser = browser
+        self._dashboard_active = False
+        self._dashboard_channel: QWebChannel | None = None
+        self._dashboard_bridge: DashboardBridge | None = None
+
+    def _enable_dashboard_bridge(self) -> None:
+        was_active = self._dashboard_active
+        self._dashboard_active = True
+        if self._dashboard_channel is None:
+            self._dashboard_channel = QWebChannel(self)
+            self._dashboard_bridge = DashboardBridge(self.browser, self)
+            self._dashboard_channel.registerObject("armaDashboard", self._dashboard_bridge)
+        if not was_active:
+            self.setWebChannel(self._dashboard_channel)
+
+    def _disable_dashboard_bridge(self) -> None:
+        self._dashboard_active = False
+        self.setWebChannel(None)
+
+    def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
+        if url.scheme() == "arma" and url.host() == "dashboard":
+            if not is_main_frame:
+                return False
+            # Browser history can return to the internal page after external
+            # navigation. Its content always comes from our scheme handler.
+            self._enable_dashboard_bridge()
+            self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
+        if is_main_frame and self._dashboard_active:
+            # The dashboard origin is served only by our app-owned handler.
+            self._disable_dashboard_bridge()
+            self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
+        return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
 
     def createWindow(self, window_type):
         index = self.browser.new_tab("about:blank", make_active=True)
@@ -418,7 +462,9 @@ class BrowserWindow(QMainWindow):
             self.selected_profile = self.settings.profiles_list[0]
         self.settings.load(self.selected_profile)
 
-        self._closed_tab_urls: List[str] = []
+        self._closed_tab_urls: Dict[tuple[str, bool], List[str]] = {}
+        self._private_dashboard_notes: Dict[str, str] = {}
+        self._private_dashboard_quick_notes: Dict[str, List[str]] = {}
         self._browser_shortcuts: Dict[QAction, list[QKeySequence]] = {}
         self._ui_shortcut_actions: set[QAction] = set()
         self._gaming_mode_active = False
@@ -432,6 +478,7 @@ class BrowserWindow(QMainWindow):
             os.makedirs(self.storage_path, exist_ok=True)
 
         self._profiles: Dict[tuple[str, bool], QWebEngineProfile] = {}
+        self._dashboard_handlers: Dict[int, DashboardSchemeHandler] = {}
         self._profile_default_user_agents: Dict[int, str] = {}
         self.profile = self._get_profile(self.selected_profile)
         self._apply_profile_settings(self.profile)
@@ -442,7 +489,7 @@ class BrowserWindow(QMainWindow):
         self.navbar = NavigationBar(self.settings.profiles_list, settings=self.settings)
         self.navbar.history = self.history.history if self.history else {}
         self.navbar.profile_selected.connect(self.on_profile_selected)
-        self.navbar.new_tab_requested.connect(lambda: self.new_tab(self.settings.homepage))
+        self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(4)
@@ -454,7 +501,7 @@ class BrowserWindow(QMainWindow):
 
         self.tabbar = CustomTabBar()
         self.tabbar.setObjectName("browserTabBar")
-        self.tabbar.new_tab_requested.connect(lambda: self.new_tab(self.settings.homepage))
+        self.tabbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
         self.tabbar.tab_changed.connect(self._on_tab_changed)
         # connect to our custom close flow
         self.tabbar.tab_closed.connect(self.request_close_tab)
@@ -483,9 +530,11 @@ class BrowserWindow(QMainWindow):
         root.setObjectName("browserWindowRoot")
         layout = QVBoxLayout(root)
         layout.setContentsMargins(8, 8, 8, 8)
+        self._root_layout = layout
         layout.setSpacing(0)
         shell = QFrame(root)
         shell.setObjectName("browserShell")
+        self._shell = shell
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(1, 1, 1, 1)
         shell_layout.setSpacing(0)
@@ -543,10 +592,11 @@ class BrowserWindow(QMainWindow):
             "bottom_right": ResizeHandle(self, Qt.BottomEdge | Qt.RightEdge, diagonal_down),
         }
         self._update_resize_handles()
+        self._sync_window_frame()
 
         try:
             self.navbar.url_submitted.connect(self.navigate)
-            self.navbar.home_clicked.connect(lambda: self.navigate(self.settings.homepage))
+            self.navbar.home_clicked.connect(self.open_homepage)
             if hasattr(self.navbar, "back_btn"):
                 self.navbar.back_btn.triggered.connect(lambda: self._do_on_current(lambda v: v.back()))
             if hasattr(self.navbar, "forward_btn"):
@@ -566,7 +616,7 @@ class BrowserWindow(QMainWindow):
         except (AttributeError, RuntimeError):
             logger.exception("Could not connect one or more navigation actions")
 
-        QTimer.singleShot(0, lambda: self.new_tab(self.settings.homepage))
+        QTimer.singleShot(0, lambda: self.new_tab(self._startup_address()))
         self._last_progress_ts = 0
         
         self.dock = QDockWidget("Proxy", self)
@@ -595,6 +645,18 @@ class BrowserWindow(QMainWindow):
         if event.type() == QEvent.WindowStateChange and hasattr(self, "title_bar"):
             self.title_bar.sync_maximize_button()
             self._update_resize_handles()
+            self._sync_window_frame()
+
+    def _sync_window_frame(self) -> None:
+        if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
+            return
+        edge_to_edge = self.isMaximized() or self.isFullScreen()
+        margin = 0 if edge_to_edge else 8
+        self._root_layout.setContentsMargins(margin, margin, margin, margin)
+        self._shell.setProperty("edgeToEdge", edge_to_edge)
+        self._shell.style().unpolish(self._shell)
+        self._shell.style().polish(self._shell)
+        self._shell.update()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -692,6 +754,7 @@ class BrowserWindow(QMainWindow):
             "Previous tab", ["Ctrl+Shift+Tab", "Ctrl+PageUp"], lambda: self._cycle_tabs(-1)
         )
         self._add_shortcut("Focus address bar", ["Ctrl+L", "Alt+D"], self.navbar._focus_url_bar)
+        self._add_shortcut("Toggle fullscreen", ["F11"], self.toggle_fullscreen)
         for number in range(1, 9):
             self._add_shortcut(
                 f"Switch to tab {number}",
@@ -757,11 +820,11 @@ class BrowserWindow(QMainWindow):
         close_right_action.setEnabled(index < len(self.views) - 1)
         menu.addSeparator()
         reopen_action = menu.addAction("Reopen closed tab")
-        reopen_action.setEnabled(bool(self._closed_tab_urls))
+        reopen_action.setEnabled(bool(self._closed_tabs_for_current_session()))
         selected = menu.exec(global_pos)
 
         if selected is new_tab_action:
-            self.new_tab(self.settings.homepage)
+            self.new_tab()
         elif selected is reload_action:
             view.reload()
         elif selected is duplicate_action:
@@ -795,8 +858,13 @@ class BrowserWindow(QMainWindow):
                 self.request_close_tab(self.views.index(view))
 
     def _reopen_closed_tab(self) -> None:
-        if self._closed_tab_urls:
-            self.new_tab(self._closed_tab_urls.pop())
+        closed_tabs = self._closed_tabs_for_current_session()
+        if closed_tabs:
+            self.new_tab(closed_tabs.pop())
+
+    def _closed_tabs_for_current_session(self) -> List[str]:
+        key = (self.selected_profile, bool(self.settings.private_mode))
+        return self._closed_tab_urls.setdefault(key, [])
 
     def _cycle_tabs(self, offset: int) -> None:
         if self.views:
@@ -833,6 +901,9 @@ class BrowserWindow(QMainWindow):
             else:
                 profile = QWebEngineProfile(profile_name, self)
             self._profiles[key] = profile
+            handler = DashboardSchemeHandler(self, self)
+            profile.installUrlSchemeHandler(DASHBOARD_SCHEME, handler)
+            self._dashboard_handlers[id(profile)] = handler
         return profile
 
     def _apply_profile_settings(self, profile: QWebEngineProfile):
@@ -872,9 +943,15 @@ class BrowserWindow(QMainWindow):
         settings.setAttribute(QWebEngineSettings.JavascriptEnabled, True)
         settings.setAttribute(QWebEngineSettings.LocalStorageEnabled, True)
         settings.setAttribute(QWebEngineSettings.FullScreenSupportEnabled, True)
+        settings.setAttribute(QWebEngineSettings.ScrollAnimatorEnabled, True)
 
     def _setup_feature_managers(self):
         self.bookmarks_manager = None
+        try:
+            self.dashboard_manager = DashboardManager(self.selected_profile)
+        except Exception:
+            logger.exception("Could not initialize dashboard settings for profile %s", self.selected_profile)
+            self.dashboard_manager = None
         if BookmarksManager is not None:
             try:
                 self.bookmarks_manager = BookmarksManager(self.selected_profile)
@@ -921,6 +998,7 @@ class BrowserWindow(QMainWindow):
         except Exception:
             logger.exception("Could not refresh bookmarks for profile %s", self.selected_profile)
             self.statusBar().showMessage("Could not refresh bookmarks.", 3000)
+        self._sync_dashboard_tabs()
 
     def _show_bookmark_context_menu(self, bookmark: dict, global_pos: QPoint) -> None:
         """Show bookmark actions for both visible and overflow entries."""
@@ -1058,7 +1136,7 @@ class BrowserWindow(QMainWindow):
     def _close_downloads_panel(self) -> None:
         self._animate_downloads_panel(False)
         if not self.views and not self.close():
-            self.new_tab(self.settings.homepage)
+            self.new_tab()
 
     def _collapse_downloads_splitter(self) -> None:
         if not hasattr(self, "downloads_splitter"):
@@ -1141,7 +1219,7 @@ class BrowserWindow(QMainWindow):
 
     def _close_empty_browser(self) -> None:
         if not self.views and not self.downloads_panel.is_open and not self.close():
-            self.new_tab(self.settings.homepage)
+            self.new_tab()
 
     def _setup_download_toast(self, parent: QWidget) -> None:
         self.download_toast = QFrame(parent)
@@ -1228,15 +1306,221 @@ class BrowserWindow(QMainWindow):
         lbl.setStyleSheet("background: #f6f6f6; color: #444;")
         return lbl
 
+    def _startup_address(self) -> str:
+        return DASHBOARD_URL if self.settings.startup_page == "dashboard" else self.settings.homepage
+
+    def _new_tab_address(self) -> str:
+        return DASHBOARD_URL if self.settings.new_tab_page == "dashboard" else self.settings.homepage
+
+    def open_homepage(self) -> None:
+        self.navigate(self.settings.homepage)
+
+    @staticmethod
+    def _is_dashboard_address(value: str | QUrl | None) -> bool:
+        if value is None:
+            return False
+        url = value if isinstance(value, QUrl) else QUrl(str(value))
+        return url.scheme().lower() == "arma" and url.host().lower() == "dashboard"
+
+    def _dashboard_state(self) -> dict:
+        manager = getattr(self, "dashboard_manager", None)
+        state = manager.export() if manager is not None else {}
+        state.update({
+            "dark_mode": bool(self.settings.dark_mode),
+            "default_search_engine": self.settings.default_search_engine,
+            "bookmarks": [],
+            "recent": [],
+            "closed": [],
+        })
+        if self.settings.private_mode:
+            state["notes"] = self._private_dashboard_notes.get(self.selected_profile, "")
+            state["quick_notes"] = self._private_dashboard_quick_notes.get(self.selected_profile, [])
+        try:
+            if self.bookmarks_manager is not None:
+                state["bookmarks"] = self.bookmarks_manager.list_bookmarks()[:24]
+        except (AttributeError, OSError, RuntimeError):
+            logger.exception("Could not load dashboard bookmarks")
+        if self.history is not None and self.settings.save_history and not self.settings.private_mode:
+            try:
+                recent = []
+                for link, visits in self.history.history.items():
+                    if not isinstance(link, str) or not link.startswith(("http://", "https://")):
+                        continue
+                    last_visit = visits[-1] if isinstance(visits, list) and visits else {}
+                    stamp = (
+                        f"{last_visit.get('date', '')} {last_visit.get('time', '')}"
+                        if isinstance(last_visit, dict) else ""
+                    )
+                    recent.append((stamp, {"title": link, "url": link}))
+                recent.sort(key=lambda item: item[0], reverse=True)
+                state["recent"] = [item for _, item in recent[:6]]
+            except (AttributeError, TypeError):
+                logger.exception("Could not prepare dashboard history")
+        state["closed"] = [
+            {"title": url, "url": url}
+            for url in reversed(self._closed_tabs_for_current_session()[-6:])
+            if url.startswith(("http://", "https://"))
+        ]
+        return state
+
+    def _dashboard_document(self) -> bytes:
+        asset_dir = Path(__file__).resolve().parent / "dashboard"
+        page_html = (asset_dir / "index.html").read_text(encoding="utf-8")
+        css = (asset_dir / "dashboard.css").read_text(encoding="utf-8")
+        script = (asset_dir / "dashboard.js").read_text(encoding="utf-8")
+
+        page_html = page_html.replace(
+            '<link rel="stylesheet" href="dashboard.css">', f"<style>{css}</style>"
+        )
+        page_html = page_html.replace(
+            '<script src="dashboard.js"></script>', f"<script>{script}</script>"
+        )
+        state_json = json.dumps(self._dashboard_state(), ensure_ascii=False, separators=(",", ":"))
+        state_json = state_json.replace("</", "<\\/")
+        page_html = page_html.replace("{{DASHBOARD_STATE}}", state_json)
+        return page_html.encode("utf-8")
+
+    def _load_dashboard(self, view: QWebEngineView) -> None:
+        if self.dashboard_manager is None:
+            self.statusBar().showMessage("Dashboard preferences are unavailable.", 4000)
+            return
+        view.page()._enable_dashboard_bridge()
+        view.page().settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+        view.setUrl(QUrl(DASHBOARD_URL))
+
+    def _sync_dashboard_page(self, page: QWebEnginePage) -> None:
+        if not getattr(page, "_dashboard_active", False):
+            return
+        state_json = json.dumps(self._dashboard_state(), ensure_ascii=False, separators=(",", ":"))
+        state_json = state_json.replace("</", "<\\/")
+        script = (
+            "if (location.protocol === 'arma:' && location.host === 'dashboard' && "
+            f"window.updateDashboardState) window.updateDashboardState({state_json});"
+        )
+        page.runJavaScript(script)
+
+    def _handle_dashboard_action(self, page: BrowserPage, action_url: QUrl) -> None:
+        if self.dashboard_manager is None or not getattr(page, "_dashboard_active", False):
+            return
+        query = QUrlQuery(action_url)
+        action = query.queryItemValue("action")
+        raw_payload = query.queryItemValue("payload")
+        if len(raw_payload) > 80_000:
+            return
+        try:
+            payload = json.loads(raw_payload) if raw_payload else {}
+        except (json.JSONDecodeError, TypeError):
+            return
+        if not isinstance(payload, dict):
+            return
+        view = next((candidate for candidate in self.views if candidate.page() is page), None)
+        if view is None:
+            return
+        try:
+            if action in {"open", "open_new", "search", "reopen"}:
+                if action == "reopen":
+                    target = payload.get("url")
+                    closed_tabs = self._closed_tabs_for_current_session()
+                    if isinstance(target, str) and target in closed_tabs:
+                        closed_tabs.remove(target)
+                        self.new_tab(target)
+                        self._sync_dashboard_tabs()
+                    return
+                if action == "search":
+                    query_text = payload.get("query")
+                    engine = payload.get("engine", "default")
+                    allowed_engines = {
+                        "default", "https://www.google.com/search?q=",
+                        "https://duckduckgo.com/?q=", "https://www.bing.com/search?q=",
+                    }
+                    if not isinstance(query_text, str) or not query_text.strip():
+                        return
+                    if engine not in allowed_engines:
+                        engine = "default"
+                    search_engine = self.settings.default_search_engine if engine == "default" else engine
+                    address = resolve_address_input(query_text, search_engine)
+                else:
+                    target = payload.get("url")
+                    if not isinstance(target, str):
+                        return
+                    address = resolve_address_input(target, self.settings.default_search_engine)
+                if action == "open_new":
+                    self.new_tab(address)
+                else:
+                    if view is self.current_view():
+                        self.navigate(address)
+                    else:
+                        view.setUrl(QUrl(address))
+                return
+
+            manager = self.dashboard_manager
+            if action == "save_shortcuts":
+                manager.set_shortcuts(payload.get("shortcuts"))
+            elif action == "save_notes":
+                notes = payload.get("notes", "")
+                if not isinstance(notes, str):
+                    raise ValueError("Notes must be text.")
+                quick_notes = payload.get("quick_notes", [])
+                if (
+                    not isinstance(quick_notes, list)
+                    or len(quick_notes) > 10
+                    or any(not isinstance(note, str) for note in quick_notes)
+                ):
+                    raise ValueError("You can save up to 10 text notes.")
+                quick_notes = [note[:5000] for note in quick_notes]
+                if self.settings.private_mode:
+                    self._private_dashboard_notes[self.selected_profile] = notes[:10_000]
+                    self._private_dashboard_quick_notes[self.selected_profile] = quick_notes
+                else:
+                    manager.update({"notes": notes[:10_000], "quick_notes": quick_notes})
+            elif action == "update_preferences":
+                allowed = {
+                    "overlay", "blur", "glass", "accent", "clock_24h",
+                    "show_seconds", "animations", "density", "widgets", "focus_minutes",
+                    "break_minutes",
+                }
+                manager.update({key: value for key, value in payload.items() if key in allowed})
+            elif action == "set_wallpaper":
+                manager.set_wallpaper(payload.get("wallpaper", ""))
+            elif action == "cycle_wallpaper":
+                manager.cycle_wallpaper()
+            elif action == "import_wallpaper":
+                source, _ = QFileDialog.getOpenFileName(
+                    self, "Choose dashboard wallpaper", os.path.expanduser("~"),
+                    "Images (*.jpg *.jpeg *.png *.webp)",
+                )
+                if source:
+                    manager.import_wallpaper(source)
+            elif action == "reset_preferences":
+                manager.reset()
+            else:
+                return
+            self._sync_dashboard_page(page)
+        except (OSError, ValueError, TypeError) as error:
+            logger.info("Dashboard action %s was rejected: %s", action, error)
+            page.runJavaScript(
+                "window.showDashboardToast && window.showDashboardToast(" +
+                json.dumps(str(error)) + ");"
+            )
+
+    def _sync_dashboard_tabs(self) -> None:
+        for view in tuple(getattr(self, "views", ())):
+            if getattr(view.page(), "_dashboard_active", False):
+                self._sync_dashboard_page(view.page())
+
     def new_tab(self, url: Optional[str] = None, make_active: bool = True) -> int:
         """Create one aligned tab, placeholder, view, and page before loading."""
-        raw_url = url.toString() if isinstance(url, QUrl) else (url or "about:blank")
-        try:
-            resolved_url = resolve_address_input(raw_url, self.settings.default_search_engine)
-        except URLInputError as exc:
-            logger.warning("Rejected tab URL %r: %s", raw_url, exc)
-            self.statusBar().showMessage(str(exc), 5000)
-            resolved_url = "about:blank"
+        raw_url = url.toString() if isinstance(url, QUrl) else (url if url is not None else self._new_tab_address())
+        is_dashboard = self._is_dashboard_address(raw_url)
+        if is_dashboard:
+            resolved_url = DASHBOARD_URL
+        else:
+            try:
+                resolved_url = resolve_address_input(raw_url, self.settings.default_search_engine)
+            except URLInputError as exc:
+                logger.warning("Rejected tab URL %r: %s", raw_url, exc)
+                self.statusBar().showMessage(str(exc), 5000)
+                resolved_url = "about:blank"
         url_q = QUrl(resolved_url)
 
         view = QWebEngineView(self.view_container)
@@ -1259,7 +1543,10 @@ class BrowserWindow(QMainWindow):
         else:
             self._set_tab_visibility()
 
-        view.setUrl(url_q)
+        if is_dashboard:
+            self._load_dashboard(view)
+        else:
+            view.setUrl(url_q)
         return index
 
     def _connect_page(self, view: QWebEngineView, page: QWebEnginePage) -> None:
@@ -1302,8 +1589,9 @@ class BrowserWindow(QMainWindow):
         closing_view = self.views.pop(index)
         closed_url = closing_view.url().toString().strip()
         if closed_url and closed_url != "about:blank":
-            self._closed_tab_urls.append(closed_url)
-            self._closed_tab_urls = self._closed_tab_urls[-10:]
+            closed_tabs = self._closed_tabs_for_current_session()
+            closed_tabs.append(closed_url)
+            del closed_tabs[:-10]
         was_active = index == self.current_index
         self.tabbar.remove_tab(index, activate=False)
         placeholder = self._placeholders.pop(closing_view, None)
@@ -1324,7 +1612,7 @@ class BrowserWindow(QMainWindow):
             if self.downloads_panel.is_open:
                 return
             if not self.close():
-                self.new_tab(self.settings.homepage)
+                self.new_tab()
             return
 
         if was_active:
@@ -1336,6 +1624,7 @@ class BrowserWindow(QMainWindow):
         self.current_index = -1
         self.tabbar.set_active(next_index)
         self._activate(next_index)
+        self._sync_dashboard_tabs()
 
     def close_tab(self, index: int):
         """
@@ -1430,6 +1719,7 @@ class BrowserWindow(QMainWindow):
                     self._recorded_history_urls[view] = url_text
                 except OSError:
                     logger.exception("Could not save browsing history for %s", url_text)
+        self._sync_dashboard_tabs()
 
         self._update_navigation_actions(view)
         QTimer.singleShot(100, lambda v=view: self._capture_snapshot(v))
@@ -1566,6 +1856,7 @@ class BrowserWindow(QMainWindow):
         for view in list(self.views):
             old_page = view.page()
             current_url = view.url()
+            was_dashboard = bool(getattr(old_page, "_dashboard_active", False))
             new_page = BrowserPage(self, self.profile, view)
             view.setPage(new_page)
             self._connect_page(view, new_page)
@@ -1574,7 +1865,10 @@ class BrowserWindow(QMainWindow):
                     old_page.deleteLater()
                 except RuntimeError:
                     logger.debug("Old profile page was already destroyed", exc_info=True)
-            view.setUrl(current_url if current_url.isValid() else QUrl("about:blank"))
+            if was_dashboard:
+                self._load_dashboard(view)
+            else:
+                view.setUrl(current_url if current_url.isValid() else QUrl("about:blank"))
             self._recorded_history_urls.pop(view, None)
 
         self.navbar.history = self.history.history if self.history else {}
@@ -1597,13 +1891,19 @@ class BrowserWindow(QMainWindow):
         self.change_profile(profile_name)
         self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
-        self.new_tab(self.settings.homepage)
+        self.new_tab()
 
     def navigate(self, url: str):
         if isinstance(url, QUrl):
             url = url.toString()
         if not isinstance(url, str):
             self.statusBar().showMessage("The selected address is invalid.", 5000)
+            return
+        if BrowserWindow._is_dashboard_address(url):
+            view = self.current_view()
+            if view is not None:
+                self._load_dashboard(view)
+                self.navbar.url_bar.setText(DASHBOARD_URL)
             return
         try:
             resolved_url = resolve_address_input(url, self.settings.default_search_engine)
@@ -1620,7 +1920,10 @@ class BrowserWindow(QMainWindow):
         self.navbar.url_bar.setText(qurl.toString())
 
     def open_settings(self):
-        dialog = SettingsWindow(self.settings, self.selected_profile, self.history, self)
+        dialog = SettingsWindow(
+            self.settings, self.selected_profile, self.history, self,
+            dashboard=self.dashboard_manager,
+        )
         if self.settings.private_mode:
             dialog.history_btn.setEnabled(False)
             dialog.history_btn.setToolTip("History is unavailable in a private session.")
@@ -1635,6 +1938,7 @@ class BrowserWindow(QMainWindow):
                 self._apply_profile_settings(self.profile)
                 self._setup_feature_managers()
             self.apply_theme()
+            self._sync_dashboard_tabs()
 
     def apply_theme(self):
         try:
@@ -1642,6 +1946,7 @@ class BrowserWindow(QMainWindow):
             self.setStyleSheet(theme)
             if hasattr(self.navbar, "apply_theme"):
                 self.navbar.apply_theme()
+            self._sync_dashboard_tabs()
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
@@ -1701,16 +2006,42 @@ class BrowserWindow(QMainWindow):
 
     def handle_fullscreen(self, request: QWebEngineFullScreenRequest):
         if request.toggleOn():
-            # hide navigation / tab bar
-            self.navbar.hide()
-            self.tabbar.hide()
-            self.progress_bar.hide()
-            self.showFullScreen()
+            self._enter_fullscreen()
+        else:
+            self._leave_fullscreen()
+        request.accept()
+
+    def toggle_fullscreen(self) -> None:
+        if self.isFullScreen():
+            self._leave_fullscreen()
+        else:
+            self._enter_fullscreen()
+
+    def _enter_fullscreen(self) -> None:
+        if self.isFullScreen():
+            return
+        self._fullscreen_return_maximized = self.isMaximized()
+        self._fullscreen_chrome_visibility = {
+            widget: widget.isVisible()
+            for widget in (
+                self.title_bar, self.navbar, self.bookmarks_bar, self.tabbar,
+                self.progress_bar, self.dock,
+            )
+            if widget is not None
+        }
+        for widget in self._fullscreen_chrome_visibility:
+            widget.hide()
+        self.showFullScreen()
+        self._sync_window_frame()
+
+    def _leave_fullscreen(self) -> None:
+        if not self.isFullScreen():
+            return
+        if getattr(self, "_fullscreen_return_maximized", False):
+            self.showMaximized()
         else:
             self.showNormal()
-            # restore UI
-            self.navbar.show()
-            self.tabbar.show()
-            view = self.current_view()
-            self.progress_bar.setVisible(bool(view and view.page().isLoading()))
-        request.accept()
+        for widget, was_visible in getattr(self, "_fullscreen_chrome_visibility", {}).items():
+            widget.setVisible(was_visible)
+        self._fullscreen_chrome_visibility = None
+        self._sync_window_frame()
