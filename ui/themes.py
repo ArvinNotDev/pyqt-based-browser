@@ -10,17 +10,17 @@ QMainWindow, QDialog, QWidget {
 QLabel { background-color: transparent; }
 
 QWidget#browserWindowRoot { background: transparent; }
-QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid rgba(255,255,255,235); border-radius: 17px; }
+QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid rgba(255,255,255,235); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(231,237,246,220); border: 1px solid rgba(255,255,255,175); border-radius: 12px; }
-QWidget#browserContentCard { background: #e9edf3; border: 1px solid #dce1e8; border-radius: 14px; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
 QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #dce1e8; }
 
 QWidget#customTitleBar {
     background-color: rgba(242,246,252,235);
     border-bottom: 1px solid rgba(255,255,255,205);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 QLabel#titleBarLogo {
     color: #ffffff;
@@ -318,8 +318,8 @@ QLineEdit#urlBar:focus {
     background-color: rgba(255,255,255,255);
     border: 1px solid #3979d6;
 }
-QWidget#browserTabBar { border-radius: 14px; }
-QWidget#browserContentCard { border-radius: 14px; }
+QWidget#browserTabBar { border-radius: 9px; }
+QWidget#browserContentCard { border-radius: 0; }
 QWidget#customTitleBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(250,252,255,245), stop:1 rgba(233,240,249,236));
     border-bottom-color: rgba(203,216,234,170);
@@ -538,17 +538,17 @@ QMainWindow, QDialog, QWidget {
 }
 QLabel { background-color: transparent; }
 QWidget#browserWindowRoot { background: transparent; }
-QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rgba(255,255,255,35); border-radius: 17px; }
+QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rgba(255,255,255,35); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(34,40,49,230); border: 1px solid rgba(255,255,255,24); border-radius: 12px; }
-QWidget#browserContentCard { background: #22272e; border: 1px solid #30353d; border-radius: 14px; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
 QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid #30353d; }
 
 QWidget#customTitleBar {
     background-color: rgba(23,27,34,242);
     border-bottom: 1px solid rgba(255,255,255,30);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 QLabel#titleBarLogo {
     color: #ffffff;
@@ -845,8 +845,8 @@ QLineEdit#urlBar:focus {
     background-color: rgba(22,29,39,255);
     border: 1px solid #82aff4;
 }
-QWidget#browserTabBar { border-radius: 14px; }
-QWidget#browserContentCard { border-radius: 14px; }
+QWidget#browserTabBar { border-radius: 9px; }
+QWidget#browserContentCard { border-radius: 0; }
 QWidget#customTitleBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(31,37,47,250), stop:1 rgba(22,27,35,245));
     border-bottom-color: rgba(255,255,255,28);

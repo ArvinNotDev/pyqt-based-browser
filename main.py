@@ -132,6 +132,10 @@ if __name__ == "__main__":
     selected_profile = restored_session.get("profile") if restored_session else None
     _load_startup_settings(selected_profile)
 
+    # Register the internal origin before importing BrowserWindow or creating profiles.
+    from ui.dashboard.internal_page import register_dashboard_scheme
+    register_dashboard_scheme()
+
     # No Tor proxy is configured for an ordinary browser session.
     from PySide6.QtWidgets import QApplication, QMessageBox
     from ui.browser_window import BrowserWindow

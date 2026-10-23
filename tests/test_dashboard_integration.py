@@ -405,6 +405,7 @@ def test_dashboard_scheme_has_a_valid_default_port_and_registers_idempotently():
     register_dashboard_scheme()
     scheme = QWebEngineUrlScheme.schemeByName(DASHBOARD_SCHEME)
     assert scheme.defaultPort() == DASHBOARD_DEFAULT_PORT == 443
+    assert scheme.flags() & QWebEngineUrlScheme.Flag.LocalAccessAllowed
 
 def test_external_browser_fallback_opens_only_http_and_https_pages():
     web_view = SimpleNamespace(url=lambda: QUrl("https://game.example/"))

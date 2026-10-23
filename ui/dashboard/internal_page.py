@@ -29,6 +29,7 @@ def register_dashboard_scheme() -> None:
     scheme.setFlags(
         QWebEngineUrlScheme.Flag.SecureScheme
         | QWebEngineUrlScheme.Flag.LocalScheme
+        | QWebEngineUrlScheme.Flag.LocalAccessAllowed
     )
     QWebEngineUrlScheme.registerScheme(scheme)
     _scheme_registered = True

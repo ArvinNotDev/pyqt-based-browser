@@ -7,11 +7,10 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
-    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedCornerCutout,
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView,
 )
 from ui.title_bar import CustomTitleBar
 
@@ -21,27 +20,19 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_rounded_corner_cutout_uses_antialiased_paint(qapp):
-    host = QWidget()
-    host.resize(12, 12)
-    cutout = _RoundedCornerCutout(host, "top-left", 12)
-    cutout.set_color(QColor("#ff0000"))
-    cutout.resize(12, 12)
-    host.show()
-    cutout.show()
-    qapp.processEvents()
+def test_webengine_viewport_is_square_and_has_no_overlaid_corner_mask(qapp):
+    view = _RoundedWebView()
+    assert view.objectName() == "browserPageView"
+    assert not hasattr(view, "_corner_cutouts")
+    view.close()
 
-    image = QImage(12, 12, QImage.Format.Format_ARGB32_Premultiplied)
-    image.fill(Qt.GlobalColor.transparent)
-    cutout.render(image)
 
-    assert image.pixelColor(0, 0).alpha() == 255
-    assert image.pixelColor(11, 11).alpha() == 0
-    assert any(
-        0 < image.pixelColor(x, y).alpha() < 255
-        for y in range(image.height())
-        for x in range(image.width())
-    )
+def test_custom_title_bar_does_not_show_active_page_title(qapp):
+    host = _StateTrackingWindow()
+    title_bar = CustomTitleBar(host)
+    assert title_bar.title.text() == "ARMA Browser"
+    assert not hasattr(title_bar, "page_context")
+    assert not hasattr(title_bar, "set_page_title")
     host.close()
 
 

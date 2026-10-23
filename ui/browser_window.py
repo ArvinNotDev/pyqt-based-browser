@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QPainter, QPainterPath, QColor, QCursor
+from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -242,117 +242,12 @@ class _PageLoadOverlay(QFrame):
         return super().eventFilter(watched, event)
 
 
-class _RoundedCornerCutout(QWidget):
-    """Antialiased corner patch that visually rounds a WebEngine surface without masking it."""
-
-    _BEZIER_CIRCLE = 0.5522847498
-
-    def __init__(self, parent: QWidget, corner: str, radius: int):
-        super().__init__(parent)
-        self.corner = corner
-        self._radius = float(radius)
-        self._color = QColor("#e9edf3")
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.hide()
-
-    def set_color(self, color: str | QColor) -> None:
-        next_color = QColor(color)
-        if next_color != self._color:
-            self._color = next_color
-            self.update()
-
-    def set_radius(self, radius: int) -> None:
-        radius = max(0, int(radius))
-        if radius != self._radius:
-            self._radius = float(radius)
-            self.update()
-
-    def paintEvent(self, event) -> None:
-        radius = min(self._radius, float(self.width()), float(self.height()))
-        if radius < 1:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(self._color)
-        if self.corner.endswith("right"):
-            painter.translate(self.width(), 0)
-            painter.scale(-1, 1)
-        if self.corner.startswith("bottom"):
-            painter.translate(0, self.height())
-            painter.scale(1, -1)
-
-        # Paint only the area outside the quarter-circle. The page itself keeps
-        # its normal compositor surface; antialiasing happens in this tiny patch.
-        control = radius * self._BEZIER_CIRCLE
-        path = QPainterPath()
-        path.moveTo(0.0, 0.0)
-        path.lineTo(radius, 0.0)
-        path.cubicTo(radius - control, 0.0, 0.0, radius - control, 0.0, radius)
-        path.closeSubpath()
-        painter.drawPath(path)
-        painter.end()
-
-
 class _RoundedWebView(QWebEngineView):
-    """WebEngine viewport with antialiased visual corners and no compositor mask."""
-
-    CORNER_RADIUS = 14
-    CORNERS = ("top-left", "top-right", "bottom-left", "bottom-right")
+    """Square WebEngine viewport; no fake corner frame around live page pixels."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("browserPageView")
-        self._rounded_corners_enabled = True
-        self._corner_color = QColor("#e9edf3")
-        self._corner_cutouts = {
-            corner: _RoundedCornerCutout(self, corner, self.CORNER_RADIUS)
-            for corner in self.CORNERS
-        }
-
-    def set_corner_color(self, color: str) -> None:
-        next_color = QColor(color)
-        if next_color == self._corner_color:
-            return
-        self._corner_color = next_color
-        for cutout in self._corner_cutouts.values():
-            cutout.set_color(next_color)
-
-    def set_rounded_corners(self, enabled: bool) -> None:
-        self._rounded_corners_enabled = bool(enabled)
-        self._update_corner_cutouts()
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._update_corner_cutouts()
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self._update_corner_cutouts()
-
-    def _update_corner_cutouts(self) -> None:
-        width, height = self.width(), self.height()
-        radius = min(self.CORNER_RADIUS, width // 2, height // 2)
-        if not self._rounded_corners_enabled or radius < 1:
-            for cutout in self._corner_cutouts.values():
-                cutout.hide()
-            return
-
-        geometries = {
-            "top-left": QRect(0, 0, radius, radius),
-            "top-right": QRect(width - radius, 0, radius, radius),
-            "bottom-left": QRect(0, height - radius, radius, radius),
-            "bottom-right": QRect(width - radius, height - radius, radius, radius),
-        }
-        for corner, cutout in self._corner_cutouts.items():
-            cutout.set_radius(radius)
-            cutout.set_color(self._corner_color)
-            cutout.setGeometry(geometries[corner])
-            cutout.show()
-            cutout.raise_()
 
 
 class _ProxyPanelHost(QFrame):
@@ -1262,14 +1157,14 @@ class BrowserWindow(QMainWindow):
         root = QWidget()
         root.setObjectName("browserWindowRoot")
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(4, 4, 4, 4)
         self._root_layout = layout
         layout.setSpacing(0)
         shell = QFrame(root)
         shell.setObjectName("browserShell")
         self._shell = shell
         shell_layout = QVBoxLayout(shell)
-        shell_layout.setContentsMargins(1, 1, 1, 1)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
         self._shell_layout = shell_layout
         self.title_bar = CustomTitleBar(self)
@@ -1606,13 +1501,9 @@ class BrowserWindow(QMainWindow):
             return
         if edge_to_edge is None:
             edge_to_edge = self._is_edge_to_edge_geometry()
-        # QRegion masks rasterize curved paths to hard pixel steps and clip native
-        # child surfaces poorly. The stylesheet paints the shell curve; DWM handles
-        # the outer Windows frame, while page corners use small antialiased overlays.
+        # A QWidget mask cannot reliably clip WebEngine's compositor surface.
+        # Keep page pixels square and apply a subtle curve only to the outer shell.
         shell.clearMask()
-        for view in tuple(getattr(self, "views", ())):
-            if isinstance(view, _RoundedWebView):
-                view.set_rounded_corners(not edge_to_edge)
 
     def _sync_window_frame(self) -> None:
         if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
@@ -1622,8 +1513,8 @@ class BrowserWindow(QMainWindow):
             self._apply_shell_corner_mask(edge_to_edge)
             return
         self._edge_to_edge_frame_state = edge_to_edge
-        margin = 0 if edge_to_edge else 8
-        shell_margin = 0 if edge_to_edge else 1
+        margin = 0 if edge_to_edge else 4
+        shell_margin = 0
         self._root_layout.setContentsMargins(margin, margin, margin, margin)
         shell_layout = getattr(self, "_shell_layout", None)
         if shell_layout is not None:
@@ -3169,8 +3060,6 @@ class BrowserWindow(QMainWindow):
         url_q = QUrl(resolved_url)
 
         view = _RoundedWebView(self.view_container)
-        view.set_corner_color("#22272e" if self.settings.dark_mode else "#e9edf3")
-        view.set_rounded_corners(not self._is_edge_to_edge_geometry())
         view.setVisible(False)
         self._page_load_overlays[view] = _PageLoadOverlay(view)
         # WebEngine owns a separate compositor surface; transparency and animated
@@ -3310,14 +3199,6 @@ class BrowserWindow(QMainWindow):
         if self.bookmarks_manager is not None:
             self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(view.url().toString()))
         self._update_navigation_actions(view)
-        title_bar = getattr(self, "title_bar", None)
-        set_page_title = getattr(title_bar, "set_page_title", None)
-        page_title = view.title()
-        if callable(set_page_title):
-            set_page_title(page_title or view.url().host() or "New tab")
-        set_window_title = getattr(self, "setWindowTitle", None)
-        if callable(set_window_title):
-            set_window_title(f"{page_title} — ARMA Browser" if page_title else "ARMA Browser")
         self.tabbar.set_active(index)
 
     def _set_tab_visibility(self):
@@ -3356,24 +3237,12 @@ class BrowserWindow(QMainWindow):
         if view not in self.views:
             return
         self.tabbar.set_title(self.views.index(view), title)
-        if view is self.current_view():
-            window_title = f"{title} — ARMA Browser" if title else "ARMA Browser"
-            set_window_title = getattr(self, "setWindowTitle", None)
-            if callable(set_window_title):
-                set_window_title(window_title)
-            title_bar = getattr(self, "title_bar", None)
-            set_page_title = getattr(title_bar, "set_page_title", None)
-            if callable(set_page_title):
-                set_page_title(title or view.url().host() or "New tab")
+        # Keep the native caption fixed to the app name. The active website title
+        # belongs to its tab label, not to the browser title bar.
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
         if view is self.current_view():
             self._update_bookmarks_bar_visibility(url)
-            if not view.title():
-                title_bar = getattr(self, "title_bar", None)
-                set_page_title = getattr(title_bar, "set_page_title", None)
-                if callable(set_page_title):
-                    set_page_title(url.host() or "New tab")
             self.navbar.url_bar.setText(url.toString())
             self._sync_site_connection_action(url.toString())
             if self.bookmarks_manager is not None:
@@ -3748,10 +3617,6 @@ class BrowserWindow(QMainWindow):
             if hasattr(self.navbar, "apply_theme"):
                 self.navbar.apply_theme()
             dark = bool(getattr(self.settings, "dark_mode", False))
-            corner_color = "#22272e" if dark else "#e9edf3"
-            for view in tuple(getattr(self, "views", ())):
-                if isinstance(view, _RoundedWebView):
-                    view.set_corner_color(corner_color)
             if hasattr(self, "tabbar"):
                 self.tabbar.apply_icon_theme(dark)
             if hasattr(self, "title_bar"):
