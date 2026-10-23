@@ -14,12 +14,36 @@ from ui.bookmarks_dialog import BookmarksDialog
 from ui.downloads_dialog import DownloadsDialog
 from ui.navigation_bar import NavigationBar
 from ui.settings import Settings
+from ui.settings_window import ThemeSwitch
 from ui.themes import dark_theme, light_theme
 
 
 @pytest.fixture(scope="session")
 def qapp():
     return QApplication.instance() or QApplication([])
+
+
+def test_theme_switch_keeps_checkbox_state_and_changes_with_click(qapp):
+    switch = ThemeSwitch()
+    switch.setChecked(False)
+    switch.show()
+    qapp.processEvents()
+
+    assert switch.isChecked() is False
+    assert switch.accessibleName() == "Dark theme"
+    assert switch.toolTip()
+
+    QTest.mouseClick(switch, Qt.LeftButton, pos=QPoint(18, 18))
+    qapp.processEvents()
+    assert switch.isChecked() is True
+
+    QTest.mouseClick(switch, Qt.LeftButton, pos=QPoint(50, 18))
+    qapp.processEvents()
+    assert switch.isChecked() is False
+
+    switch.setChecked(True)
+    assert switch.isChecked() is True
+    switch.close()
 
 
 def test_navigation_bar_stays_fixed_when_entering_long_or_rtl_search(qapp):

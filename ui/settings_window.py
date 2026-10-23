@@ -7,7 +7,8 @@ import os
 import re
 import sys
 
-from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QVariantAnimation, QTimer
+from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QVariantAnimation, QTimer, QRectF
+from PySide6.QtGui import QColor, QPainter, QLinearGradient
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,10 +32,137 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
+import qtawesome as qta
+
 from managers.history_manager import History
 from .history_window import HistoryWindow
 from .settings import Settings, default_download_directory
 from managers.dashboard_manager import PRESETS, DashboardManager
+
+
+
+
+class ThemeSwitch(QCheckBox):
+    """Compact, keyboard-accessible sun/moon switch with pointer dragging."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("themeSwitch")
+        self.setText("Dark theme")
+        self.setAccessibleName("Dark theme")
+        self.setAccessibleDescription("Drag to switch between light and dark appearance.")
+        self.setToolTip("Drag or click to change the browser theme")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFixedSize(68, 36)
+
+        self._position = 1.0 if self.isChecked() else 0.0
+        self._press_x = 0.0
+        self._dragging = False
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(170)
+        self._animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._animation.valueChanged.connect(self._set_position)
+        self.toggled.connect(self._animate_to_state)
+
+    def _set_position(self, value) -> None:
+        self._position = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    def _animate_to_state(self, checked: bool) -> None:
+        self._animation.stop()
+        self._animation.setStartValue(self._position)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        dark = self.isChecked()
+        track = QRectF(1.0, 1.0, self.width() - 2.0, self.height() - 2.0)
+        gradient = QLinearGradient(track.topLeft(), track.bottomRight())
+        if dark:
+            gradient.setColorAt(0.0, QColor("#344b68"))
+            gradient.setColorAt(1.0, QColor("#202d40"))
+            border = QColor("#536b8a")
+        else:
+            gradient.setColorAt(0.0, QColor("#e9f0fa"))
+            gradient.setColorAt(1.0, QColor("#d6e2f2"))
+            border = QColor("#c7d5e8")
+
+        painter.setPen(border)
+        painter.setBrush(gradient)
+        painter.drawRoundedRect(track, track.height() / 2.0, track.height() / 2.0)
+
+        diameter = 28.0
+        travel = self.width() - diameter - 8.0
+        thumb_x = 4.0 + self._position * travel
+        thumb = QRectF(thumb_x, 4.0, diameter, diameter)
+
+        shadow = QRectF(thumb)
+        shadow.translate(0.0, 1.0)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(15, 26, 42, 30))
+        painter.drawEllipse(shadow)
+
+        painter.setPen(QColor("#ffffff") if not dark else QColor("#9ec6ff"))
+        painter.setBrush(QColor("#ffffff") if not dark else QColor("#79a9eb"))
+        painter.drawEllipse(thumb)
+
+        icon_name = "fa5s.moon" if dark else "fa5s.sun"
+        icon_color = "#ffffff" if dark else "#c58a16"
+        icon_pixmap = qta.icon(icon_name, color=icon_color).pixmap(16, 16)
+        painter.drawPixmap(
+            int(thumb.center().x() - icon_pixmap.width() / 2),
+            int(thumb.center().y() - icon_pixmap.height() / 2),
+            icon_pixmap,
+        )
+
+        if self.hasFocus():
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QColor("#6195e2") if not dark else QColor("#8db8ff"))
+            painter.drawRoundedRect(
+                QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0),
+                self.height() / 2.0,
+                self.height() / 2.0,
+            )
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._animation.stop()
+            self._press_x = event.position().x()
+            self._dragging = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.LeftButton:
+            current_x = event.position().x()
+            if abs(current_x - self._press_x) > 3.0:
+                self._dragging = True
+            if self._dragging:
+                diameter = 28.0
+                travel = max(1.0, self.width() - diameter - 8.0)
+                self._set_position((current_x - diameter / 2.0 - 4.0) / travel)
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            if self._dragging:
+                checked = self._position >= 0.5
+            else:
+                checked = not self.isChecked()
+            self.setChecked(checked)
+            self._dragging = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class SmoothScrollArea(QScrollArea):
@@ -299,11 +427,28 @@ class SettingsWindow(QDialog):
             "Appearance",
             "Choose the browser theme. The change is applied as soon as you save.",
         )
-        self.dark_mode_checkbox = QCheckBox("Use the dark theme")
-        self.dark_mode_checkbox.setChecked(self.settings.dark_mode)
         card_layout.setContentsMargins(18, 18, 18, 18)
-        card_layout.addWidget(self.dark_mode_checkbox)
-        card_layout.addWidget(self._note("The theme applies to the browser controls and its built-in dialogs."))
+
+        theme_row = QHBoxLayout()
+        theme_row.setSpacing(16)
+        theme_copy = QVBoxLayout()
+        theme_copy.setSpacing(4)
+        theme_title = QLabel("Appearance mode")
+        theme_title.setObjectName("settingsSectionTitle")
+        theme_description = QLabel("Light by day, dark when you need less glare.")
+        theme_description.setObjectName("settingsSectionDescription")
+        theme_description.setWordWrap(True)
+        theme_copy.addWidget(theme_title)
+        theme_copy.addWidget(theme_description)
+        theme_row.addLayout(theme_copy, 1)
+
+        self.dark_mode_checkbox = ThemeSwitch()
+        self.dark_mode_checkbox.setChecked(self.settings.dark_mode)
+        theme_row.addWidget(self.dark_mode_checkbox, 0, Qt.AlignVCenter)
+        card_layout.addLayout(theme_row)
+        card_layout.addWidget(
+            self._note("The theme applies to browser controls and built-in dialogs.")
+        )
         card_layout.addStretch(1)
 
     def _add_dashboard_page(self) -> None:
