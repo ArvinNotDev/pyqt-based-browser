@@ -28,7 +28,14 @@ class Window(QMainWindow):
         self._parent = parent
         self.profile = profile
         self._embedded = parent is not None
-        self._display_mode = "dark"
+        parent_settings = getattr(parent, "settings", None)
+        if self._embedded:
+            self._display_mode = (
+                "dark" if bool(getattr(parent_settings, "dark_mode", CONFIG["mode"] == "dark")) else "light"
+            )
+        else:
+            configured_mode = CONFIG["mode"]
+            self._display_mode = configured_mode if configured_mode in {"dark", "light"} else "dark"
         super().__init__(parent)
         if IS_WINDOWS and not self._embedded:
             self.setWindowFlag(Qt.FramelessWindowHint)
@@ -144,6 +151,8 @@ class Window(QMainWindow):
             self._proxy_nav_buttons.append(button)
             layout.addWidget(button, 1)
         self._proxy_nav_buttons[0].setChecked(True)
+        for button, icon_name in zip(self._proxy_nav_buttons, ("fa6s.house", "fa6s.gear", "fa6s.boxes-stacked")):
+            button.setIcon(qta.icon(icon_name, color="#ffffff" if button.isChecked() else ("#e8edf3" if self._display_mode == "dark" else "#253041")))
 
     def _show_page_index(self, index):
         if not 0 <= index < self.stack.count():
@@ -171,33 +180,83 @@ class Window(QMainWindow):
     def apply_theme(self, mode=None):
         settings = getattr(self._parent, "settings", None)
         if mode not in {"dark", "light"}:
-            mode = "dark" if bool(getattr(settings, "dark_mode", True)) else "light"
+            mode = (
+                "dark" if bool(getattr(settings, "dark_mode", CONFIG["mode"] == "dark")) else "light"
+            )
         self._display_mode = mode
         dark = mode == "dark"
-        border = "#384454" if dark else "#d8e0eb"
-        panel = "#202630" if dark else "#f7f9fc"
-        text = "#e8edf3" if dark else "#253247"
-        accent = "#65aaf6" if dark else "#176fc1"
-        hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
+        border = "#3b4552" if dark else "#d7dee7"
+        surface = "#202630" if dark else "#ffffff"
+        menu_surface = "#1b2029" if dark else "#eef2f8"
+        field = "#171c23" if dark else "#f8fafc"
+        text = "#e8edf3" if dark else "#253041"
+        muted = "#9aaabd" if dark else "#667386"
+        accent = "#287db5"
+        hover = "rgba(71,163,242,0.15)" if dark else "rgba(24,118,191,0.11)"
+
+        # CONFIG is shared by Tor settings controls. Keep it in sync with the
+        # browser's authoritative theme instead of retaining a stale Tor-only mode.
+        if CONFIG["mode"] != mode:
+            CONFIG["mode"] = mode
+
         self.setStyleSheet(f"""
-            QWidget#torProxyShell {{ background: {panel}; color: {text}; }}
-            QWidget#proxyEmbeddedNavigation {{ background: {"#1b2029" if dark else "#eef2f8"}; border-bottom: 1px solid {border}; }}
-            QPushButton#proxyEmbeddedNavButton {{ min-height: 32px; padding: 0 6px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: {text}; font-weight: 650; }}
-            QPushButton#proxyEmbeddedNavButton:hover {{ background: {hover}; border-color: {border}; }}
-            QPushButton#proxyEmbeddedNavButton:checked {{ background: {"#314c70" if dark else "#dce9fc"}; border-color: {"#5276a4" if dark else "#b8d0f3"}; color: {"#ffffff" if dark else "#174b8f"}; }}
+            QWidget#torProxyShell {{ background: {surface}; color: {text}; }}
+            QWidget#proxyEmbeddedNavigation {{ background: {menu_surface}; border-bottom: 1px solid {border}; }}
+            QWidget {{ color: {text}; }}
+            QLabel {{ color: {text}; }}
+            QPushButton {{ min-height: 32px; padding: 0 10px; border: 1px solid {border};
+                border-radius: 8px; background: transparent; color: {text}; font-weight: 600; }}
+            QPushButton:hover {{ background: {hover}; border-color: {accent}; }}
+            QPushButton:disabled {{ color: {muted}; border-color: {border}; }}
+            QLineEdit, QTextEdit, QListWidget, QComboBox {{
+                background: {field}; color: {text}; border: 1px solid {border};
+                border-radius: 8px; padding: 7px; selection-background-color: {accent};
+                selection-color: #ffffff;
+            }}
+            QCheckBox {{ color: {text}; spacing: 7px; }}
             QScrollBar:vertical {{ background: transparent; width: 9px; margin: 2px; }}
-            QScrollBar::handle:vertical {{ background: {"#4b5b70" if dark else "#bdc8d8"}; min-height: 24px; border-radius: 4px; }}
+            QScrollBar::handle:vertical {{ background: {"#4b5b70" if dark else "#bdc8d8"};
+                min-height: 24px; border-radius: 4px; }}
             QScrollBar::handle:vertical:hover {{ background: {"#6a809c" if dark else "#94a8c4"}; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-            QLabel#proxyRulesTitle {{ font-size: 15px; font-weight: 800; padding: 6px 2px; }}
-            QPushButton#proxySettingsBackButton {{ min-height: 32px; border: 1px solid {border}; border-radius: 8px; background: transparent; color: {text}; }}
+            QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 2px; }}
+            QScrollBar::handle:horizontal {{ background: {"#4b5b70" if dark else "#bdc8d8"};
+                min-width: 24px; border-radius: 4px; }}
+            QScrollBar::handle:horizontal:hover {{ background: {"#6a809c" if dark else "#94a8c4"}; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
+            QPushButton#proxyEmbeddedNavButton {{
+                min-height: 32px; padding: 0 8px; border: 1px solid transparent;
+                border-radius: 7px; background: transparent; color: {text}; font-weight: 650;
+            }}
+            QPushButton#proxyEmbeddedNavButton:hover {{ background: {hover}; border-color: {border}; }}
+            QPushButton#proxyEmbeddedNavButton:checked {{
+                background: {accent}; border-color: {accent}; color: #ffffff; font-weight: 750;
+            }}
+            QPushButton#proxySettingsBackButton {{ min-height: 32px; border: 1px solid {border};
+                border-radius: 8px; background: transparent; color: {text}; }}
             QPushButton#proxySettingsBackButton:hover {{ border-color: {accent}; background: {hover}; }}
+            QLabel#proxyRulesTitle {{ font-size: 15px; font-weight: 800; padding: 6px 2px; }}
         """)
-        for widget in (getattr(self, "proxyWidget", None), getattr(self, "settingWidget", None)):
+
+        for button, icon_name in zip(
+            getattr(self, "_proxy_nav_buttons", []),
+            ("fa6s.house", "fa6s.gear", "fa6s.boxes-stacked"),
+        ):
+            button.setIcon(qta.icon(icon_name, color="#ffffff" if button.isChecked() else text))
+
+        for widget in (
+            getattr(self, "proxyWidget", None),
+            getattr(self, "settingWidget", None),
+            getattr(self, "block_host_window", None),
+            getattr(self, "exclude_host_window", None),
+            getattr(self, "updater_window", None),
+        ):
             callback = getattr(widget, "apply_theme", None)
             if callable(callback):
                 callback(mode)
+
         if hasattr(self, "title_bar") and not self._embedded:
             self.title_bar.update_theme(text)
 

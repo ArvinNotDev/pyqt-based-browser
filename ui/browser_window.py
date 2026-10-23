@@ -2837,6 +2837,8 @@ class BrowserWindow(QMainWindow):
                 self.title_bar.apply_icon_theme(dark)
             if getattr(self, "bookmarks_bar", None) is not None:
                 self.bookmarks_bar.apply_icon_theme(dark)
+            if getattr(self, "proxy_panel", None) is not None:
+                self.proxy_panel.apply_theme("dark" if dark else "light")
             self._sync_dashboard_tabs()
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")

@@ -178,12 +178,12 @@ class ProxyWindow(QWidget):
             QWidget#homeContent {{ background: {surface}; color: {text}; }}
             QLabel#homeEyebrow {{ background: transparent; color: {accent}; font-size: 10px; font-weight: 850; letter-spacing: 1.1px; }}
             QLabel#homeSubtitle {{ background: transparent; color: {muted}; font-size: 10px; }}
-            QLabel#connectionStatus {{ color: {text}; background: {hover}; border: 1px solid {border}; border-radius: 9px; padding: 8px 6px; font-size: 11px; font-weight: 800; }}
-            QLabel#connectionStatus[connectionState="connected"] {{ color: #2eae69; border-color: rgba(46,174,105,0.48); background: rgba(46,174,105,0.08); }}
-            QLabel#connectionStatus[connectionState="connecting"] {{ color: {accent}; border-color: {accent}; background: rgba(71,163,242,0.08); }}
-            QLabel#connectionStatus[connectionState="disconnected"] {{ color: {muted}; }}
+            QLabel#connectionStatus {{ color: {text}; background: transparent; border: none; padding: 4px; font-size: 12px; font-weight: 750; }}
+            QLabel#connectionStatus[connectionState="connected"] {{ color: #2eae69; }}
+            QLabel#connectionStatus[connectionState="connecting"] {{ color: {accent}; }}
+            QLabel#connectionStatus[connectionState="disconnected"] {{ color: {text}; }}
             QLabel#bootstrapPercent {{ color: {accent}; background: transparent; font-size: 12px; font-weight: 800; }}
-            QLabel#trafficUsage, QLabel#routeStatusLabel, QLabel#exitIpLabel {{ color: {muted}; background: transparent; font-size: 10px; padding: 2px; }}
+            QLabel#trafficUsage, QLabel#routeStatusLabel, QLabel#exitIpLabel {{ color: {muted}; background: transparent; border: none; font-size: 11px; padding: 2px; }}
             QFrame#homeMetricSeparator {{ color: {border}; background: {border}; max-width: 1px; }}
             QPushButton#connectPulseButton {{ background: transparent; border: none; padding: 0; margin: 0; }}
             QPushButton#connectPulseButton:hover, QPushButton#connectPulseButton:pressed, QPushButton#connectPulseButton:focus {{ background: transparent; border: none; }}
@@ -350,6 +350,7 @@ class ProxyWindow(QWidget):
 
         self._parent._notify("Tor Proxy", "Connected through Tor")
         self.connected = True
+        self.connect_btn.set_connected(True)
         self.btn_whatismyip.setEnabled(True)
         self._parent._parent.reload_engine()
         self.btn_status.setText("connected")
@@ -382,12 +383,14 @@ class ProxyWindow(QWidget):
     def _toggle(self):
         browser = self._parent._parent
         if self.running:
+            self.connect_btn.set_disconnecting()
             browser._request_network_mode(False)
             return
         if not browser.tor_mode:
             browser._request_network_mode(True)
             return
 
+        self.connect_btn.set_connecting()
         self.connect_btn.setEnabled(False)
         self.btn_status.setText("checking ports ...")
         self.set_btn_status_style("connecting")
@@ -402,8 +405,7 @@ class ProxyWindow(QWidget):
         logger.error("Proxy port check failed: %s", error)
         self.btn_status.setText("port check failed")
         self.set_btn_status_style("disconnected")
-        self.connect_btn.connected = False
-        self.connect_btn.updateStyle()
+        self.connect_btn.set_connected(False)
         self.connect_btn.setEnabled(True)
 
     # ===== slot that runs on main thread with the result =====
@@ -432,8 +434,7 @@ class ProxyWindow(QWidget):
             self.set_btn_status_style("disconnected")
             self.btn_status.setText("port check failed")
             self.connect_btn.setEnabled(True)
-            self.connect_btn.connected = False
-            self.connect_btn.updateStyle()
+            self.connect_btn.set_connected(False)
             return
 
         # ok==True -> attempt to set ports and start services (on main thread)
@@ -540,6 +541,9 @@ class ProxyWindow(QWidget):
             logger.warning("Tor cleanup after failure failed (%s)", type(exc).__name__)
         self.connected = False
         self.running = True
+        # Browser remains routed through the local proxy until the user
+        # disconnects, even when Tor bootstrap itself has failed.
+        self.connect_btn.set_connected(True)
         self.btn_whatismyip.setEnabled(False)
         self.timer.stop()
         self.timer_data_usage.stop()
@@ -565,6 +569,7 @@ class ProxyWindow(QWidget):
             # Its SOCKS connection now fails with 502 until the user disconnects.
             proxy.set_tor_routing(True)
             self.connected = False
+            self.connect_btn.set_connected(True)
             self.btn_whatismyip.setEnabled(False)
             if self.controller:
                 try:
@@ -685,6 +690,7 @@ class ProxyWindow(QWidget):
             return
         self._stopping = True
         self._tor_start_token = None
+        self.connect_btn.set_disconnecting()
         self.btn_status.setText("disconnecting . . .")
         self.set_btn_status_style("disconnecting")
         self.timer_data_usage.stop()
@@ -719,8 +725,7 @@ class ProxyWindow(QWidget):
         self.lbl_percent.setText("0%")
         self.btn_status.setText("disconnected")
         self.set_btn_status_style("disconnected")
-        self.connect_btn.connected = False
-        self.connect_btn.updateStyle()
+        self.connect_btn.set_connected(False)
         self.connect_btn.setEnabled(True)
         self._stopping = False
         

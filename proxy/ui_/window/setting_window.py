@@ -93,21 +93,22 @@ class SettingWindow(QWidget):
 
     def apply_theme(self, mode="dark"):
         dark = mode == "dark"
-        border = "#394655" if dark else "#d7e0eb"
-        panel = "#202630" if dark else "#f7f9fc"
-        text = "#e8edf3" if dark else "#253247"
-        accent = "#65aaf6" if dark else "#176fc1"
-        hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
+        border = "#3b4552" if dark else "#d7dee7"
+        panel = "#202630" if dark else "#ffffff"
+        field = "#171c23" if dark else "#f8fafc"
+        text = "#e8edf3" if dark else "#253041"
+        accent = "#287db5"
+        hover = "rgba(71,163,242,0.15)" if dark else "rgba(24,118,191,0.11)"
         self.setStyleSheet(f"""
             QWidget {{ color: {text}; background: transparent; }}
             QWidget#proxySettingsContent {{ background: {panel}; }}
-            QLabel {{ color: {text}; }}
-            QLineEdit, QTextEdit, QListWidget {{ background: {"#171c23" if dark else "#ffffff"}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 7px; selection-background-color: {accent}; }}
-            QCheckBox {{ spacing: 7px; }}
+            QLabel {{ color: {text}; background: transparent; }}
+            QLineEdit, QTextEdit, QListWidget {{ background: {field}; color: {text}; border: 1px solid {border}; border-radius: 8px; padding: 7px; selection-background-color: {accent}; selection-color: #ffffff; }}
+            QCheckBox {{ color: {text}; spacing: 7px; }}
             QPushButton {{ min-height: 32px; padding: 0 10px; background: transparent; color: {text}; border: 1px solid {border}; border-radius: 8px; font-weight: 600; }}
             QPushButton:hover {{ background: {hover}; border-color: {accent}; }}
             QPushButton#proxySettingsNavButton {{ min-height: 34px; padding: 0 8px; border-color: transparent; }}
-            QPushButton#proxySettingsNavButton:checked {{ background: {"#314c70" if dark else "#dce9fc"}; border-color: {"#5276a4" if dark else "#b8d0f3"}; }}
+            QPushButton#proxySettingsNavButton:checked {{ background: {accent}; border-color: {accent}; color: #ffffff; font-weight: 750; }}
             QPushButton#proxySettingsBackButton {{ min-height: 32px; border: 1px solid {border}; border-radius: 8px; background: transparent; color: {text}; }}
             QPushButton#proxySettingsBackButton:hover {{ border-color: {accent}; background: {hover}; }}
             QScrollBar:vertical {{ background: transparent; width: 9px; margin: 2px; }}
@@ -115,7 +116,18 @@ class SettingWindow(QWidget):
             QScrollBar::handle:vertical:hover {{ background: {"#6a809c" if dark else "#94a8c4"}; }}
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
             QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
+            QScrollBar:horizontal {{ background: transparent; height: 9px; margin: 2px; }}
+            QScrollBar::handle:horizontal {{ background: {"#4b5b70" if dark else "#bdc8d8"}; min-width: 24px; border-radius: 4px; }}
+            QScrollBar::handle:horizontal:hover {{ background: {"#6a809c" if dark else "#94a8c4"}; }}
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ width: 0; }}
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: transparent; }}
         """)
+        # Recolor QtAwesome glyphs whenever the browser theme changes.
+        icon_color = "#eff1f4" if dark else "#202832"
+        for button, icon_name in zip(self.settings_nav_buttons, ("fa6s.link", "fa6s.network-wired")):
+            button.setIcon(qta.icon(icon_name, color="#ffffff" if button.isChecked() else icon_color))
+        if hasattr(self, "btn_qrcode"):
+            self.btn_qrcode.setIcon(qta.icon("fa6s.qrcode", color=icon_color))
 
     def initialize_first_page(self):
         mode_layout = QHBoxLayout()
