@@ -137,6 +137,26 @@ class StartupConfigurationTests(unittest.TestCase):
         self.assertEqual(refreshes, [True])
 
 
+    def test_application_font_normalizer_preserves_valid_point_size(self):
+        from PySide6.QtGui import QFont
+
+        class FakeApplication:
+            def __init__(self):
+                self.current_font = QFont("Segoe UI", 11)
+
+            def font(self):
+                return self.current_font
+
+            def setFont(self, font):
+                self.current_font = font
+
+        app = FakeApplication()
+        normalized = _normalize_application_font(app)
+
+        self.assertEqual(normalized.pointSize(), 11)
+        self.assertEqual(app.font().pointSize(), 11)
+
+
     def test_application_font_normalizer_repairs_unspecified_point_size(self):
         from PySide6.QtGui import QFont
 

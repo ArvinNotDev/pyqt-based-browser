@@ -28,9 +28,11 @@ def _normalize_application_font(app):
     from PySide6.QtGui import QFont
 
     app_font = QFont(app.font())
-    if app_font.pointSize() <= 0:
-        app_font.setPointSize(10)
-        app.setFont(app_font)
+    point_size = app_font.pointSize()
+    # Convert pixel-sized/default fonts into a resolved point-sized font before
+    # importing Qt widgets and icon engines that may copy the application font.
+    app_font.setPointSize(point_size if point_size > 0 else 10)
+    app.setFont(app_font)
     return app_font
 
 
@@ -138,12 +140,15 @@ if __name__ == "__main__":
 
     # No Tor proxy is configured for an ordinary browser session.
     from PySide6.QtWidgets import QApplication, QMessageBox
-    from ui.browser_window import BrowserWindow
 
     app = QApplication([sys.argv[0], *qt_arguments])
     _normalize_application_font(app)
     app.setApplicationName("ARMA Browser")
     app.setApplicationDisplayName("ARMA Browser")
+
+    # Import QWebEngine widgets and icon engines only after the application font
+    # has a valid point size. The custom scheme was registered before QApplication.
+    from ui.browser_window import BrowserWindow
     try:
         window = BrowserWindow(tor_mode=tor_mode, restored_session=restored_session)
     except Exception as exc:
