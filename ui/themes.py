@@ -110,7 +110,7 @@ QToolButton#menuButton {
     color: #3f4752;
     border: 1px solid #e1e5eb;
     border-radius: 10px;
-    padding: 0 8px 2px;
+    padding: 0 8px;
     min-width: 30px;
     min-height: 28px;
     font-size: 22px;
@@ -388,7 +388,7 @@ QToolButton#menuButton {
     color: #c7ced8;
     border: 1px solid #343c47;
     border-radius: 10px;
-    padding: 0 8px 2px;
+    padding: 0 8px;
     min-width: 30px;
     min-height: 28px;
     font-size: 22px;
