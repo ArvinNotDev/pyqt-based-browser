@@ -524,12 +524,13 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
     first = tabs.add_tab("First website", make_active=True)
     tabs.add_tab("Second website", make_active=False)
     tabs.add_tab("Third website", make_active=False)
+
+    first_tab = tabs.tabs[first]
+    assert first_tab.close_btn.isHidden()
     tabs.show()
     app.processEvents()
 
-    first_tab = tabs.tabs[first]
     assert not first_tab.favicon.pixmap().isNull()
-    assert first_tab.close_btn.isHidden()
     assert first_tab.height() == 36
 
     tabs.set_loading(first, True)

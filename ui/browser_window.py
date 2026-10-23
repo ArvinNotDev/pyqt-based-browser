@@ -2900,8 +2900,9 @@ class BrowserWindow(QMainWindow):
             message = (info.errorString() or "").strip()
             if not message:
                 message = "The website could not be reached. Check the connection and try again."
-            if view in self.views:
-                self.tabbar.set_loading(self.views.index(view), False)
+            tabbar = getattr(self, "tabbar", None)
+            if view in self.views and tabbar is not None:
+                tabbar.set_loading(self.views.index(view), False)
             placeholder = self._placeholders.get(view)
             if placeholder is None and view in self.views:
                 # A page can fail after an earlier successful load removed its placeholder.
