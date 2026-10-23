@@ -151,7 +151,11 @@ def test_dashboard_actions_are_rejected_from_external_pages():
 
 def test_dashboard_state_sync_checks_origin_again_at_execution_time():
     browser = SimpleNamespace(_dashboard_state=lambda: {"notes": "private text"})
-    page = SimpleNamespace(_dashboard_active=True, runJavaScript=Mock())
+    page = SimpleNamespace(
+        _dashboard_active=True,
+        url=lambda: QUrl("arma://dashboard/"),
+        runJavaScript=Mock(),
+    )
 
     BrowserWindow._sync_dashboard_page(browser, page)
 
@@ -166,7 +170,11 @@ def test_dashboard_search_uses_existing_url_resolver():
     query.addQueryItem("payload", json.dumps({"query": "privacy browser", "engine": "default"}))
     action_url = QUrl("arma-action://dispatch/")
     action_url.setQuery(query)
-    page = SimpleNamespace(_dashboard_active=True, runJavaScript=Mock())
+    page = SimpleNamespace(
+        _dashboard_active=True,
+        url=lambda: QUrl("arma://dashboard/"),
+        runJavaScript=Mock(),
+    )
     view = SimpleNamespace(setUrl=Mock(), page=lambda: page)
     browser = SimpleNamespace(
         dashboard_manager=object(),

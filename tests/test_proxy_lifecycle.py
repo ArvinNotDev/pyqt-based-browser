@@ -1,4 +1,5 @@
 import importlib
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -75,6 +76,12 @@ def test_tor_runner_rejects_missing_local_bundle_without_starting_process(monkey
 def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_path):
     tor_module = importlib.import_module("proxy.tor")
     runner = tor_module.TorRunner(9050, 9051, 9053)
+    bundle_root = tmp_path / "tor"
+    bundle_root.mkdir()
+    tor_binary = bundle_root / ("tor.exe" if os.name == "nt" else "tor")
+    tor_binary.touch()
+    runner.tor_path = str(tor_binary)
+    runner.path_set = True
     runner.geoip_path = str(tmp_path / "data" / "geoip")
     runner.geoip6_path = str(tmp_path / "data" / "geoip6")
     runner.Log = "notice stdout"
@@ -87,7 +94,7 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     runner.ClientUseIPv6 = 0
     runner.bridge = True
     runner.bridges = "obfs4 192.0.2.10:443 fingerprint cert=example"
-    lyrebird_path = tmp_path / "tor" / "pluggable_transports" / "lyrebird"
+    lyrebird_path = bundle_root / "pluggable_transports" / ("lyrebird.exe" if os.name == "nt" else "lyrebird")
     lyrebird_path.parent.mkdir(parents=True)
     lyrebird_path.touch()
     runner.lyrebird_path = str(lyrebird_path)
@@ -99,7 +106,7 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     assert "DNSPort 127.0.0.1:9053" in config
     assert "UseBridges 1" in config
     plugin_command = runner._torrc_quote(runner.lyrebird_path)
-    assert f"ClientTransportPlugin obfs4 exec {plugin_command}" in config
+    assert f"ClientTransportPlugin meek_lite,obfs4,snowflake,webtunnel exec {plugin_command}" in config
 
 
 def test_invalid_port_is_not_reported_as_available():
