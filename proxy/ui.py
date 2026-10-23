@@ -192,7 +192,7 @@ class Window(QMainWindow):
         self._display_mode = mode
         dark = mode == "dark"
         border = "#3b4552" if dark else "#d7dee7"
-        surface = "#202630" if dark else "#ffffff"
+        surface = "#1a2029" if dark else "#f7f9fc"
         menu_surface = "#1b2029" if dark else "#eef2f8"
         field = "#171c23" if dark else "#f8fafc"
         text = "#e8edf3" if dark else "#253041"
@@ -202,6 +202,8 @@ class Window(QMainWindow):
 
         self.setStyleSheet(f"""
             QWidget#torProxyShell {{ background: {surface}; color: {text}; }}
+            QStackedWidget#torProxyPages {{ background: {surface}; border: none; }}
+            QWidget#homeContent, QWidget#torBundlePage {{ background: transparent; }}
             QWidget#proxyEmbeddedNavigation {{ background: {menu_surface}; border-bottom: 1px solid {border}; }}
             QWidget {{ color: {text}; }}
             QLabel {{ color: {text}; }}

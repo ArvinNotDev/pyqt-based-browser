@@ -15,6 +15,7 @@ class PulseButton(QPushButton):
         self.setAutoFillBackground(False)
         self.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0; margin: 0; }")
         self._state = "disconnected"
+        self._dark_mode = False
         self.connected = False
         self.hovered = False
         self._pulse_radius = 103.0
@@ -90,6 +91,11 @@ class PulseButton(QPushButton):
         self._set_state("disconnect", "DISCONNECT")
         self.setToolTip("Tor is unavailable. Click to leave Tor routing and restore direct browsing.")
 
+    def set_theme(self, mode):
+        """Match the animated Connect control to the surrounding Tor theme."""
+        self._dark_mode = mode == "dark"
+        self.update()
+
     def set_compact(self, compact: bool):
         """Scale the Connect control down for narrow/mobile browser panels."""
         target = 220 if compact else 264
@@ -122,13 +128,21 @@ class PulseButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         center = self.rect().center()
-        colors = {
-            "disconnected": ("#2eae69", "#82e8ae", "#176942"),
-            "connecting": ("#328bd4", "#9bd1ff", "#1d4e89"),
-            "connected": ("#2cbb88", "#a6f4d3", "#146953"),
-            "disconnect": ("#ff526d", "#ff9caa", "#9d2941"),
-            "stopping": ("#e58a44", "#ffd0a5", "#8a4321"),
+        dark_colors = {
+            "disconnected": ("#4c8fe8", "#a9ceff", "#244f8b"),
+            "connecting": ("#3e9bf4", "#b6dcff", "#24598f"),
+            "connected": ("#2fb87b", "#a1f0c1", "#145f40"),
+            "disconnect": ("#e65a6a", "#ffadb6", "#8e2636"),
+            "stopping": ("#c9854b", "#ffd0a1", "#76451f"),
         }
+        light_colors = {
+            "disconnected": ("#3979d6", "#9ec5ff", "#1e4f91"),
+            "connecting": ("#2f84d8", "#8fc9ff", "#1c528c"),
+            "connected": ("#269e70", "#8fe0b8", "#176448"),
+            "disconnect": ("#d94f5e", "#ff9fa8", "#8f2634"),
+            "stopping": ("#bc773b", "#f5c18b", "#7c461d"),
+        }
+        colors = dark_colors if self._dark_mode else light_colors
         base, highlight, edge = colors.get(self._state, colors["disconnected"])
         base_color = QColor(base)
         highlight_color = QColor(highlight)

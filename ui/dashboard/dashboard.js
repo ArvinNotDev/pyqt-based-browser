@@ -49,6 +49,7 @@
     document.body.classList.toggle('compact', state.density === 'compact');
     document.body.classList.toggle('no-motion', state.animations === false);
     document.body.classList.toggle('light', state.dark_mode === false);
+    document.documentElement.classList.toggle('light', state.dark_mode === false);
     applyViewportMode();
     for (const name of ['bookmarks', 'recent', 'closed', 'notes', 'focus']) {
       const element = byId(`${name}-widget`);

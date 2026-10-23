@@ -753,3 +753,156 @@ body.viewport-tight .widget.size-wide .link-list { display: block; }
   .search select { min-width: 52px; flex-basis: 64px; width: 64px; font-size: 9px; }
   .search input { font-size: 12px; }
 }
+
+
+/* Theme pass: separate graphite glass from the light palette; avoid white-tinted
+   controls on the dark start page and keep every field/button in the same system. */
+:root {
+  --surface-panel: rgba(13, 23, 38, var(--glass));
+  --surface-panel-raised: rgba(20, 32, 49, .78);
+  --surface-field: rgba(7, 16, 29, .34);
+  --surface-border: rgba(228, 239, 255, .17);
+  --surface-border-strong: rgba(228, 239, 255, .27);
+  --surface-hover: rgba(231, 241, 255, .10);
+  --surface-shadow: 0 16px 38px rgba(0, 0, 0, .23);
+  --action-ink: #122139;
+}
+:root.light {
+  color-scheme: light;
+  background: #edf2f8;
+  --ink: #1c2a3b;
+  --muted: rgba(25, 42, 61, .74);
+  --dim: rgba(25, 42, 61, .57);
+  --surface-panel: rgba(249, 252, 255, var(--glass));
+  --surface-panel-raised: rgba(250, 252, 255, .92);
+  --surface-field: rgba(238, 244, 251, .88);
+  --surface-border: rgba(43, 63, 91, .15);
+  --surface-border-strong: rgba(43, 63, 91, .24);
+  --surface-hover: rgba(42, 85, 140, .085);
+  --surface-shadow: 0 14px 34px rgba(29, 48, 72, .12);
+  --action-ink: #122139;
+}
+html.light { background: #edf2f8; }
+.glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .085), rgba(255, 255, 255, .025) 44%, rgba(1, 8, 19, .22)),
+    var(--surface-panel);
+  border-color: var(--surface-border);
+  box-shadow:
+    var(--surface-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, .10),
+    inset 0 -1px 0 rgba(255, 255, 255, .025);
+}
+.search.glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .10), rgba(255, 255, 255, .025) 48%, rgba(1, 8, 19, .18)),
+    var(--surface-panel-raised);
+  border-color: var(--surface-border-strong);
+}
+.panel.glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .065), rgba(255, 255, 255, .015) 58%, rgba(1, 8, 19, .14)),
+    var(--surface-panel);
+}
+.text-button, .quiet-button {
+  color: var(--ink);
+  background: var(--surface-hover);
+  border-color: var(--surface-border);
+}
+.text-button:hover, .quiet-button:hover {
+  background: var(--surface-hover);
+  border-color: var(--surface-border-strong);
+}
+#notes, .quick-note-input,
+.modal label > input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.search select {
+  color: var(--ink);
+  background: var(--surface-field);
+  border-color: var(--surface-border);
+}
+#notes::placeholder, .quick-note-input::placeholder, .search input::placeholder {
+  color: var(--dim);
+}
+.search-submit, .pill-button {
+  color: var(--action-ink);
+  border: 1px solid color-mix(in srgb, var(--accent) 68%, transparent);
+}
+.search-submit:hover, .pill-button:hover {
+  color: var(--action-ink);
+  filter: brightness(1.06);
+}
+.search:focus-within { border-color: var(--accent); }
+.clear-search:hover, .link-item:hover { background: var(--surface-hover); }
+.link-item:hover { border-color: var(--surface-border); }
+.shortcut {
+  border-color: var(--surface-border);
+  background: var(--surface-panel);
+}
+.shortcut:hover {
+  border-color: var(--surface-border-strong);
+  background: var(--surface-panel-raised);
+}
+.panel-heading h2, .section-heading h2, .panel-heading p, .section-heading p {
+  text-shadow: none;
+}
+.widget.drag-over { outline-color: var(--accent); }
+.toast {
+  border-color: var(--surface-border);
+  box-shadow: var(--surface-shadow);
+}
+body.light .shade {
+  background: linear-gradient(
+    180deg,
+    rgba(247, 250, 255, .28),
+    rgba(242, 247, 254, .34) 42%,
+    rgba(239, 245, 253, .42)
+  );
+}
+body.light .glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .70), rgba(255, 255, 255, .34) 48%, rgba(227, 236, 248, .30)),
+    var(--surface-panel);
+  border-color: var(--surface-border);
+  box-shadow:
+    var(--surface-shadow),
+    inset 0 1px 0 rgba(255, 255, 255, .80),
+    inset 0 -1px 0 rgba(255, 255, 255, .34);
+}
+body.light .search.glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .83), rgba(250, 252, 255, .66) 48%, rgba(231, 239, 249, .46)),
+    var(--surface-panel-raised);
+}
+body.light .panel.glass {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, .76), rgba(255, 255, 255, .48) 55%, rgba(229, 238, 249, .36)),
+    var(--surface-panel);
+}
+body.light .shortcut-title { color: rgba(20, 37, 57, .94); }
+body.light .shortcut-icon {
+  background: rgba(255, 255, 255, .62);
+  border-color: rgba(40, 62, 89, .13);
+  color: #1c2a3b;
+  text-shadow: none;
+}
+body.light .shortcut-tools button {
+  background: rgba(28, 44, 64, .76);
+  border-color: rgba(255, 255, 255, .48);
+  color: #ffffff;
+}
+body.light .search select { background: var(--surface-field); border-color: var(--surface-border); }
+body.light .search-divider { background: var(--surface-border-strong); }
+body.light .text-button, body.light .quiet-button {
+  background: rgba(245, 249, 255, .74);
+  border-color: var(--surface-border);
+}
+body.light .text-button:hover, body.light .quiet-button:hover {
+  background: rgba(231, 240, 251, .94);
+  border-color: var(--surface-border-strong);
+}
+body.light #notes, body.light .quick-note-input {
+  background: rgba(248, 251, 255, .90);
+  border-color: var(--surface-border);
+}
+body.light .link-item:hover { background: rgba(231, 240, 251, .82); }
+body.light .toast { background: rgba(26, 42, 61, .88); color: #ffffff; }

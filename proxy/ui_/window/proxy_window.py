@@ -174,11 +174,10 @@ class ProxyWindow(QWidget):
         border = "#394655" if dark else "#d7e0eb"
         muted = "#9caabb" if dark else "#64748b"
         accent = "#65aaf6" if dark else "#176fc1"
-        surface = "#202630" if dark else "#f7f9fc"
         text = "#e8edf3" if dark else "#243247"
         hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
         self.home_content.setStyleSheet(f"""
-            QWidget#homeContent {{ background: {surface}; color: {text}; }}
+            QWidget#homeContent {{ background: transparent; color: {text}; }}
             QLabel#homeEyebrow {{ background: transparent; color: {accent}; font-size: 10px; font-weight: 850; letter-spacing: 1.1px; }}
             QLabel#homeSubtitle {{ background: transparent; color: {muted}; font-size: 10px; }}
             QLabel#connectionStatus {{ color: {text}; background: transparent; border: none; padding: 4px; font-size: 12px; font-weight: 750; }}
@@ -195,6 +194,7 @@ class ProxyWindow(QWidget):
             QPushButton#secondaryAction:checked {{ background: {hover}; border-color: {accent}; }}
             QPushButton#secondaryAction:disabled {{ color: {muted}; background: transparent; }}
         """)
+        self.connect_btn.set_theme("dark" if dark else "light")
         self.logs_widget.apply_theme("dark" if dark else "light")
         self.btn_change_identity.setIcon(qta.icon("fa6s.arrows-rotate", color=text))
         self.btn_log.setIcon(qta.icon("fa6s.align-left", color=text))
