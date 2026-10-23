@@ -7,10 +7,11 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 import pytest
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtGui import QColor, QImage
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
-    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _rounded_region,
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedCornerCutout,
 )
 from ui.title_bar import CustomTitleBar
 
@@ -20,13 +21,24 @@ def qapp():
     return QApplication.instance() or QApplication([])
 
 
-def test_rounded_region_clips_square_page_corners():
-    region = _rounded_region(QRect(0, 0, 100, 80), 16)
+def test_rounded_corner_cutout_uses_antialiased_paint(qapp):
+    host = QWidget()
+    cutout = _RoundedCornerCutout(host, "top-left", 12)
+    cutout.set_color(QColor("#ff0000"))
+    cutout.resize(12, 12)
 
-    assert region.contains(QPoint(50, 40))
-    assert region.contains(QPoint(15, 15))
-    assert not region.contains(QPoint(0, 0))
-    assert not region.contains(QPoint(99, 0))
+    image = QImage(12, 12, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    cutout.render(image)
+
+    assert image.pixelColor(0, 0).alpha() == 255
+    assert image.pixelColor(11, 11).alpha() == 0
+    assert any(
+        0 < image.pixelColor(x, y).alpha() < 255
+        for y in range(image.height())
+        for x in range(image.width())
+    )
+    host.close()
 
 
 def test_tab_widgets_fit_inside_their_strip(qapp):

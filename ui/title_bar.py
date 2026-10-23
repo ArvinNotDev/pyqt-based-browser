@@ -5,7 +5,8 @@ import sys
 from ctypes import wintypes
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
+from PySide6.QtGui import QFontMetrics
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QToolButton, QSizePolicy, QWidget
 
 import qtawesome as qta
 
@@ -35,23 +36,44 @@ class CustomTitleBar(QWidget):
         super().__init__(window)
         self.host = window
         self.setObjectName("customTitleBar")
-        self.setFixedHeight(34)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedHeight(38)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 0, 10, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(9)
 
         self.logo = QLabel("A", self)
         self.logo.setObjectName("titleBarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
-        self.logo.setFixedSize(24, 24)
+        self.logo.setFixedSize(26, 26)
         self.logo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.logo.setAccessibleName("ARMA Browser")
         layout.addWidget(self.logo)
 
         self.title = QLabel("ARMA Browser", self)
         self.title.setObjectName("titleBarTitle")
         self.title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.title.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.title)
+
+        self.title_divider = QFrame(self)
+        self.title_divider.setObjectName("titleBarDivider")
+        self.title_divider.setFixedSize(1, 16)
+        self.title_divider.setFrameShape(QFrame.Shape.NoFrame)
+        self.title_divider.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.title_divider)
+
+        self.page_context = QLabel("New tab", self)
+        self.page_context.setObjectName("titleBarPageContext")
+        self.page_context.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.page_context.setMinimumWidth(0)
+        self.page_context.setMaximumWidth(460)
+        self.page_context.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.page_context.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self._full_page_title = "New tab"
+        self.page_context.setToolTip(self._full_page_title)
+        layout.addWidget(self.page_context, 1)
         layout.addStretch(1)
 
         self.minimize_button = self._button("Minimize", "windowMinimizeButton", "fa5s.minus")
@@ -68,6 +90,32 @@ class CustomTitleBar(QWidget):
         self.maximize_button.clicked.connect(self._toggle_maximized)
         self.close_button.clicked.connect(window.close)
         self.sync_maximize_button()
+        self._update_page_context_text()
+
+    def set_page_title(self, title: str) -> None:
+        """Show the active page title without replacing the persistent app identity."""
+        normalized = " ".join(str(title or "New tab").split()) or "New tab"
+        if normalized == self._full_page_title:
+            self._update_page_context_text()
+            return
+        self._full_page_title = normalized
+        self.page_context.setToolTip(normalized)
+        self._update_page_context_text()
+
+    def _update_page_context_text(self) -> None:
+        width = max(0, self.page_context.width() - 18)
+        if width <= 0:
+            self.page_context.setText("")
+            return
+        self.page_context.setText(
+            QFontMetrics(self.page_context.font()).elidedText(
+                self._full_page_title, Qt.TextElideMode.ElideRight, width
+            )
+        )
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_page_context_text()
 
     def _button(self, tooltip, object_name, icon_name):
         button = QToolButton(self)
@@ -77,8 +125,8 @@ class CustomTitleBar(QWidget):
         button.setIconSize(QSize(13, 13))
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
-        button.setFixedSize(34, 28)
-        button.setFocusPolicy(Qt.NoFocus)
+        button.setFixedSize(36, 30)
+        button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         return button
 
     def _toggle_maximized(self):

@@ -893,3 +893,42 @@ QWidget#dashboardWidgetOptionRow QCheckBox { font-size: 13px; min-height: 32px; 
 QComboBox#dashboardWidgetSize { min-width: 118px; min-height: 30px; padding: 3px 9px; border-radius: 8px; }
 QDialog#settingsDialog QFormLayout QLabel { font-size: 13px; }
 """
+
+
+/* A clearer app identity, live page context, and consistent window-control targets. */
+LIGHT_CHROME_POLISH += """
+QWidget#customTitleBar { min-height: 38px; }
+QLabel#titleBarLogo { border-radius: 9px; font-size: 14px; font-weight: 800; }
+QLabel#titleBarTitle { color: #2c3d55; font-size: 13px; font-weight: 750; }
+QFrame#titleBarDivider { background: rgba(143,161,189,145); border: none; }
+QLabel#titleBarPageContext {
+    color: #63738a;
+    background: rgba(218,228,242,125);
+    border: 1px solid rgba(193,207,229,165);
+    border-radius: 9px;
+    padding: 2px 9px;
+    min-height: 20px;
+    font-size: 11px;
+    font-weight: 550;
+}
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton { min-width: 36px; max-width: 36px; min-height: 30px; max-height: 30px; border-radius: 9px; }
+"""
+DARK_CHROME_POLISH += """
+QWidget#customTitleBar { min-height: 38px; }
+QLabel#titleBarLogo { border-radius: 9px; font-size: 14px; font-weight: 800; }
+QLabel#titleBarTitle { color: #eef4fc; font-size: 13px; font-weight: 750; }
+QFrame#titleBarDivider { background: rgba(130,148,173,105); border: none; }
+QLabel#titleBarPageContext {
+    color: #b5c3d7;
+    background: rgba(51,62,79,180);
+    border: 1px solid rgba(125,145,174,105);
+    border-radius: 9px;
+    padding: 2px 9px;
+    min-height: 20px;
+    font-size: 11px;
+    font-weight: 550;
+}
+QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
+QToolButton#windowCloseButton { min-width: 36px; max-width: 36px; min-height: 30px; max-height: 30px; border-radius: 9px; }
+"""
