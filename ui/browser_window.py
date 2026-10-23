@@ -955,6 +955,8 @@ class BrowserWindow(QMainWindow):
         reload_action = menu.addAction("Reload tab")
         duplicate_action = menu.addAction("Duplicate tab")
         copy_action = menu.addAction("Copy page address")
+        page = view.page()
+        mute_action = menu.addAction("Unmute tab" if page.isAudioMuted() else "Mute tab")
         menu.addSeparator()
         close_action = menu.addAction("Close tab")
         close_others_action = menu.addAction("Close other tabs")
@@ -974,6 +976,12 @@ class BrowserWindow(QMainWindow):
         elif selected is copy_action:
             QApplication.clipboard().setText(view.url().toString())
             self.statusBar().showMessage("Page address copied.", 2000)
+        elif selected is mute_action:
+            page.setAudioMuted(not page.isAudioMuted())
+            self.statusBar().showMessage(
+                "Tab audio unmuted." if not page.isAudioMuted() else "Tab audio muted.",
+                2000,
+            )
         elif selected is close_action and view in self.views:
             self.request_close_tab(self.views.index(view))
         elif selected is close_others_action:
