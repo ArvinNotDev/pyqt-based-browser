@@ -128,6 +128,8 @@ def test_downloads_glass_softens_only_its_material_not_the_controls():
     panel.resize(380, 620)
     app.processEvents()
 
+    assert panel.manager_button is not None
+    assert not panel.manager_button.icon().isNull()
     assert isinstance(panel.glass_material.graphicsEffect(), QGraphicsBlurEffect)
     assert panel.glass_material.parentWidget() is panel
     assert panel.glass_material.isAncestorOf(panel.search) is False

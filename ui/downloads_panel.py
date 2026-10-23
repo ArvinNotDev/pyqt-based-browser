@@ -6,6 +6,8 @@ import os
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
+import qtawesome as qta
+
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
