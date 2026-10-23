@@ -692,6 +692,10 @@ class BrowserWindow(QMainWindow):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
             if hasattr(self.navbar, "open_external_requested"):
                 self.navbar.open_external_requested.connect(self.open_current_page_externally)
+            if hasattr(self.navbar, "reload_bypass_cache_requested"):
+                self.navbar.reload_bypass_cache_requested.connect(
+                    self.reload_current_page_bypassing_cache
+                )
         except (AttributeError, RuntimeError):
             logger.exception("Could not connect one or more navigation actions")
 
@@ -948,6 +952,7 @@ class BrowserWindow(QMainWindow):
             (self.navbar.back_btn, ["Alt+Left"]),
             (self.navbar.forward_btn, ["Alt+Right"]),
             (self.navbar.reload_btn, ["Ctrl+R", "F5"]),
+            (self.navbar.reload_bypass_cache_action, ["Ctrl+Shift+R", "Ctrl+F5"]),
             (self.navbar.home_btn, ["Alt+Home"]),
         ):
             self._register_browser_shortcut(action, sequences, ui_action=True)
@@ -2366,6 +2371,20 @@ class BrowserWindow(QMainWindow):
             self.statusBar().showMessage("Opened in the default browser.", 2500)
         else:
             self.statusBar().showMessage("Could not open the default browser.", 4000)
+
+    def reload_current_page_bypassing_cache(self) -> None:
+        """Retry the active page without reusing resources from the HTTP cache."""
+        view = self.current_view()
+        if view is None:
+            return
+        url = view.url()
+        if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
+            self.statusBar().showMessage(
+                "Only web pages can be reloaded without cache.", 3000
+            )
+            return
+        view.page().triggerAction(QWebEnginePage.WebAction.ReloadAndBypassCache)
+        self.statusBar().showMessage("Reloading without the local cache…", 2500)
 
     def navigate(self, url: str):
         if isinstance(url, QUrl):
