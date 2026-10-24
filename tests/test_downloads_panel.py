@@ -196,7 +196,8 @@ def test_overlay_dock_switch_preserves_the_existing_page_and_view_container():
     assert splitter.widget(0) is panel
     assert splitter.widget(1) is view_container
     assert panel.is_open
-    assert panel.mode_button.text() == "Overlay"
+    assert panel.mode_button.property("downloadsPinned") is True
+    assert panel.mode_button.toolTip() == "Unpin downloads panel and return to overlay"
 
     browser._toggle_downloads_panel_mode()
 
@@ -207,7 +208,8 @@ def test_overlay_dock_switch_preserves_the_existing_page_and_view_container():
     assert splitter.widget(0) is view_container
     assert panel.parentWidget() is browser.content_row
     assert panel.is_open
-    assert panel.mode_button.text() == "Dock"
+    assert panel.mode_button.property("downloadsPinned") is False
+    assert panel.mode_button.toolTip() == "Pin downloads panel beside the page"
 
     browser.content_row.close()
     browser.content_row.deleteLater()
