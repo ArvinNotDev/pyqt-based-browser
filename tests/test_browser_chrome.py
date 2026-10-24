@@ -338,6 +338,19 @@ def test_title_bar_hosted_tab_strip_new_and_close_controls_emit_actions(qapp):
     qapp.processEvents()
     assert new_tab_spy.count() == 1
 
+    # The overflow layout uses a second plus button; the tab-list menu has
+    # another "New tab" action. All entry points must discard Qt's checked bool.
+    tab_bar.external_plus.show()
+    QTest.mouseClick(tab_bar.external_plus, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert new_tab_spy.count() == 2
+
+    tab_bar._populate_tab_list_menu()
+    new_action = next(action for action in tab_bar.tab_list_menu.actions() if action.text() == "New tab")
+    new_action.trigger()
+    qapp.processEvents()
+    assert new_tab_spy.count() == 3
+
     tab_bar.add_tab("Closable tab")
     qapp.processEvents()
     tab = tab_bar.tabs[0]
