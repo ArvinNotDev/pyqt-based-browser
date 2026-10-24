@@ -3,6 +3,8 @@ import re
 import time
 import json
 import copy
+import base64
+import shutil
 import ctypes
 from ctypes import wintypes
 import logging
@@ -23,7 +25,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QImage, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -49,6 +51,8 @@ from .dashboard.internal_page import (
 register_dashboard_scheme()
 from .internal_pages import render_internal_page
 from managers.history_manager import History
+from managers.storage import profile_data_path
+from app_paths import user_data_path
 from managers.dashboard_manager import DashboardManager
 from .dashboard.bridge import DashboardBridge
 from .themes import light_theme, dark_theme
@@ -1330,6 +1334,7 @@ class BrowserWindow(QMainWindow):
             self.navbar.insertWidget(self.navbar.profile_btn, self.bookmarks_bar)
         self.navbar.history = self.history.history if self.history else {}
         self.navbar.profile_selected.connect(self.on_profile_selected)
+        self.navbar.open_profiles_requested.connect(self.open_profiles)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
 
         self.tabbar = CustomTabBar()
@@ -2865,6 +2870,179 @@ class BrowserWindow(QMainWindow):
         )
         page.runJavaScript(script)
 
+
+    def _handle_profile_page_action(
+        self, page: BrowserPage, view: QWebEngineView, action: str, payload: dict
+    ) -> None:
+        """Handle validated profile manager actions from arma://profile/."""
+        profiles = list(getattr(self.navbar, "profiles", None) or self.settings.profiles_list or ["Guest"])
+        allowed_actions = {
+            "profile_create", "profile_switch", "profile_delete",
+            "profile_avatar_save", "profile_avatar_remove",
+        }
+        if action not in allowed_actions:
+            return
+        raw_name = payload.get("name")
+        try:
+            name = Settings._validate_profile_key(raw_name)
+        except ValueError as error:
+            raise ValueError(str(error)) from None
+
+        if action == "profile_create":
+            if not isinstance(raw_name, str) or raw_name != raw_name.strip():
+                raise ValueError("Enter a profile name without leading or trailing spaces.")
+            if any(existing.casefold() == name.casefold() for existing in profiles):
+                raise ValueError(f"A profile named “{name}” already exists.")
+            new_profiles = [*profiles, name]
+            Settings.save_profiles(new_profiles, self.settings.file_path)
+            self.settings.profiles_list = new_profiles
+            self.navbar.set_profiles(new_profiles, self.selected_profile)
+            _show_status_message(self, f"Profile “{name}” created.", 2500)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+        if name not in profiles:
+            raise ValueError("That profile is no longer available.")
+
+        if action == "profile_switch":
+            if name == self.selected_profile:
+                _show_status_message(self, f"“{name}” is already the active profile.", 2000)
+                return
+            self.on_profile_selected(name)
+            return
+
+        if action == "profile_avatar_save":
+            data_url = payload.get("data")
+            if not isinstance(data_url, str) or not data_url.startswith("data:image/png;base64,"):
+                raise ValueError("The profile picture data is invalid.")
+            encoded = data_url.partition(",")[2]
+            if len(encoded) > 1_900_000:
+                raise ValueError("The cropped image is too large. Choose a smaller image.")
+            try:
+                image_bytes = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                raise ValueError("The profile picture data is invalid.") from None
+            if not image_bytes or len(image_bytes) > 1_400_000 or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError("The profile picture must be a valid PNG image.")
+            image = QImage.fromData(image_bytes, "PNG")
+            if image.isNull() or image.width() > 1024 or image.height() > 1024 or image.width() * image.height() > 1_000_000:
+                raise ValueError("The profile picture dimensions are invalid.")
+            image_path = profile_data_path(
+                name, "profile", "image.png", base_dir=user_data_path("profile_data")
+            )
+            image_dir = os.path.dirname(image_path)
+            os.makedirs(image_dir, exist_ok=True)
+            descriptor, temporary_path = tempfile.mkstemp(
+                prefix=".profile-image-", suffix=".png", dir=image_dir
+            )
+            os.close(descriptor)
+            try:
+                if not image.save(temporary_path, "PNG"):
+                    raise OSError("The profile picture could not be encoded.")
+                os.replace(temporary_path, image_path)
+            finally:
+                try:
+                    if os.path.exists(temporary_path):
+                        os.unlink(temporary_path)
+                except OSError:
+                    logger.debug("Could not clean a temporary profile image", exc_info=True)
+            self.navbar._refresh_profile_icon()
+            _show_status_message(self, f"Profile picture saved for “{name}”.", 2500)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+        if action == "profile_avatar_remove":
+            image_path = profile_data_path(
+                name, "profile", "image.png", base_dir=user_data_path("profile_data")
+            )
+            try:
+                os.unlink(image_path)
+            except FileNotFoundError:
+                pass
+            self.navbar._refresh_profile_icon()
+            _show_status_message(self, f"Profile picture removed for “{name}”.", 2200)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+        if action == "profile_delete":
+            if name == self.selected_profile:
+                raise ValueError("Switch to another profile before removing the active one.")
+            if len(profiles) <= 1:
+                raise ValueError("At least one browser profile must remain.")
+
+            # Never remove a profile while it still owns active download requests.
+            for (manager_profile, _private_mode), manager in list(self._download_managers.items()):
+                if manager_profile != name:
+                    continue
+                try:
+                    active_downloads = [
+                        item for item in manager.get_downloads()
+                        if item.get("state") in {"requested", "downloading"}
+                    ]
+                except (AttributeError, RuntimeError, TypeError):
+                    active_downloads = []
+                if active_downloads:
+                    raise ValueError("This profile still has active downloads. Finish or cancel them before removing it.")
+
+            new_profiles = [profile_name for profile_name in profiles if profile_name != name]
+            Settings.remove_profile(name, new_profiles, self.settings.file_path)
+            self.settings.profiles_list = new_profiles
+            self.navbar.set_profiles(new_profiles, self.selected_profile)
+            self._closed_tab_urls = {
+                key: value for key, value in self._closed_tab_urls.items()
+                if key[0] != name
+            }
+            self._private_dashboard_notes.pop(name, None)
+            self._private_dashboard_quick_notes.pop(name, None)
+
+            for manager_key, manager in list(self._download_managers.items()):
+                if manager_key[0] == name:
+                    try:
+                        manager.shutdown()
+                    except (AttributeError, OSError, RuntimeError):
+                        logger.warning("Could not fully stop resources for removed profile %s", name, exc_info=True)
+                    self._download_managers.pop(manager_key, None)
+                    self._connected_download_managers.discard(id(manager))
+
+            for profile_key, web_profile in list(self._profiles.items()):
+                if profile_key[0] != name:
+                    continue
+                profile_id = id(web_profile)
+                handler = self._dashboard_handlers.pop(profile_id, None)
+                try:
+                    web_profile.removeUrlSchemeHandler(DASHBOARD_SCHEME)
+                    web_profile.clearHttpCache()
+                    web_profile.cookieStore().deleteAllCookies()
+                except RuntimeError:
+                    logger.debug("Profile web storage was already being destroyed", exc_info=True)
+                if handler is not None:
+                    handler.deleteLater()
+                self._profile_default_user_agents.pop(profile_id, None)
+                self._profiles.pop(profile_key, None)
+                web_profile.deleteLater()
+
+            storage_roots = {
+                os.path.abspath(getattr(self, "storage_path", user_data_path("profile_data"))),
+                os.path.abspath(user_data_path("profile_data")),
+            }
+
+            def remove_profile_storage(profile_name=name, roots=tuple(storage_roots)):
+                for root in roots:
+                    try:
+                        target = profile_data_path(profile_name, base_dir=root)
+                        if os.path.islink(target):
+                            os.unlink(target)
+                        elif os.path.isdir(target):
+                            shutil.rmtree(target)
+                    except (OSError, ValueError):
+                        logger.warning("Could not fully remove local data for profile %s", profile_name, exc_info=True)
+
+            # Wait until WebEngine releases the profile's cache/storage handles.
+            QTimer.singleShot(1200, remove_profile_storage)
+            _show_status_message(self, f"Profile “{name}” removed. Downloaded files were kept.", 3000)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
     def _handle_internal_page_action(
         self, page: BrowserPage, view: QWebEngineView, host: str, action: str, payload: dict
     ) -> None:
@@ -2877,6 +3055,10 @@ class BrowserWindow(QMainWindow):
                 if not isinstance(target_host, str) or target_host.lower() not in INTERNAL_PAGE_HOSTS:
                     raise ValueError("That internal page is not available.")
                 self._load_internal_page(view, f"arma://{target_host.lower()}/")
+                return
+
+            if host == "profile":
+                self._handle_profile_page_action(page, view, action, payload)
                 return
 
             if action == "browse_download_folder":
@@ -3194,7 +3376,8 @@ class BrowserWindow(QMainWindow):
         query = QUrlQuery(action_url)
         action = query.queryItemValue("action")
         raw_payload = query.queryItemValue("payload")
-        if len(raw_payload) > 80_000:
+        payload_limit = 2_200_000 if host == "profile" else 80_000
+        if len(raw_payload) > payload_limit:
             return
         try:
             payload = json.loads(raw_payload) if raw_payload else {}
@@ -4096,6 +4279,10 @@ class BrowserWindow(QMainWindow):
 
     def open_settings(self):
         self.navigate("arma://settings/")
+
+    def open_profiles(self) -> None:
+        """Open the in-browser profile manager in the current tab."""
+        self.navigate("arma://profile/")
 
     def _apply_tabbar_placement(self) -> None:
         """Move the tab strip between the workspace row and the title-bar left slot."""

@@ -16,6 +16,8 @@ from ui.browser_window import (
     DASHBOARD_URL,
     DASHBOARD_SCHEME,
 )
+from ui.internal_pages import render_internal_page
+from ui.settings import Settings
 from ui.dashboard.internal_page import DASHBOARD_DEFAULT_PORT, register_dashboard_scheme
 from ui.dashboard.internal_page import DashboardSchemeHandler
 from ui.dashboard.bridge import DashboardBridge
@@ -68,6 +70,69 @@ def test_closing_the_sole_non_dashboard_tab_loads_dashboard_in_the_same_tab():
     browser.new_tab.assert_not_called()
     browser.tabbar.remove_tab.assert_not_called()
     assert closed_urls == ["https://www.youtube.com/"]
+
+
+def test_profile_page_is_an_internal_page_with_switch_create_delete_and_avatar_controls(tmp_path):
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(dark_mode=False, profiles_list=["Guest", "Work"]),
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest", "Work"]),
+    )
+
+    html = render_internal_page(browser, "profile")
+
+    assert "Manage profiles" in html
+    assert "profile_create" in html
+    assert "profile_switch" in html
+    assert "profile_delete" in html
+    assert "profile_avatar_save" in html
+    assert "profile_avatar_remove" in html
+    assert "profile-avatar-canvas" in html
+    assert 'href="arma://profile/"' in html
+
+
+def test_settings_page_links_to_in_browser_profile_manager(tmp_path):
+    settings = Settings(file_path=str(tmp_path / "settings.json"))
+    settings.load_profile_settings()
+    settings.load("Guest")
+    browser = SimpleNamespace(
+        settings=settings,
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest"]),
+    )
+
+    html = render_internal_page(browser, "settings")
+
+    assert 'href="arma://profile/"' in html
+    assert "Manage profiles" in html
+
+
+def test_remove_profile_atomically_updates_metadata_without_touching_other_profiles(tmp_path):
+    settings_path = str(tmp_path / "settings.json")
+    settings = Settings(file_path=settings_path, profiles_list=["Guest", "Work", "Study"])
+    settings.save("Guest")
+    settings.save("Work")
+    settings.save("Study")
+    Settings.save_profiles(["Guest", "Work", "Study"], settings_path)
+
+    Settings.remove_profile("Work", ["Guest", "Study"], settings_path)
+
+    restored = Settings(file_path=settings_path)
+    restored.load_profile_settings()
+    document, corrupt = Settings._read_document(settings_path)
+    assert not corrupt
+    assert restored.profiles_list == ["Guest", "Study"]
+    assert "Work" not in document
+    assert "Guest" in document
+    assert "Study" in document
+
+
+def test_internal_profile_route_is_whitelisted():
+    from ui.dashboard.internal_page import INTERNAL_PAGE_HOSTS
+
+    assert "profile" in INTERNAL_PAGE_HOSTS
+    assert BrowserWindow._internal_host("arma://profile/") == "profile"
+    assert BrowserWindow._internal_host("arma://untrusted/") is None
 
 
 def test_recently_closed_tabs_are_scoped_to_profile_and_private_session():

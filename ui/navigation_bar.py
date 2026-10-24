@@ -13,7 +13,6 @@ from PySide6.QtGui import QAction, QFont, QIcon, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QInputDialog,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -29,7 +28,6 @@ from PySide6.QtWidgets import (
 
 from app_paths import user_data_path
 
-from .profile_dialog import CustomizeProfile
 from .settings import Settings
 from .themes import dark_theme, light_theme
 
@@ -76,6 +74,7 @@ class NavigationBar(QToolBar):
     url_submitted = Signal(str)
     home_clicked = Signal()
     profile_selected = Signal(str)
+    open_profiles_requested = Signal()
     new_tab_requested = Signal()
     switch_tab_requested = Signal(int)
     move_tab_requested = Signal(int)
@@ -204,12 +203,13 @@ class NavigationBar(QToolBar):
         self.addSeparator()
         self.profile_btn = self._action("Profiles", "fa5s.user-circle")
         self._navigation_icon_names[self.profile_btn] = "fa5s.user-circle"
-        self.profile_btn.setToolTip("Choose or customize a profile")
+        self.profile_btn.setToolTip("Manage browser profiles")
         self._add_styled_action(self.profile_btn)
-        self.profile_menu = QMenu(self)
-        self.profile_btn.triggered.connect(self._show_profile_menu)
+        self.profile_btn.triggered.connect(
+            lambda _checked=False: self.open_profiles_requested.emit()
+        )
         self.profile_selected.connect(self._on_profile_selected)
-        self._populate_profile_menu()
+        self._refresh_profile_icon()
 
         self.browser_menu = QMenu(self)
         self.new_tab_action = QAction(self._awesome_icon("fa5s.plus"), "New tab", self)
@@ -519,7 +519,7 @@ class NavigationBar(QToolBar):
             logger.warning("Ignoring unknown profile selection: %r", profile_name)
             return
         self.profile = profile_name
-        self._populate_profile_menu(profile_name)
+        self._refresh_profile_icon()
         self.get_history()
 
     def get_history(self):
@@ -675,11 +675,6 @@ class NavigationBar(QToolBar):
         if self.tabs_list:
             self.tab_bar.setCurrentIndex(self.current_tab_index)
 
-    def _show_profile_menu(self):
-        rect = self.actionGeometry(self.profile_btn)
-        pos = self.mapToGlobal(rect.bottomLeft() if rect.isValid() else QPoint(0, self.height()))
-        self.profile_menu.popup(pos)
-
     def _show_browser_menu(self, _checked: bool = False) -> None:
         button = self.menu_button
         bottom = button.mapToGlobal(QPoint(0, button.height()))
@@ -703,56 +698,15 @@ class NavigationBar(QToolBar):
             icon = self._awesome_icon("fa5s.user-circle")
         self.profile_btn.setIcon(icon)
 
-    def _populate_profile_menu(self, selected_profile: str | None = None):
+    def set_profiles(self, profiles: list[str], selected_profile: str | None = None) -> None:
+        """Update the profile manager's backing model without a native menu."""
+        clean = list(dict.fromkeys(name for name in (profiles or []) if isinstance(name, str) and name))
+        self.profiles = clean or ["Guest"]
         if selected_profile in self.profiles:
             self.profile = selected_profile
         elif self.profile not in self.profiles:
-            self.profile = self.profiles[0] if self.profiles else "Guest"
-
-        self.profile_menu.clear()
+            self.profile = self.profiles[0]
         self._refresh_profile_icon()
-        for profile_name in self.profiles:
-            action = QAction(profile_name, self.profile_menu)
-            action.setCheckable(True)
-            action.setChecked(profile_name == self.profile)
-            action.setIcon(self._awesome_icon("fa5s.user"))
-            action.triggered.connect(lambda checked=False, name=profile_name: self.profile_selected.emit(name))
-            self.profile_menu.addAction(action)
-
-        self.profile_menu.addSeparator()
-        customize = QAction(self._awesome_icon("fa5s.user-cog"), "Customize profile…", self.profile_menu)
-        customize.triggered.connect(self._customize_profile)
-        self.profile_menu.addAction(customize)
-        add_profile = QAction(self._awesome_icon("fa5s.user-plus"), "Add profile…", self.profile_menu)
-        add_profile.triggered.connect(self._add_new_profile)
-        self.profile_menu.addAction(add_profile)
-
-    def _customize_profile(self):
-        if not self.profile:
-            return
-        dialog = CustomizeProfile(self.profile, self)
-        dialog.profile_saved.connect(lambda _path: self._refresh_profile_icon())
-        dialog.exec()
-
-    def _add_new_profile(self):
-        name, accepted = QInputDialog.getText(self, "Add profile", "Profile name:")
-        name = name.strip()
-        if not accepted or not name:
-            return
-        if any(existing.casefold() == name.casefold() for existing in self.profiles):
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.information(self, "Profile already exists", f"A profile named “{name}” already exists.")
-            return
-        new_profiles = [*self.profiles, name]
-        try:
-            Settings.save_profiles(new_profiles)
-        except Exception as error:
-            logger.exception("Could not save the profile list")
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "Could not add profile", f"The profile list could not be saved.\n\n{error}")
-            return
-        self.profiles = new_profiles
-        self._populate_profile_menu()
 
     # URL entry and compatibility helpers
     def _on_url_entered(self):
@@ -775,7 +729,7 @@ class NavigationBar(QToolBar):
         if selected_profile not in self.profiles:
             return
         self.profiles = [selected_profile, *(profile for profile in self.profiles if profile != selected_profile)]
-        self._populate_profile_menu(selected_profile)
+        self.set_profiles(self.profiles, selected_profile)
 
     def eventFilter(self, obj, event):
         if obj is self.url_bar:

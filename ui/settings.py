@@ -312,6 +312,43 @@ class Settings:
         cls._prepare_for_write(file_path, data, corrupt)
         return data
 
+    @classmethod
+    def remove_profile(
+        cls,
+        profile_name: str,
+        remaining_profiles: list[str],
+        file_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Remove a profile's settings and persist the remaining profile list atomically."""
+        name = cls._validate_profile_key(profile_name)
+        if not isinstance(remaining_profiles, list):
+            raise ValueError("Profiles must be supplied as a list")
+
+        clean_profiles: list[str] = []
+        seen: set[str] = set()
+        for value in remaining_profiles:
+            valid_name = cls._validate_profile_key(value)
+            if valid_name == name:
+                raise ValueError("The removed profile cannot remain in the profile list")
+            if valid_name not in seen:
+                clean_profiles.append(valid_name)
+                seen.add(valid_name)
+        if not clean_profiles:
+            raise ValueError("At least one browser profile must remain")
+
+        target_path = file_path or user_data_path("settings.json")
+        data, corrupt = cls._read_document(target_path)
+        if cls._is_flat_legacy_settings(data):
+            data = {_LEGACY_FLAT_KEY: data}
+        data.pop(name, None)
+        metadata = data.get(_META_KEY)
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata["profiles"] = clean_profiles
+        data[_META_KEY] = metadata
+        cls._prepare_for_write(target_path, data, corrupt)
+        return data
+
     def load_profile_settings(self) -> None:
         """Load profile names, including the previous machine-hash schema."""
         data, corrupt = self._read_document(self.file_path)

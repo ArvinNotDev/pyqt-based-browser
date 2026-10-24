@@ -11,7 +11,7 @@ from PySide6.QtWebEngineCore import (
 DASHBOARD_SCHEME = b"arma"
 DASHBOARD_URL = "arma://dashboard/"
 DASHBOARD_DEFAULT_PORT = 443
-INTERNAL_PAGE_HOSTS = frozenset({"dashboard", "bookmarks", "settings", "history", "downloads"})
+INTERNAL_PAGE_HOSTS = frozenset({"dashboard", "bookmarks", "settings", "history", "downloads", "profile"})
 _scheme_registered = False
 
 

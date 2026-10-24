@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import html
 import json
+import os
 from typing import Any
+
+from app_paths import user_data_path
+from managers.storage import validate_profile_name
 
 from ._manager_ui import normalize_download
 
@@ -33,6 +38,7 @@ def _shell(browser, title: str, subtitle: str, body: str, active: str) -> str:
         ("Bookmarks", "bookmarks"),
         ("History", "history"),
         ("Downloads", "downloads"),
+        ("Profiles", "profile"),
         ("Settings", "settings"),
     ]
     nav_html = "".join(
@@ -536,6 +542,14 @@ def _settings_page(browser) -> str:
       </section>
     </section>
 
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Browser profiles</h3><p>Switch, create, or personalize separate browsing profiles without opening another window.</p></div>
+        <div class="panel-body">
+          <p class="field-hint">Each profile keeps its own browser settings, bookmarks, history and site storage.</p>
+          <a class="button" href="arma://profile/">Manage profiles <span aria-hidden="true">↗</span></a>
+        </div>
+      </section>
+
     <section class="settings-section" id="section-performance" data-section="performance" aria-labelledby="heading-performance">
       <div class="settings-section-head"><span class="section-kicker">RENDERING</span><h2 id="heading-performance">Performance</h2>
         <p>Choose how Chromium renders web pages.</p></div>
@@ -957,10 +971,310 @@ def _downloads_page(browser) -> str:
     return _shell(browser, "Downloads", "Track progress and manage downloaded files.", body, "downloads")
 
 
+
+def _profile_page(browser) -> str:
+    """Render a profile manager inside the current browser tab."""
+    settings = browser.settings
+    selected = str(getattr(browser, "selected_profile", "Guest") or "Guest")
+    navbar = getattr(browser, "navbar", None)
+    configured = getattr(navbar, "profiles", None) or getattr(settings, "profiles_list", None) or ["Guest"]
+    profiles: list[str] = []
+    seen: set[str] = set()
+    for raw_name in configured:
+        try:
+            name = validate_profile_name(raw_name)
+        except ValueError:
+            continue
+        if name.casefold() not in seen:
+            profiles.append(name)
+            seen.add(name.casefold())
+    if selected and selected not in profiles:
+        profiles.insert(0, selected)
+    if not profiles:
+        profiles = [selected or "Guest"]
+
+    def avatar_markup(name: str, *, large: bool = False) -> str:
+        classes = "profile-avatar profile-avatar-large" if large else "profile-avatar"
+        fallback = _e("".join(part[0] for part in name.split()[:2]).upper() or "A")
+        image_path = user_data_path("profile_data", name, "profile", "image.png")
+        try:
+            if os.path.isfile(image_path) and os.path.getsize(image_path) <= 1_500_000:
+                with open(image_path, "rb") as stream:
+                    encoded = base64.b64encode(stream.read()).decode("ascii")
+                return f'<span class="{classes}"><img alt="" src="data:image/png;base64,{encoded}"></span>'
+        except OSError:
+            pass
+        return f'<span class="{classes}"><span class="profile-avatar-fallback">{fallback}</span></span>'
+
+    cards = []
+    for name in profiles:
+        active = name == selected
+        is_last = len(profiles) <= 1
+        controls = (
+            '<span class="profile-active-pill"><span aria-hidden="true">✓</span> Current profile</span>'
+            if active else _action("Switch to profile", "profile_switch", {"name": name}, "primary")
+        )
+        if not active and not is_last:
+            controls += _action("Remove", "profile_delete", {"name": name}, "danger")
+        hint = "This is the profile currently used by your browser." if active else "Settings and browsing data stay separate from other profiles."
+        cards.append(f"""
+          <article class="profile-card{" profile-card-active" if active else ""}">
+            {avatar_markup(name)}
+            <div class="profile-card-copy">
+              <div class="profile-card-title"><h3>{_e(name)}</h3>{"<span class='profile-active-dot' aria-label='Active'></span>" if active else ""}</div>
+              <p>{_e(hint)}</p>
+            </div>
+            <div class="profile-card-actions">{controls}</div>
+          </article>
+        """)
+    profile_rows = "".join(cards)
+    current_avatar_path = user_data_path("profile_data", selected, "profile", "image.png")
+    existing_avatar = ""
+    try:
+        if os.path.isfile(current_avatar_path) and os.path.getsize(current_avatar_path) <= 1_500_000:
+            with open(current_avatar_path, "rb") as stream:
+                encoded = base64.b64encode(stream.read()).decode("ascii")
+            existing_avatar = f'<img id="profile-existing-avatar" alt="" hidden src="data:image/png;base64,{encoded}">'
+    except OSError:
+        existing_avatar = ""
+
+    body = f"""
+<style>
+.profile-layout {{ display:grid; grid-template-columns:minmax(0,1.45fr) minmax(270px, .8fr); gap:16px; align-items:start; }}
+.profile-stack {{ display:flex; flex-direction:column; gap:10px; }}
+.profile-card {{ display:flex; align-items:center; gap:13px; min-width:0; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--surface); }}
+.profile-card-active {{ border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent); }}
+.profile-avatar {{ width:48px; height:48px; flex:0 0 48px; overflow:hidden; display:grid; place-items:center; border-radius:50%; border:1px solid var(--line); background:var(--accent-soft); color:var(--accent); font-weight:800; }}
+.profile-avatar-large {{ width:148px; height:148px; flex-basis:148px; border-width:2px; }}
+.profile-avatar img {{ width:100%; height:100%; display:block; object-fit:cover; border-radius:50%; }}
+.profile-avatar-fallback {{ display:grid; place-items:center; width:100%; height:100%; font-size:17px; }}
+.profile-avatar-large .profile-avatar-fallback {{ font-size:44px; }}
+.profile-card-copy {{ flex:1; min-width:0; }}
+.profile-card-title {{ display:flex; align-items:center; gap:8px; }}
+.profile-card-title h3 {{ margin:0; font-size:14px; overflow-wrap:anywhere; }}
+.profile-card-copy p {{ margin:4px 0 0; color:var(--muted); font-size:12px; }}
+.profile-active-dot {{ width:8px; height:8px; background:#35b77b; border-radius:50%; }}
+.profile-card-actions {{ display:flex; flex-wrap:wrap; gap:7px; align-items:center; justify-content:flex-end; }}
+.profile-active-pill {{ display:inline-flex; align-items:center; gap:6px; color:var(--accent); background:var(--accent-soft); font-size:11px; font-weight:750; border-radius:8px; padding:7px 9px; white-space:nowrap; }}
+.profile-create-form {{ display:flex; align-items:center; gap:9px; }}
+.profile-create-form input {{ flex:1; width:100%; min-width:0; }}
+.profile-editor {{ display:flex; flex-direction:column; gap:14px; }}
+.profile-editor-head {{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:5px; }}
+.profile-editor-head h3 {{ margin:0; }}
+.profile-editor-head p {{ color:var(--muted); margin:0; font-size:12px; }}
+#profile-avatar-canvas {{ width:190px; height:190px; border-radius:50%; background:var(--surface-2); border:1px solid var(--line); touch-action:none; cursor:grab; }}
+#profile-avatar-canvas:active {{ cursor:grabbing; }}
+.profile-editor-controls {{ display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }}
+.profile-editor-controls input[type=range] {{ width:100%; accent-color:var(--accent); }}
+.profile-help {{ color:var(--muted); font-size:11px; margin:0; }}
+@media (max-width:900px) {{ .profile-layout {{ grid-template-columns:minmax(0,1fr); }} .profile-card {{ flex-wrap:wrap; }} .profile-card-actions {{ width:100%; justify-content:flex-start; }} }}
+@media (max-width:520px) {{ .profile-create-form {{ flex-direction:column; align-items:stretch; }} .profile-avatar-large {{ width:116px; height:116px; flex-basis:116px; }} }}
+</style>
+<div class="page-head">
+  <div><h2>Manage profiles</h2><p class="subtitle">Switch browsing identities and personalize each profile without leaving the browser.</p></div>
+</div>
+<div class="profile-layout">
+  <main class="profile-stack">
+    <section class="panel">
+      <div class="panel-head"><h3>Your profiles</h3><p>{len(profiles)} profile{"s" if len(profiles) != 1 else ""} · the selected profile controls the current browser session.</p></div>
+      <div class="panel-body profile-stack">{profile_rows}</div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h3>Create a profile</h3><p>A fresh profile starts with default browser preferences and separate website storage.</p></div>
+      <div class="panel-body">
+        <form id="profile-create-form" class="profile-create-form">
+          <input id="profile-create-name" name="profile-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Work, Study, Personal" aria-label="New profile name" required>
+          <button type="submit" class="primary">Create profile</button>
+        </form>
+        <p class="footer-note">Use a distinct name for each browsing context. Names cannot contain path separators or reserved operating-system characters.</p>
+      </div>
+    </section>
+  </main>
+  <aside>
+    <div class="profile-editor">
+      <div class="profile-editor-head">
+        <h2>Profile picture</h2>
+        <p>Customize the avatar for <strong>{_e(selected)}</strong>.</p>
+      </div>
+      {avatar_markup(selected, large=True)}
+      <canvas id="profile-avatar-canvas" width="512" height="512" aria-label="Circular profile picture crop preview"></canvas>
+      {existing_avatar}
+      <input id="profile-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden>
+      <button type="button" id="profile-choose-image">Choose image…</button>
+      <div class="profile-editor-controls">
+        <label for="profile-image-zoom" class="field-label">Zoom</label>
+        <span id="profile-image-zoom-value" class="field-hint">100%</span>
+        <input id="profile-image-zoom" type="range" min="100" max="400" step="5" value="100" aria-label="Profile image zoom">
+        <span></span>
+      </div>
+      <div class="actions">
+        <button type="button" id="profile-image-reset" class="ghost">Reset crop</button>
+        <button type="button" id="profile-image-save" class="primary" disabled>Save picture</button>
+        {_action("Remove picture", "profile_avatar_remove", {"name": selected}, "danger")}
+      </div>
+      <p class="profile-help">Drag the image to reposition it, use the wheel or zoom slider to adjust it, then save. The picture is cropped locally in this page.</p>
+    </div>
+  </aside>
+</div>
+<script>
+(() => {{
+  const createForm = document.getElementById('profile-create-form');
+  const nameInput = document.getElementById('profile-create-name');
+  createForm.addEventListener('submit', event => {{
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) {{ nameInput.focus(); return; }}
+    window.armaAction('profile_create', {{name}});
+  }});
+
+  const canvas = document.getElementById('profile-avatar-canvas');
+  const ctx = canvas.getContext('2d');
+  const fileInput = document.getElementById('profile-image-file');
+  const chooseButton = document.getElementById('profile-choose-image');
+  const resetButton = document.getElementById('profile-image-reset');
+  const saveButton = document.getElementById('profile-image-save');
+  const zoomSlider = document.getElementById('profile-image-zoom');
+  const zoomLabel = document.getElementById('profile-image-zoom-value');
+  const oldAvatar = document.getElementById('profile-existing-avatar');
+  let sourceImage = null;
+  let zoom = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let dirty = false;
+  let dragging = false;
+  let lastPoint = null;
+
+  function paint() {{
+    const size = canvas.width;
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent-soft').trim() || '#e2efff';
+    ctx.fillRect(0, 0, size, size);
+    if (sourceImage) {{
+      const base = Math.max(size / sourceImage.naturalWidth, size / sourceImage.naturalHeight);
+      const scale = base * zoom;
+      const width = sourceImage.naturalWidth * scale;
+      const height = sourceImage.naturalHeight * scale;
+      ctx.drawImage(sourceImage, (size - width) / 2 + offsetX, (size - height) / 2 + offsetY, width, height);
+    }} else {{
+      ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#176fc1';
+      ctx.font = '700 44px Segoe UI, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('ARMA', size / 2, size / 2);
+    }}
+    ctx.restore();
+    zoomLabel.textContent = Math.round(zoom * 100) + '%';
+    saveButton.disabled = !sourceImage || !dirty;
+  }}
+
+  function loadImage(source) {{
+    const image = new Image();
+    image.onload = () => {{
+      sourceImage = image;
+      zoom = 1;
+      offsetX = 0;
+      offsetY = 0;
+      dirty = true;
+      zoomSlider.value = '100';
+      paint();
+    }};
+    image.onerror = () => window.armaToast('That image could not be opened.', 'warning');
+    image.src = source;
+  }}
+
+  if (oldAvatar && oldAvatar.src) {{
+    loadImage(oldAvatar.src);
+    dirty = false;
+  }} else {{
+    paint();
+  }}
+
+  chooseButton.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {{
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    if (!/^image\/(png|jpeg|webp|bmp)$/.test(file.type) || file.size > 12 * 1024 * 1024) {{
+      window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.', 'warning');
+      fileInput.value = '';
+      return;
+    }}
+    const reader = new FileReader();
+    reader.onload = () => loadImage(String(reader.result || ''));
+    reader.onerror = () => window.armaToast('The selected image could not be read.', 'warning');
+    reader.readAsDataURL(file);
+  }});
+
+  zoomSlider.addEventListener('input', () => {{
+    zoom = Math.max(1, Math.min(4, Number(zoomSlider.value) / 100));
+    dirty = true;
+    paint();
+  }});
+
+  resetButton.addEventListener('click', () => {{
+    if (!sourceImage) return;
+    zoom = 1;
+    offsetX = 0;
+    offsetY = 0;
+    zoomSlider.value = '100';
+    dirty = true;
+    paint();
+  }});
+
+  canvas.addEventListener('pointerdown', event => {{
+    if (!sourceImage) return;
+    dragging = true;
+    lastPoint = {{x:event.clientX, y:event.clientY}};
+    canvas.setPointerCapture(event.pointerId);
+  }});
+  canvas.addEventListener('pointermove', event => {{
+    if (!dragging || !lastPoint) return;
+    const ratioX = canvas.width / Math.max(1, canvas.clientWidth);
+    const ratioY = canvas.height / Math.max(1, canvas.clientHeight);
+    offsetX += (event.clientX - lastPoint.x) * ratioX;
+    offsetY += (event.clientY - lastPoint.y) * ratioY;
+    lastPoint = {{x:event.clientX, y:event.clientY}};
+    dirty = true;
+    paint();
+  }});
+  function stopDrag() {{ dragging = false; lastPoint = null; }}
+  canvas.addEventListener('pointerup', stopDrag);
+  canvas.addEventListener('pointercancel', stopDrag);
+  canvas.addEventListener('wheel', event => {{
+    if (!sourceImage) return;
+    event.preventDefault();
+    zoom = Math.max(1, Math.min(4, zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
+    zoomSlider.value = String(Math.round(zoom * 100));
+    dirty = true;
+    paint();
+  }}, {{passive:false}});
+
+  saveButton.addEventListener('click', () => {{
+    if (!sourceImage || !dirty) return;
+    const dataUrl = canvas.toDataURL('image/png');
+    if (dataUrl.length > 1_900_000) {{
+      window.armaToast('The cropped image is too large. Choose a smaller image.', 'warning');
+      return;
+    }}
+    saveButton.disabled = true;
+    window.armaAction('profile_avatar_save', {{name:{json.dumps(selected)}, data:dataUrl}});
+  }});
+}})();
+</script>
+<p class="footer-note">Removing a profile deletes its saved profile settings, browser storage, bookmarks, history and profile picture. Files already downloaded to your chosen download folder are not deleted.</p>
+"""
+    return _shell(browser, "Profiles", "Keep work, personal browsing and other contexts neatly separated.", body, "profile")
+
+
 def render_internal_page(browser, host: str) -> str:
     host = str(host or "").strip().lower()
     if host == "settings":
         return _settings_page(browser)
+    if host == "profile":
+        return _profile_page(browser)
     if host == "history":
         return _history_page(browser)
     if host == "bookmarks":

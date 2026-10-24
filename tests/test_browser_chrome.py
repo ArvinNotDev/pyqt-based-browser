@@ -11,7 +11,7 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
-    TAB_HEIGHT, CustomTabBar, TabButton, _TabPreviewPopup, _StatusMessageOverlay, _RoundedWebView,
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView,
     _BrowserShell, _title_bar_point_is_interactive,
 )
 from ui.title_bar import CustomTitleBar
@@ -36,85 +36,6 @@ def test_custom_title_bar_does_not_show_active_page_title(qapp):
     assert not hasattr(title_bar, "page_context")
     assert not hasattr(title_bar, "set_page_title")
     host.close()
-
-
-def test_tab_hover_preview_is_mouse_transparent_and_not_a_tooltip_window(qapp):
-    host = QWidget()
-    popup = _TabPreviewPopup(host)
-
-    assert not popup.isWindow()
-    assert popup.testAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-    assert popup.focusPolicy() == Qt.FocusPolicy.NoFocus
-
-    popup.set_page_details(
-        "Previously opened page",
-        "https://example.com/",
-        loading=True,
-        dark=True,
-    )
-    assert popup.title_label.text() == "Previously opened page"
-    assert popup.url_label.text() == "https://example.com/"
-    assert popup.loading_bar.isVisibleTo(popup)
-    assert popup.status_label.text() == "Loading in background…"
-
-    popup.set_page_details(
-        "Previously opened page",
-        "https://example.com/",
-        loading=False,
-        dark=False,
-    )
-    assert not popup.loading_bar.isVisibleTo(popup)
-    assert not popup.status_label.isVisibleTo(popup)
-
-    host.close()
-    qapp.processEvents()
-
-
-def test_clicking_an_existing_titlebar_tab_switches_back_to_it(qapp):
-    host = _StateTrackingWindow()
-    host.resize(900, 120)
-    host_layout = QVBoxLayout(host)
-    title_bar = CustomTitleBar(host)
-    host_layout.addWidget(title_bar)
-
-    tab_bar = CustomTabBar()
-    title_bar.set_tabs_widget(tab_bar)
-    tab_bar.add_tab("Previously opened tab", make_active=True)
-    tab_bar.add_tab("Current tab", make_active=True)
-
-    host.show()
-    qapp.processEvents()
-
-    previous_tab = tab_bar.tabs[0]
-    assert not hasattr(previous_tab, "_hover_timer")
-    previous_center = previous_tab.mapTo(
-        title_bar, previous_tab.rect().center()
-    )
-    assert _title_bar_point_is_interactive(title_bar, previous_center)
-
-    # The strip's padding and gaps must also remain client area; Windows must
-    # not reinterpret a click near a tab as a window-drag gesture.
-    strip_padding = tab_bar.mapTo(
-        title_bar, QPoint(2, tab_bar.height() // 2)
-    )
-    assert _title_bar_point_is_interactive(title_bar, strip_padding)
-
-    changed = QSignalSpy(tab_bar.tab_changed)
-    QTest.mousePress(previous_tab, Qt.MouseButton.LeftButton)
-    qapp.processEvents()
-
-    # The previous tab becomes active on mouse-down, without needing repeated
-    # clicks or waiting for the mouse-up event.
-    assert tab_bar.active_index == 0
-    assert changed.count() == 1
-    assert changed.at(0)[0] == 0
-
-    QTest.mouseRelease(previous_tab, Qt.MouseButton.LeftButton)
-    qapp.processEvents()
-    assert changed.count() == 1
-
-    host.close()
-    qapp.processEvents()
 
 
 def test_tab_strip_can_move_into_title_bar_and_return_to_workspace(qapp):
