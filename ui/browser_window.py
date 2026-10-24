@@ -1333,8 +1333,12 @@ class BrowserWindow(QMainWindow):
             # Keep bookmarks one click away without reserving a dedicated header row.
             self.navbar.insertWidget(self.navbar.profile_btn, self.bookmarks_bar)
         self.navbar.history = self.history.history if self.history else {}
-        self.navbar.profile_selected.connect(self.on_profile_selected)
+        self.navbar.set_profiles(self.settings.profiles_list, self.selected_profile)
+        self.navbar.profile_selected.connect(
+            lambda name: self.on_profile_selected(name, open_new_tab=False)
+        )
         self.navbar.open_profiles_requested.connect(self.open_profiles)
+        self.navbar.create_profile_requested.connect(self.open_profiles_for_creation)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
 
         self.tabbar = CustomTabBar()
@@ -2898,7 +2902,7 @@ class BrowserWindow(QMainWindow):
             self.settings.profiles_list = new_profiles
             self.navbar.set_profiles(new_profiles, self.selected_profile)
             _show_status_message(self, f"Profile “{name}” created.", 2500)
-            self._load_internal_page(view, "arma://profile/")
+            self.on_profile_selected(name, open_new_tab=False)
             return
 
         if name not in profiles:
@@ -2908,7 +2912,7 @@ class BrowserWindow(QMainWindow):
             if name == self.selected_profile:
                 _show_status_message(self, f"“{name}” is already the active profile.", 2000)
                 return
-            self.on_profile_selected(name)
+            self.on_profile_selected(name, open_new_tab=False)
             return
 
         if action == "profile_avatar_save":
@@ -3376,7 +3380,7 @@ class BrowserWindow(QMainWindow):
         query = QUrlQuery(action_url)
         action = query.queryItemValue("action")
         raw_payload = query.queryItemValue("payload")
-        payload_limit = 2_200_000 if host == "profile" else 80_000
+        payload_limit = 900_000 if host == "profile" else 80_000
         if len(raw_payload) > payload_limit:
             return
         try:
@@ -3653,7 +3657,9 @@ class BrowserWindow(QMainWindow):
         if index < 0 or index >= len(self.views):
             return
 
-        self._hide_tab_preview()
+        hide_preview = getattr(self, "_hide_tab_preview", None)
+        if callable(hide_preview):
+            hide_preview()
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
@@ -4187,7 +4193,7 @@ class BrowserWindow(QMainWindow):
             self.navbar.url_bar.setText(self.current_view().url().toString())
             self._update_navigation_actions(self.current_view())
 
-    def on_profile_selected(self, profile_name: str):
+    def on_profile_selected(self, profile_name: str, open_new_tab: bool = True):
         try:
             self.settings.save(self.selected_profile)
         except (OSError, ValueError):
@@ -4201,7 +4207,8 @@ class BrowserWindow(QMainWindow):
         self._apply_tabbar_placement()
         self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
-        self.new_tab()
+        if open_new_tab:
+            self.new_tab()
 
 
     def _show_status_overlay(self, message: str, timeout: int = 0) -> None:
@@ -4282,7 +4289,17 @@ class BrowserWindow(QMainWindow):
 
     def open_profiles(self) -> None:
         """Open the in-browser profile manager in the current tab."""
+        self._profile_modal_on_load = False
         self.navigate("arma://profile/")
+
+    def open_profiles_for_creation(self) -> None:
+        """Open the in-page create-profile dialog from the browser header menu."""
+        self._profile_modal_on_load = True
+        view = self.current_view()
+        if view is None:
+            self.new_tab("arma://profile/")
+            return
+        self._load_internal_page(view, "arma://profile/")
 
     def _apply_tabbar_placement(self) -> None:
         """Move the tab strip between the workspace row and the title-bar left slot."""

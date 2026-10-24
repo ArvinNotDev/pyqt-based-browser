@@ -75,6 +75,7 @@ class NavigationBar(QToolBar):
     home_clicked = Signal()
     profile_selected = Signal(str)
     open_profiles_requested = Signal()
+    create_profile_requested = Signal()
     new_tab_requested = Signal()
     switch_tab_requested = Signal(int)
     move_tab_requested = Signal(int)
@@ -203,13 +204,12 @@ class NavigationBar(QToolBar):
         self.addSeparator()
         self.profile_btn = self._action("Profiles", "fa5s.user-circle")
         self._navigation_icon_names[self.profile_btn] = "fa5s.user-circle"
-        self.profile_btn.setToolTip("Manage browser profiles")
+        self.profile_btn.setToolTip("Choose or manage browser profiles")
         self._add_styled_action(self.profile_btn)
-        self.profile_btn.triggered.connect(
-            lambda _checked=False: self.open_profiles_requested.emit()
-        )
+        self.profile_menu = QMenu(self)
+        self.profile_btn.triggered.connect(self._show_profile_menu)
         self.profile_selected.connect(self._on_profile_selected)
-        self._refresh_profile_icon()
+        self._populate_profile_menu()
 
         self.browser_menu = QMenu(self)
         self.new_tab_action = QAction(self._awesome_icon("fa5s.plus"), "New tab", self)
@@ -519,7 +519,7 @@ class NavigationBar(QToolBar):
             logger.warning("Ignoring unknown profile selection: %r", profile_name)
             return
         self.profile = profile_name
-        self._refresh_profile_icon()
+        self._populate_profile_menu(profile_name)
         self.get_history()
 
     def get_history(self):
@@ -697,16 +697,58 @@ class NavigationBar(QToolBar):
         if icon.isNull():
             icon = self._awesome_icon("fa5s.user-circle")
         self.profile_btn.setIcon(icon)
+        label = f"Profile: {self.profile}"
+        self.profile_btn.setToolTip(f"{label} · click to switch or manage")
+        self.profile_btn.setStatusTip(label)
+        self.profile_btn.setAccessibleName(label)
 
-    def set_profiles(self, profiles: list[str], selected_profile: str | None = None) -> None:
-        """Update the profile manager's backing model without a native menu."""
-        clean = list(dict.fromkeys(name for name in (profiles or []) if isinstance(name, str) and name))
-        self.profiles = clean or ["Guest"]
+    def _populate_profile_menu(self, selected_profile: str | None = None) -> None:
         if selected_profile in self.profiles:
             self.profile = selected_profile
         elif self.profile not in self.profiles:
-            self.profile = self.profiles[0]
-        self._refresh_profile_icon()
+            self.profile = self.profiles[0] if self.profiles else "Guest"
+
+        self.profile_menu.clear()
+        current = QAction(self._awesome_icon("fa5s.user-circle"), f"Using {self.profile}", self.profile_menu)
+        current.setEnabled(False)
+        self.profile_menu.addAction(current)
+        self.profile_menu.addSeparator()
+        for profile_name in self.profiles:
+            action = QAction(
+                self._awesome_icon("fa5s.check-circle" if profile_name == self.profile else "fa5s.user"),
+                profile_name,
+                self.profile_menu,
+            )
+            action.setCheckable(True)
+            action.setChecked(profile_name == self.profile)
+            action.triggered.connect(
+                lambda checked=False, name=profile_name: self.profile_selected.emit(name)
+            )
+            self.profile_menu.addAction(action)
+
+        self.profile_menu.addSeparator()
+        create_action = QAction(self._awesome_icon("fa5s.user-plus"), "Create profile…", self.profile_menu)
+        create_action.triggered.connect(lambda _checked=False: self.create_profile_requested.emit())
+        self.profile_menu.addAction(create_action)
+        manage_action = QAction(self._awesome_icon("fa5s.users-cog"), "Manage profiles…", self.profile_menu)
+        manage_action.triggered.connect(lambda _checked=False: self.open_profiles_requested.emit())
+        self.profile_menu.addAction(manage_action)
+
+    def _show_profile_menu(self, _checked: bool = False) -> None:
+        rect = self.actionGeometry(self.profile_btn)
+        pos = self.mapToGlobal(
+            rect.bottomLeft() if rect.isValid() else QPoint(0, self.height())
+        )
+        self._populate_profile_menu()
+        self.profile_menu.popup(pos)
+
+    def set_profiles(self, profiles: list[str], selected_profile: str | None = None) -> None:
+        """Refresh the header selector after profiles are created, switched or removed."""
+        self.profiles = list(dict.fromkeys(
+            name for name in (profiles or [])
+            if isinstance(name, str) and name
+        )) or ["Guest"]
+        self._populate_profile_menu(selected_profile)
 
     # URL entry and compatibility helpers
     def _on_url_entered(self):

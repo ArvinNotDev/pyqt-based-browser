@@ -9,7 +9,7 @@ import os
 from typing import Any
 
 from app_paths import user_data_path
-from managers.storage import validate_profile_name
+from managers.storage import profile_data_path, validate_profile_name
 
 from ._manager_ui import normalize_download
 
@@ -972,18 +972,18 @@ def _downloads_page(browser) -> str:
 
 
 
+
 def _profile_page(browser) -> str:
-    """Render a profile manager inside the current browser tab."""
-    settings = browser.settings
+    """Render profile management and editing in the app-owned web page."""
     selected = str(getattr(browser, "selected_profile", "Guest") or "Guest")
     navbar = getattr(browser, "navbar", None)
-    configured = getattr(navbar, "profiles", None) or getattr(settings, "profiles_list", None) or ["Guest"]
+    configured = getattr(navbar, "profiles", None) or getattr(browser.settings, "profiles_list", None) or ["Guest"]
     profiles: list[str] = []
     seen: set[str] = set()
-    for raw_name in configured:
+    for raw in configured:
         try:
-            name = validate_profile_name(raw_name)
-        except ValueError:
+            name = validate_profile_name(raw)
+        except (TypeError, ValueError):
             continue
         if name.casefold() not in seen:
             profiles.append(name)
@@ -993,150 +993,184 @@ def _profile_page(browser) -> str:
     if not profiles:
         profiles = [selected or "Guest"]
 
-    def avatar_markup(name: str, *, large: bool = False) -> str:
-        classes = "profile-avatar profile-avatar-large" if large else "profile-avatar"
-        fallback = _e("".join(part[0] for part in name.split()[:2]).upper() or "A")
-        image_path = user_data_path("profile_data", name, "profile", "image.png")
-        try:
-            if os.path.isfile(image_path) and os.path.getsize(image_path) <= 1_500_000:
-                with open(image_path, "rb") as stream:
-                    encoded = base64.b64encode(stream.read()).decode("ascii")
-                return f'<span class="{classes}"><img alt="" src="data:image/png;base64,{encoded}"></span>'
-        except OSError:
-            pass
-        return f'<span class="{classes}"><span class="profile-avatar-fallback">{fallback}</span></span>'
+    open_create_modal = bool(getattr(browser, "_profile_modal_on_load", False))
+    if open_create_modal:
+        browser._profile_modal_on_load = False
 
-    cards = []
+    def avatar_data(name: str, max_bytes: int = 420_000) -> str:
+        try:
+            path = profile_data_path(
+                name, "profile", "image.png", base_dir=user_data_path("profile_data")
+            )
+            if not os.path.isfile(path) or os.path.getsize(path) > max_bytes:
+                return ""
+            with open(path, "rb") as stream:
+                raw = stream.read(max_bytes + 1)
+            if len(raw) > max_bytes or not raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                return ""
+            return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+        except (OSError, TypeError, ValueError):
+            return ""
+
+    def avatar_markup(name: str, data_url: str) -> str:
+        initials = "".join(part[0] for part in name.split()[:2]).upper() or "A"
+        contents = f'<img alt="" src="{_e(data_url)}">' if data_url else f'<span class="avatar-initials">{_e(initials)}</span>'
+        return f'<span class="profile-avatar" aria-hidden="true">{contents}</span>'
+
+    cards: list[str] = []
     for name in profiles:
         active = name == selected
-        is_last = len(profiles) <= 1
-        controls = (
-            '<span class="profile-active-pill"><span aria-hidden="true">✓</span> Current profile</span>'
-            if active else _action("Switch to profile", "profile_switch", {"name": name}, "primary")
+        data_url = avatar_data(name)
+        primary_action = (
+            '<span class="current-chip"><span aria-hidden="true">✓</span> Current</span>'
+            if active else _action("Use profile", "profile_switch", {"name": name}, "primary")
         )
-        if not active and not is_last:
-            controls += _action("Remove", "profile_delete", {"name": name}, "danger")
-        hint = "This is the profile currently used by your browser." if active else "Settings and browsing data stay separate from other profiles."
+        delete_action = (
+            f'<button type="button" class="profile-remove" data-delete-profile="{_e(name)}" aria-label="Remove profile {_e(name)}">Remove</button>'
+            if not active and len(profiles) > 1 else ""
+        )
         cards.append(f"""
-          <article class="profile-card{" profile-card-active" if active else ""}">
-            {avatar_markup(name)}
-            <div class="profile-card-copy">
-              <div class="profile-card-title"><h3>{_e(name)}</h3>{"<span class='profile-active-dot' aria-label='Active'></span>" if active else ""}</div>
-              <p>{_e(hint)}</p>
+          <article class="profile-card{" is-current" if active else ""}">
+            <div class="avatar-control">
+              {avatar_markup(name, data_url)}
+              <button type="button" class="avatar-edit" data-edit-avatar="{_e(name)}" data-avatar-src="{_e(data_url)}"
+                aria-label="Edit {_e(name)} profile picture" title="Edit profile picture">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 16.5V20h3.5L18 9.5 14.5 6 4 16.5Zm16-9.8a1 1 0 0 0 0-1.4l-1.3-1.3a1 1 0 0 0-1.4 0l-1.7 1.7 2.7 2.7L20 6.7Z"/></svg>
+              </button>
             </div>
-            <div class="profile-card-actions">{controls}</div>
+            <div class="profile-main">
+              <div class="profile-title-row"><h3>{_e(name)}</h3>{"<span class='active-dot' aria-label='Active profile'></span>" if active else ""}</div>
+              <p>{"This is the profile currently in use." if active else "Separate preferences, bookmarks and website data."}</p>
+            </div>
+            <div class="profile-actions">{primary_action}{delete_action}</div>
           </article>
         """)
-    profile_rows = "".join(cards)
-    current_avatar_path = user_data_path("profile_data", selected, "profile", "image.png")
-    existing_avatar = ""
-    try:
-        if os.path.isfile(current_avatar_path) and os.path.getsize(current_avatar_path) <= 1_500_000:
-            with open(current_avatar_path, "rb") as stream:
-                encoded = base64.b64encode(stream.read()).decode("ascii")
-            existing_avatar = f'<img id="profile-existing-avatar" alt="" hidden src="data:image/png;base64,{encoded}">'
-    except OSError:
-        existing_avatar = ""
+    profile_cards = "".join(cards)
 
     body = f"""
 <style>
-.profile-layout {{ display:grid; grid-template-columns:minmax(0,1.45fr) minmax(270px, .8fr); gap:16px; align-items:start; }}
-.profile-stack {{ display:flex; flex-direction:column; gap:10px; }}
-.profile-card {{ display:flex; align-items:center; gap:13px; min-width:0; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--surface); }}
-.profile-card-active {{ border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent); }}
-.profile-avatar {{ width:48px; height:48px; flex:0 0 48px; overflow:hidden; display:grid; place-items:center; border-radius:50%; border:1px solid var(--line); background:var(--accent-soft); color:var(--accent); font-weight:800; }}
-.profile-avatar-large {{ width:148px; height:148px; flex-basis:148px; border-width:2px; }}
-.profile-avatar img {{ width:100%; height:100%; display:block; object-fit:cover; border-radius:50%; }}
-.profile-avatar-fallback {{ display:grid; place-items:center; width:100%; height:100%; font-size:17px; }}
-.profile-avatar-large .profile-avatar-fallback {{ font-size:44px; }}
-.profile-card-copy {{ flex:1; min-width:0; }}
-.profile-card-title {{ display:flex; align-items:center; gap:8px; }}
-.profile-card-title h3 {{ margin:0; font-size:14px; overflow-wrap:anywhere; }}
-.profile-card-copy p {{ margin:4px 0 0; color:var(--muted); font-size:12px; }}
-.profile-active-dot {{ width:8px; height:8px; background:#35b77b; border-radius:50%; }}
-.profile-card-actions {{ display:flex; flex-wrap:wrap; gap:7px; align-items:center; justify-content:flex-end; }}
-.profile-active-pill {{ display:inline-flex; align-items:center; gap:6px; color:var(--accent); background:var(--accent-soft); font-size:11px; font-weight:750; border-radius:8px; padding:7px 9px; white-space:nowrap; }}
-.profile-create-form {{ display:flex; align-items:center; gap:9px; }}
-.profile-create-form input {{ flex:1; width:100%; min-width:0; }}
-.profile-editor {{ display:flex; flex-direction:column; gap:14px; }}
-.profile-editor-head {{ display:flex; flex-direction:column; align-items:center; text-align:center; gap:5px; }}
-.profile-editor-head h3 {{ margin:0; }}
-.profile-editor-head p {{ color:var(--muted); margin:0; font-size:12px; }}
-#profile-avatar-canvas {{ width:190px; height:190px; border-radius:50%; background:var(--surface-2); border:1px solid var(--line); touch-action:none; cursor:grab; }}
+.profile-page {{ max-width:1040px; margin:0 auto; }}
+.profile-page-head {{ display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:22px; }}
+.profile-page-head h2 {{ margin:0; font-size:clamp(22px,3vw,28px); letter-spacing:-.55px; }}
+.profile-page-head p {{ margin:6px 0 0; color:var(--muted); font-size:13px; }}
+.profile-head-actions {{ display:flex; gap:8px; flex-wrap:wrap; }}
+.profile-grid {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }}
+.profile-card {{ min-width:0; min-height:106px; display:flex; align-items:center; gap:13px; padding:15px; border:1px solid var(--line); border-radius:16px; background:var(--surface); box-shadow:var(--shadow); transition:border-color .15s,transform .15s; }}
+.profile-card:hover {{ border-color:color-mix(in srgb,var(--accent) 52%,var(--line)); transform:translateY(-1px); }}
+.profile-card.is-current {{ border-color:var(--accent); box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 20%,transparent),var(--shadow); }}
+.avatar-control {{ position:relative; flex:0 0 58px; width:58px; height:58px; }}
+.profile-avatar {{ display:grid; place-items:center; width:58px; height:58px; overflow:hidden; border-radius:50%; color:var(--accent); background:var(--accent-soft); border:1px solid var(--line); font-weight:800; }}
+.profile-avatar img {{ display:block; width:100%; height:100%; object-fit:cover; border-radius:50%; }}
+.avatar-initials {{ font-size:17px; letter-spacing:.2px; }}
+.avatar-edit {{ position:absolute; right:-3px; bottom:-3px; display:grid; place-items:center; width:26px; height:26px; min-height:26px; padding:0; color:var(--text); background:var(--surface-2); border:1px solid var(--line); border-radius:50%; box-shadow:0 2px 7px rgba(0,0,0,.16); }}
+.avatar-edit:hover {{ color:var(--accent); background:var(--surface-2); border-color:var(--accent); }}
+.avatar-edit svg {{ width:13px; height:13px; fill:currentColor; }}
+.profile-main {{ flex:1; min-width:0; }}
+.profile-title-row {{ display:flex; align-items:center; gap:8px; }}
+.profile-title-row h3 {{ margin:0; font-size:14px; font-weight:750; overflow-wrap:anywhere; }}
+.profile-main p {{ margin:5px 0 0; color:var(--muted); font-size:11px; line-height:1.45; }}
+.active-dot {{ width:7px; height:7px; border-radius:50%; background:#35b77b; flex:0 0 7px; }}
+.profile-actions {{ display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:6px; }}
+.profile-actions button {{ min-height:31px; padding:5px 9px; font-size:11px; white-space:nowrap; }}
+.current-chip {{ display:inline-flex; align-items:center; gap:5px; color:var(--accent); background:var(--accent-soft); border-radius:8px; padding:6px 8px; font-size:11px; font-weight:750; white-space:nowrap; }}
+.profile-remove {{ color:var(--danger); background:transparent; }}
+.profile-empty-note {{ margin-top:16px; color:var(--muted); font-size:11px; }}
+.profile-modal {{ position:fixed; inset:0; z-index:1000; display:grid; place-items:center; padding:20px; background:rgba(7,13,24,.48); backdrop-filter:blur(6px); }}
+.profile-modal[hidden] {{ display:none; }}
+.profile-modal-card {{ width:min(480px,100%); max-height:min(90vh,760px); overflow:auto; border:1px solid var(--line); border-radius:20px; color:var(--text); background:var(--surface-2); box-shadow:0 28px 90px rgba(0,0,0,.28); animation:profile-modal-enter .16s ease-out; }}
+@keyframes profile-modal-enter {{ from {{ opacity:0; transform:translateY(7px) scale(.99); }} to {{ opacity:1; transform:translateY(0) scale(1); }} }}
+.profile-modal-head {{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:20px 22px 15px; border-bottom:1px solid var(--line); }}
+.profile-modal-head h3 {{ margin:0; font-size:17px; }}
+.profile-modal-head p {{ margin:5px 0 0; color:var(--muted); font-size:12px; }}
+.profile-modal-close {{ width:30px; min-width:30px; height:30px; min-height:30px; padding:0; font-size:20px; line-height:1; border-radius:9px; }}
+.profile-modal-body {{ padding:20px 22px 22px; }}
+.profile-modal-panel[hidden] {{ display:none; }}
+.profile-modal-label {{ display:block; margin-bottom:7px; font-size:12px; font-weight:750; }}
+.profile-modal-input {{ width:100%; min-height:42px; padding:10px 12px; color:var(--text); background:var(--surface); border:1px solid var(--line); border-radius:10px; outline:none; }}
+.profile-modal-input:focus {{ border-color:var(--accent); box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 17%,transparent); }}
+.profile-modal-hint {{ margin:8px 0 0; color:var(--muted); font-size:11px; }}
+.profile-modal-actions {{ display:flex; justify-content:flex-end; flex-wrap:wrap; gap:8px; margin-top:20px; }}
+.profile-avatar-editor {{ display:grid; justify-items:center; gap:15px; }}
+#profile-avatar-canvas {{ width:216px; height:216px; max-width:100%; border-radius:50%; background:var(--accent-soft); border:1px solid var(--line); touch-action:none; cursor:grab; }}
 #profile-avatar-canvas:active {{ cursor:grabbing; }}
-.profile-editor-controls {{ display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center; }}
-.profile-editor-controls input[type=range] {{ width:100%; accent-color:var(--accent); }}
-.profile-help {{ color:var(--muted); font-size:11px; margin:0; }}
-@media (max-width:900px) {{ .profile-layout {{ grid-template-columns:minmax(0,1fr); }} .profile-card {{ flex-wrap:wrap; }} .profile-card-actions {{ width:100%; justify-content:flex-start; }} }}
-@media (max-width:520px) {{ .profile-create-form {{ flex-direction:column; align-items:stretch; }} .profile-avatar-large {{ width:116px; height:116px; flex-basis:116px; }} }}
+.profile-zoom-row {{ display:grid; grid-template-columns:auto minmax(100px,1fr) auto; align-items:center; gap:10px; width:100%; font-size:11px; color:var(--muted); }}
+.profile-zoom-row input {{ width:100%; accent-color:var(--accent); }}
+.profile-danger-copy {{ margin:0; font-size:13px; color:var(--muted); line-height:1.65; overflow-wrap:anywhere; }}
+@media (max-width:840px) {{ .profile-grid {{ grid-template-columns:minmax(0,1fr); }} }}
+@media (max-width:560px) {{
+  .profile-page-head {{ align-items:flex-start; flex-direction:column; }}
+  .profile-head-actions {{ width:100%; }} .profile-head-actions button {{ flex:1; }}
+  .profile-card {{ flex-wrap:wrap; }} .profile-actions {{ width:100%; justify-content:flex-start; padding-left:71px; }}
+  .profile-modal-head,.profile-modal-body {{ padding-left:16px; padding-right:16px; }}
+}}
 </style>
-<div class="page-head">
-  <div><h2>Manage profiles</h2><p class="subtitle">Switch browsing identities and personalize each profile without leaving the browser.</p></div>
+<div class="profile-page">
+  <div class="profile-page-head">
+    <div><h2>Profiles</h2><p>Choose a browsing profile or personalize it. Each profile keeps its own browsing data.</p></div>
+    <div class="profile-head-actions"><button type="button" class="primary" id="profile-create-open"><span aria-hidden="true">＋</span> Create profile</button></div>
+  </div>
+  <section class="profile-grid" aria-label="Browser profiles">{profile_cards}</section>
+  <p class="profile-empty-note">Use the pencil on an avatar to change its picture. Removing a profile deletes its saved browser data, but leaves downloaded files in place.</p>
 </div>
-<div class="profile-layout">
-  <main class="profile-stack">
-    <section class="panel">
-      <div class="panel-head"><h3>Your profiles</h3><p>{len(profiles)} profile{"s" if len(profiles) != 1 else ""} · the selected profile controls the current browser session.</p></div>
-      <div class="panel-body profile-stack">{profile_rows}</div>
-    </section>
-    <section class="panel">
-      <div class="panel-head"><h3>Create a profile</h3><p>A fresh profile starts with default browser preferences and separate website storage.</p></div>
-      <div class="panel-body">
-        <form id="profile-create-form" class="profile-create-form">
-          <input id="profile-create-name" name="profile-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Work, Study, Personal" aria-label="New profile name" required>
-          <button type="submit" class="primary">Create profile</button>
-        </form>
-        <p class="footer-note">Use a distinct name for each browsing context. Names cannot contain path separators or reserved operating-system characters.</p>
-      </div>
-    </section>
-  </main>
-  <aside>
-    <div class="profile-editor">
-      <div class="profile-editor-head">
-        <h2>Profile picture</h2>
-        <p>Customize the avatar for <strong>{_e(selected)}</strong>.</p>
-      </div>
-      {avatar_markup(selected, large=True)}
-      <canvas id="profile-avatar-canvas" width="512" height="512" aria-label="Circular profile picture crop preview"></canvas>
-      {existing_avatar}
-      <input id="profile-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden>
-      <button type="button" id="profile-choose-image">Choose image…</button>
-      <div class="profile-editor-controls">
-        <label for="profile-image-zoom" class="field-label">Zoom</label>
-        <span id="profile-image-zoom-value" class="field-hint">100%</span>
-        <input id="profile-image-zoom" type="range" min="100" max="400" step="5" value="100" aria-label="Profile image zoom">
-        <span></span>
-      </div>
-      <div class="actions">
-        <button type="button" id="profile-image-reset" class="ghost">Reset crop</button>
-        <button type="button" id="profile-image-save" class="primary" disabled>Save picture</button>
-        {_action("Remove picture", "profile_avatar_remove", {"name": selected}, "danger")}
-      </div>
-      <p class="profile-help">Drag the image to reposition it, use the wheel or zoom slider to adjust it, then save. The picture is cropped locally in this page.</p>
+
+<div class="profile-modal" id="profile-modal" hidden>
+  <section class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="profile-modal-title">
+    <div class="profile-modal-head">
+      <div><h3 id="profile-modal-title">Create a profile</h3><p id="profile-modal-subtitle">Set up a separate space for browsing.</p></div>
+      <button type="button" class="profile-modal-close" id="profile-modal-close" aria-label="Close dialog">×</button>
     </div>
-  </aside>
+    <div class="profile-modal-body">
+      <section class="profile-modal-panel" id="profile-create-panel" hidden>
+        <form id="profile-create-form">
+          <label class="profile-modal-label" for="profile-create-name">Profile name</label>
+          <input class="profile-modal-input" id="profile-create-name" name="profile-name" type="text" maxlength="120" autocomplete="off" placeholder="e.g. Work, Study, Personal" required>
+          <p class="profile-modal-hint">You’ll switch to this profile after it’s created. Preferences, bookmarks and website storage will be separate.</p>
+          <div class="profile-modal-actions"><button type="button" class="ghost" data-modal-cancel>Cancel</button><button type="submit" class="primary" id="profile-create-submit">Create and switch</button></div>
+        </form>
+      </section>
+      <section class="profile-modal-panel" id="profile-avatar-panel" hidden>
+        <div class="profile-avatar-editor">
+          <canvas id="profile-avatar-canvas" width="256" height="256" aria-label="Profile picture crop preview"></canvas>
+          <input id="profile-image-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden>
+          <button type="button" class="profile-upload" id="profile-choose-image"><span aria-hidden="true">↥</span> Choose image</button>
+          <div class="profile-zoom-row"><label for="profile-image-zoom">Zoom</label><input id="profile-image-zoom" type="range" min="100" max="400" step="5" value="100"><span id="profile-image-zoom-value">100%</span></div>
+          <p class="profile-modal-hint" id="profile-avatar-hint">Drag to position · scroll or use the slider to zoom.</p>
+        </div>
+        <div class="profile-modal-actions"><button type="button" class="ghost" id="profile-avatar-reset">Reset crop</button><button type="button" class="ghost" id="profile-avatar-remove">Remove picture</button><button type="button" class="ghost" data-modal-cancel>Cancel</button><button type="button" class="primary" id="profile-avatar-save" disabled>Save picture</button></div>
+      </section>
+      <section class="profile-modal-panel" id="profile-delete-panel" hidden>
+        <p class="profile-danger-copy" id="profile-delete-copy">Remove the selected profile and its saved browser data? Downloaded files will be kept.</p>
+        <div class="profile-modal-actions"><button type="button" class="ghost" data-modal-cancel>Cancel</button><button type="button" class="danger" id="profile-delete-confirm">Remove profile</button></div>
+      </section>
+    </div>
+  </section>
 </div>
+
 <script>
 (() => {{
+  const modal = document.getElementById('profile-modal');
+  const modalTitle = document.getElementById('profile-modal-title');
+  const modalSubtitle = document.getElementById('profile-modal-subtitle');
+  const panels = {{
+    create: document.getElementById('profile-create-panel'),
+    avatar: document.getElementById('profile-avatar-panel'),
+    delete: document.getElementById('profile-delete-panel')
+  }};
   const createForm = document.getElementById('profile-create-form');
   const nameInput = document.getElementById('profile-create-name');
-  createForm.addEventListener('submit', event => {{
-    event.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) {{ nameInput.focus(); return; }}
-    window.armaAction('profile_create', {{name}});
-  }});
-
   const canvas = document.getElementById('profile-avatar-canvas');
   const ctx = canvas.getContext('2d');
   const fileInput = document.getElementById('profile-image-file');
-  const chooseButton = document.getElementById('profile-choose-image');
-  const resetButton = document.getElementById('profile-image-reset');
-  const saveButton = document.getElementById('profile-image-save');
   const zoomSlider = document.getElementById('profile-image-zoom');
-  const zoomLabel = document.getElementById('profile-image-zoom-value');
-  const oldAvatar = document.getElementById('profile-existing-avatar');
+  const zoomValue = document.getElementById('profile-image-zoom-value');
+  const saveAvatar = document.getElementById('profile-avatar-save');
+  const removeAvatar = document.getElementById('profile-avatar-remove');
+  const deleteCopy = document.getElementById('profile-delete-copy');
+  const deleteConfirm = document.getElementById('profile-delete-confirm');
+  let modalMode = '';
+  let targetProfile = '';
   let sourceImage = null;
+  let sourceUrl = '';
   let zoom = 1;
   let offsetX = 0;
   let offsetY = 0;
@@ -1144,129 +1178,157 @@ def _profile_page(browser) -> str:
   let dragging = false;
   let lastPoint = null;
 
-  function paint() {{
+  function showModal(mode, profileName = '', avatarUrl = '') {{
+    modalMode = mode;
+    targetProfile = profileName;
+    Object.values(panels).forEach(panel => panel.hidden = true);
+    panels[mode].hidden = false;
+    if (mode === 'create') {{
+      modalTitle.textContent = 'Create a profile';
+      modalSubtitle.textContent = 'Set up a separate space for browsing.';
+      nameInput.value = '';
+    }} else if (mode === 'avatar') {{
+      modalTitle.textContent = 'Edit profile picture';
+      modalSubtitle.textContent = 'Personalize “' + profileName + '”.';
+      startAvatarEditor(avatarUrl);
+    }} else {{
+      modalTitle.textContent = 'Remove profile?';
+      modalSubtitle.textContent = 'This action cannot be undone.';
+      deleteCopy.textContent = 'Remove “' + profileName + '” and its saved settings, bookmarks, history, cookies and site storage? Downloaded files will be kept.';
+    }}
+    modal.hidden = false;
+    document.body.style.overflow = 'hidden';
+    if (mode === 'create') setTimeout(() => nameInput.focus(), 0);
+    else document.getElementById('profile-modal-close').focus();
+  }}
+  function hideModal() {{
+    modal.hidden = true;
+    document.body.style.overflow = '';
+    modalMode = '';
+    targetProfile = '';
+    dragging = false; lastPoint = null;
+    fileInput.value = '';
+  }}
+  document.getElementById('profile-create-open').addEventListener('click', () => showModal('create'));
+  document.querySelectorAll('[data-modal-cancel]').forEach(button => button.addEventListener('click', hideModal));
+  document.getElementById('profile-modal-close').addEventListener('click', hideModal);
+  modal.addEventListener('click', event => {{ if (event.target === modal) hideModal(); }});
+  document.addEventListener('keydown', event => {{
+    if (event.key === 'Escape' && !modal.hidden) hideModal();
+  }});
+
+  createForm.addEventListener('submit', event => {{
+    event.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) {{ nameInput.focus(); return; }}
+    window.armaAction('profile_create', {{name}});
+  }});
+  document.querySelectorAll('[data-edit-avatar]').forEach(button => {{
+    button.addEventListener('click', () => showModal('avatar', button.dataset.editAvatar || '', button.dataset.avatarSrc || ''));
+  }});
+  document.querySelectorAll('[data-delete-profile]').forEach(button => {{
+    button.addEventListener('click', () => showModal('delete', button.dataset.deleteProfile || ''));
+  }});
+  deleteConfirm.addEventListener('click', () => {{
+    if (!targetProfile) return;
+    window.armaAction('profile_delete', {{name:targetProfile}});
+    hideModal();
+  }});
+
+  function clampOffset() {{
+    if (!sourceImage) return;
     const size = canvas.width;
-    ctx.clearRect(0, 0, size, size);
-    ctx.save();
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-    ctx.clip();
+    const base = Math.max(size / sourceImage.naturalWidth, size / sourceImage.naturalHeight);
+    const width = sourceImage.naturalWidth * base * zoom;
+    const height = sourceImage.naturalHeight * base * zoom;
+    const maxX = Math.max(0, (width-size)/2), maxY = Math.max(0,(height-size)/2);
+    offsetX = Math.max(-maxX, Math.min(maxX, offsetX));
+    offsetY = Math.max(-maxY, Math.min(maxY, offsetY));
+  }}
+  function paintAvatar() {{
+    const size = canvas.width;
+    ctx.clearRect(0,0,size,size);
+    ctx.save(); ctx.beginPath(); ctx.arc(size/2,size/2,size/2-2,0,Math.PI*2); ctx.clip();
     ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent-soft').trim() || '#e2efff';
-    ctx.fillRect(0, 0, size, size);
+    ctx.fillRect(0,0,size,size);
     if (sourceImage) {{
-      const base = Math.max(size / sourceImage.naturalWidth, size / sourceImage.naturalHeight);
-      const scale = base * zoom;
-      const width = sourceImage.naturalWidth * scale;
-      const height = sourceImage.naturalHeight * scale;
-      ctx.drawImage(sourceImage, (size - width) / 2 + offsetX, (size - height) / 2 + offsetY, width, height);
+      const scale = Math.max(size/sourceImage.naturalWidth,size/sourceImage.naturalHeight)*zoom;
+      const width = sourceImage.naturalWidth*scale, height = sourceImage.naturalHeight*scale;
+      ctx.drawImage(sourceImage,(size-width)/2+offsetX,(size-height)/2+offsetY,width,height);
     }} else {{
       ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#176fc1';
-      ctx.font = '700 44px Segoe UI, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('ARMA', size / 2, size / 2);
+      ctx.font = '800 58px Segoe UI, sans-serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('ARMA',size/2,size/2);
     }}
     ctx.restore();
-    zoomLabel.textContent = Math.round(zoom * 100) + '%';
-    saveButton.disabled = !sourceImage || !dirty;
+    zoomValue.textContent = Math.round(zoom*100)+'%';
+    saveAvatar.disabled = !sourceImage || !dirty;
+    removeAvatar.hidden = !sourceUrl;
   }}
-
-  function loadImage(source) {{
+  function loadImage(url, isExisting) {{
+    sourceUrl = isExisting ? url : '';
+    if (!url) {{
+      sourceImage=null; zoom=1; offsetX=0; offsetY=0; dirty=false; zoomSlider.value='100'; paintAvatar(); return;
+    }}
     const image = new Image();
     image.onload = () => {{
-      sourceImage = image;
-      zoom = 1;
-      offsetX = 0;
-      offsetY = 0;
-      dirty = true;
-      zoomSlider.value = '100';
-      paint();
+      sourceImage=image; zoom=1; offsetX=0; offsetY=0; dirty=!isExisting; zoomSlider.value='100';
+      clampOffset(); paintAvatar();
     }};
-    image.onerror = () => window.armaToast('That image could not be opened.', 'warning');
-    image.src = source;
+    image.onerror = () => window.armaToast('This picture could not be opened.', 'warning');
+    image.src=url;
   }}
-
-  if (oldAvatar && oldAvatar.src) {{
-    loadImage(oldAvatar.src);
-    dirty = false;
-  }} else {{
-    paint();
-  }}
-
-  chooseButton.addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', () => {{
-    const file = fileInput.files && fileInput.files[0];
-    if (!file) return;
-    if (!/^image\/(png|jpeg|webp|bmp)$/.test(file.type) || file.size > 12 * 1024 * 1024) {{
-      window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.', 'warning');
-      fileInput.value = '';
-      return;
+  function startAvatarEditor(url) {{ sourceUrl=url||''; loadImage(sourceUrl,Boolean(sourceUrl)); }}
+  document.getElementById('profile-choose-image').addEventListener('click',()=>fileInput.click());
+  fileInput.addEventListener('change',()=>{{
+    const file=fileInput.files&&fileInput.files[0]; if(!file)return;
+    if(!/^image\/(png|jpeg|webp|bmp)$/.test(file.type)||file.size>12*1024*1024){{
+      window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.','warning'); fileInput.value=''; return;
     }}
-    const reader = new FileReader();
-    reader.onload = () => loadImage(String(reader.result || ''));
-    reader.onerror = () => window.armaToast('The selected image could not be read.', 'warning');
+    const reader=new FileReader();
+    reader.onload=()=>loadImage(String(reader.result||''),false);
+    reader.onerror=()=>window.armaToast('The selected image could not be read.','warning');
     reader.readAsDataURL(file);
   }});
-
-  zoomSlider.addEventListener('input', () => {{
-    zoom = Math.max(1, Math.min(4, Number(zoomSlider.value) / 100));
-    dirty = true;
-    paint();
+  zoomSlider.addEventListener('input',()=>{{zoom=Math.max(1,Math.min(4,Number(zoomSlider.value)/100));clampOffset();dirty=true;paintAvatar();}});
+  document.getElementById('profile-avatar-canvas').addEventListener('pointerdown',event=>{{
+    if(!sourceImage)return; dragging=true; lastPoint={{x:event.clientX,y:event.clientY}}; canvas.setPointerCapture(event.pointerId);
   }});
-
-  resetButton.addEventListener('click', () => {{
-    if (!sourceImage) return;
-    zoom = 1;
-    offsetX = 0;
-    offsetY = 0;
-    zoomSlider.value = '100';
-    dirty = true;
-    paint();
+  canvas.addEventListener('pointermove',event=>{{
+    if(!dragging||!lastPoint)return;
+    offsetX+=(event.clientX-lastPoint.x)*canvas.width/Math.max(1,canvas.clientWidth);
+    offsetY+=(event.clientY-lastPoint.y)*canvas.height/Math.max(1,canvas.clientHeight);
+    lastPoint={{x:event.clientX,y:event.clientY}};clampOffset();dirty=true;paintAvatar();
   }});
-
-  canvas.addEventListener('pointerdown', event => {{
-    if (!sourceImage) return;
-    dragging = true;
-    lastPoint = {{x:event.clientX, y:event.clientY}};
-    canvas.setPointerCapture(event.pointerId);
+  function stopDrag(){{dragging=false;lastPoint=null;}}
+  canvas.addEventListener('pointerup',stopDrag);canvas.addEventListener('pointercancel',stopDrag);
+  canvas.addEventListener('wheel',event=>{{
+    if(!sourceImage||modal.hidden)return;event.preventDefault();
+    zoom=Math.max(1,Math.min(4,zoom*(event.deltaY<0?1.08:.92)));zoomSlider.value=String(Math.round(zoom*100));
+    clampOffset();dirty=true;paintAvatar();
+  }},{{passive:false}});
+  document.getElementById('profile-avatar-reset').addEventListener('click',()=>{{
+    zoom=1;offsetX=0;offsetY=0;zoomSlider.value='100';clampOffset();dirty=true;paintAvatar();
   }});
-  canvas.addEventListener('pointermove', event => {{
-    if (!dragging || !lastPoint) return;
-    const ratioX = canvas.width / Math.max(1, canvas.clientWidth);
-    const ratioY = canvas.height / Math.max(1, canvas.clientHeight);
-    offsetX += (event.clientX - lastPoint.x) * ratioX;
-    offsetY += (event.clientY - lastPoint.y) * ratioY;
-    lastPoint = {{x:event.clientX, y:event.clientY}};
-    dirty = true;
-    paint();
+  saveAvatar.addEventListener('click',()=>{{
+    if(!sourceImage||!dirty||!targetProfile)return;
+    const dataUrl=canvas.toDataURL('image/png');
+    if(dataUrl.length>800000){{window.armaToast('The cropped picture is too large. Choose a smaller image.','warning');return;}}
+    saveAvatar.disabled=true;
+    window.armaAction('profile_avatar_save',{{name:targetProfile,data:dataUrl}});
+    hideModal();
   }});
-  function stopDrag() {{ dragging = false; lastPoint = null; }}
-  canvas.addEventListener('pointerup', stopDrag);
-  canvas.addEventListener('pointercancel', stopDrag);
-  canvas.addEventListener('wheel', event => {{
-    if (!sourceImage) return;
-    event.preventDefault();
-    zoom = Math.max(1, Math.min(4, zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
-    zoomSlider.value = String(Math.round(zoom * 100));
-    dirty = true;
-    paint();
-  }}, {{passive:false}});
-
-  saveButton.addEventListener('click', () => {{
-    if (!sourceImage || !dirty) return;
-    const dataUrl = canvas.toDataURL('image/png');
-    if (dataUrl.length > 1_900_000) {{
-      window.armaToast('The cropped image is too large. Choose a smaller image.', 'warning');
-      return;
-    }}
-    saveButton.disabled = true;
-    window.armaAction('profile_avatar_save', {{name:{json.dumps(selected)}, data:dataUrl}});
+  removeAvatar.addEventListener('click',()=>{{
+    if(!targetProfile||!sourceUrl)return;
+    window.armaAction('profile_avatar_remove',{{name:targetProfile}});
+    hideModal();
   }});
+  if ({str(open_create_modal).lower()}) showModal('create');
 }})();
 </script>
-<p class="footer-note">Removing a profile deletes its saved profile settings, browser storage, bookmarks, history and profile picture. Files already downloaded to your chosen download folder are not deleted.</p>
+<p class="profile-empty-note">Removing a profile deletes its settings, bookmarks, history, cookies and site storage. Downloaded files are kept.</p>
 """
-    return _shell(browser, "Profiles", "Keep work, personal browsing and other contexts neatly separated.", body, "profile")
+    return _shell(browser, "Profiles", "Switch profiles and personalize your browser.", body, "profile")
 
 
 def render_internal_page(browser, host: str) -> str:

@@ -88,6 +88,9 @@ def test_profile_page_is_an_internal_page_with_switch_create_delete_and_avatar_c
     assert "profile_avatar_save" in html
     assert "profile_avatar_remove" in html
     assert "profile-avatar-canvas" in html
+    assert 'id="profile-modal" hidden' in html
+    assert 'data-edit-avatar="Work"' in html
+    assert 'id="profile-create-open"' in html
     assert 'href="arma://profile/"' in html
 
 
