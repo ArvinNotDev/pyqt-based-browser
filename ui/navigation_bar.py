@@ -700,7 +700,6 @@ class NavigationBar(QToolBar):
         label = f"Profile: {self.profile}"
         self.profile_btn.setToolTip(f"{label} · click to switch or manage")
         self.profile_btn.setStatusTip(label)
-        self.profile_btn.setAccessibleName(label)
 
     def _populate_profile_menu(self, selected_profile: str | None = None) -> None:
         if selected_profile in self.profiles:
