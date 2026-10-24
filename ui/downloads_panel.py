@@ -280,9 +280,7 @@ class DownloadsPanel(QFrame):
             if pinned else ("#c7ced8" if dark else "#64748b")
         )
         self.mode_button.setProperty("downloadsPinned", pinned)
-        self.mode_button.setIcon(qta.icon(
-            "fa5s.thumbtack", color=icon_color, rotate=45 if pinned else 0
-        ))
+        self.mode_button.setIcon(qta.icon("fa5s.thumbtack", color=icon_color))
         tooltip = (
             "Unpin downloads panel and return to overlay"
             if pinned else "Pin downloads panel beside the page"
