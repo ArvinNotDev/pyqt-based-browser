@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QSize, QPropertyAnimation, QProcess,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QRectF, QSize, QPropertyAnimation, QProcess,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
@@ -218,6 +218,91 @@ class _ProxyPanelHost(QFrame):
         # whole browser window must not silently change the saved preference.
         if was_hidden == visible:
             self.visibilityChanged.emit(visible)
+
+
+class _BrowserShell(QFrame):
+    """Paint the selected dashboard wallpaper beneath the browser's top chrome."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._header_wallpaper = QPixmap()
+        self._header_title_bar = None
+        self._header_navigation_bar = None
+        self._header_dark_mode = False
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def set_header_wallpaper(
+        self,
+        image_data: bytes | None,
+        title_bar: QWidget | None,
+        navigation_bar: QWidget | None,
+        dark_mode: bool,
+    ) -> bool:
+        """Set an imported dashboard wallpaper for a translucent header.
+
+        Returns True only when the bytes decode into a usable image; bundled
+        gradient presets intentionally keep the normal solid/gradient chrome.
+        """
+        pixmap = QPixmap()
+        if image_data:
+            pixmap.loadFromData(image_data)
+        self._header_wallpaper = pixmap
+        self._header_title_bar = title_bar
+        self._header_navigation_bar = navigation_bar
+        self._header_dark_mode = bool(dark_mode)
+        self.update()
+        return not pixmap.isNull()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        pixmap = self._header_wallpaper
+        if pixmap.isNull():
+            return
+
+        header_bottom = 0
+        for widget in (self._header_title_bar, self._header_navigation_bar):
+            if widget is None or widget.isHidden():
+                continue
+            try:
+                origin = widget.mapTo(self, QPoint(0, 0))
+                header_bottom = max(header_bottom, origin.y() + widget.height())
+            except (RuntimeError, TypeError):
+                continue
+
+        header_bottom = min(self.height(), max(0, header_bottom))
+        if header_bottom <= 0 or self.width() <= 0:
+            return
+
+        header_rect = QRect(0, 0, self.width(), header_bottom)
+        scaled = pixmap.scaled(
+            header_rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        origin = QPoint(
+            (self.width() - scaled.width()) // 2,
+            (header_bottom - scaled.height()) // 2,
+        )
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        radius = 0 if self.property("edgeToEdge") is True else 12
+        if radius:
+            rounded_shell = QPainterPath()
+            rounded_shell.addRoundedRect(QRectF(self.rect()), radius, radius)
+            painter.setClipPath(rounded_shell)
+        painter.setClipRect(header_rect, Qt.ClipOperation.IntersectClip)
+        painter.drawPixmap(origin, scaled)
+
+        # Subtle theme-aware glass lets the image remain visible while keeping
+        # icons, tabs and address controls readable above it.
+        tint = (
+            QColor(13, 19, 29, 118)
+            if self._header_dark_mode
+            else QColor(242, 247, 254, 112)
+        )
+        painter.fillRect(header_rect, tint)
+        painter.end()
 
 
 class TabButton(QFrame):
@@ -1092,7 +1177,7 @@ class BrowserWindow(QMainWindow):
         layout.setContentsMargins(4, 4, 4, 4)
         self._root_layout = layout
         layout.setSpacing(0)
-        shell = QFrame(root)
+        shell = _BrowserShell(root)
         shell.setObjectName("browserShell")
         self._shell = shell
         shell_layout = QVBoxLayout(shell)
@@ -1489,13 +1574,23 @@ class BrowserWindow(QMainWindow):
             return
         width, height = self.width(), self.height()
         edge, corner = 8, 14
+        title_bar = getattr(self, "title_bar", None)
+        try:
+            # Resize handles are sibling overlays above the central widget. If
+            # the top strip extends into the custom title bar it steals clicks
+            # from tabs, tab-close/plus controls and the window buttons.
+            title_top = max(0, int(title_bar.mapTo(self, QPoint(0, 0)).y())) if title_bar else edge
+        except (RuntimeError, TypeError):
+            title_top = edge
+        top_edge_height = min(edge, title_top)
+        top_corner_height = min(corner, title_top)
         geometries = {
-            "top": QRect(corner, 0, max(0, width - 2 * corner), edge),
+            "top": QRect(corner, 0, max(0, width - 2 * corner), top_edge_height),
             "bottom": QRect(corner, max(0, height - edge), max(0, width - 2 * corner), edge),
             "left": QRect(0, corner, edge, max(0, height - 2 * corner)),
             "right": QRect(max(0, width - edge), corner, edge, max(0, height - 2 * corner)),
-            "top_left": QRect(0, 0, corner, corner),
-            "top_right": QRect(max(0, width - corner), 0, corner, corner),
+            "top_left": QRect(0, 0, corner, top_corner_height),
+            "top_right": QRect(max(0, width - corner), 0, corner, top_corner_height),
             "bottom_left": QRect(0, max(0, height - corner), corner, corner),
             "bottom_right": QRect(
                 max(0, width - corner), max(0, height - corner), corner, corner
@@ -3004,6 +3099,8 @@ class BrowserWindow(QMainWindow):
             else:
                 return
             self._sync_dashboard_page(page)
+            if action in {"set_wallpaper", "cycle_wallpaper", "import_wallpaper", "reset_preferences"}:
+                self._refresh_chrome_wallpaper()
         except (OSError, ValueError, TypeError) as error:
             logger.info("Dashboard action %s was rejected: %s", action, error)
             page.runJavaScript(
@@ -3596,6 +3693,94 @@ class BrowserWindow(QMainWindow):
         tabbar.style().polish(tabbar)
         tabbar.update()
 
+    def _refresh_chrome_wallpaper(self, theme: str | None = None) -> None:
+        """Reflect an imported dashboard wallpaper in the browser's title and navigation bars."""
+        shell = getattr(self, "_shell", None)
+        if not isinstance(shell, _BrowserShell):
+            return
+
+        manager = getattr(self, "dashboard_manager", None)
+        manager_data = getattr(manager, "data", {})
+        wallpaper_key = manager_data.get("wallpaper", "") if isinstance(manager_data, dict) else ""
+        image_data = None
+        if isinstance(wallpaper_key, str) and wallpaper_key.startswith("file:"):
+            reader = getattr(manager, "read_wallpaper", None)
+            if callable(reader):
+                try:
+                    image_data = reader(wallpaper_key[5:])
+                except (OSError, TypeError, ValueError):
+                    logger.debug("Could not read the selected dashboard wallpaper for browser chrome.", exc_info=True)
+
+        dark = bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+        title_bar = getattr(self, "title_bar", None)
+        navbar = getattr(self, "navbar", None)
+        has_wallpaper = shell.set_header_wallpaper(image_data, title_bar, navbar, dark)
+        theme = theme or (dark_theme if dark else light_theme)
+
+        if not has_wallpaper:
+            # Restore the original theme when the active dashboard uses one of
+            # the bundled gradient presets or its image could not be read.
+            self.setStyleSheet(theme)
+            if navbar is not None:
+                navbar.setStyleSheet(theme)
+            return
+
+        if dark:
+            title_glass = "rgba(16, 22, 31, 92)"
+            navigation_glass = "rgba(14, 20, 29, 116)"
+            chrome_border = "rgba(255, 255, 255, 42)"
+            tab_idle = "rgba(20, 27, 38, 86)"
+            tab_active = "rgba(37, 50, 70, 190)"
+            tab_edge = "rgba(130, 175, 244, 155)"
+        else:
+            title_glass = "rgba(250, 252, 255, 78)"
+            navigation_glass = "rgba(245, 249, 255, 106)"
+            chrome_border = "rgba(67, 88, 119, 76)"
+            tab_idle = "rgba(255, 255, 255, 92)"
+            tab_active = "rgba(255, 255, 255, 198)"
+            tab_edge = "rgba(57, 121, 214, 155)"
+
+        title_overlay = f"""
+            QWidget#customTitleBar {{
+                background: {title_glass};
+                border-bottom-color: {chrome_border};
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] {{
+                background: transparent;
+                border-color: transparent;
+                border-radius: 0;
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] QFrame#browserTab {{
+                background: {tab_idle};
+                border-color: {chrome_border};
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] QFrame#browserTab[active="true"] {{
+                background: {tab_active};
+                border-color: {tab_edge};
+                border-bottom-color: {tab_edge};
+            }}
+        """
+        navigation_overlay = f"""
+            QToolBar#NavigationBar {{
+                background: {navigation_glass};
+                border-top: none;
+                border-left: none;
+                border-right: none;
+                border-bottom: 1px solid {chrome_border};
+                border-radius: 0;
+            }}
+            QWidget#BookmarksBar {{
+                background: {navigation_glass};
+                border-bottom-color: {chrome_border};
+            }}
+        """
+        self.setStyleSheet(theme + title_overlay)
+        if navbar is not None:
+            # NavigationBar owns a theme stylesheet, so append the glass rules
+            # directly after it rather than relying on an ancestor stylesheet
+            # to beat its local background declarations.
+            navbar.setStyleSheet(theme + navigation_overlay)
+
     def apply_theme(self):
         try:
             theme = dark_theme if getattr(self.settings, "dark_mode", False) else light_theme
@@ -3620,6 +3805,7 @@ class BrowserWindow(QMainWindow):
             for internal_view in tuple(getattr(self, "views", ())):
                 if self._internal_host(internal_view.url()) in {"settings", "history", "downloads"}:
                     internal_view.page().runJavaScript(theme_script)
+            self._refresh_chrome_wallpaper(theme)
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
