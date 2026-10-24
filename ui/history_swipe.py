@@ -1,7 +1,7 @@
-"""Trackpad two-finger back/forward navigation with a lightweight animated cue.
+"""Trackpad two-finger back/forward navigation with an animated cue.
 
-The WebEngine viewport owns the gesture controller, so each tab operates on its
-own QWebEngineHistory and the gesture never snapshots or composites live pages.
+Each WebEngine viewport owns its gesture controller. Horizontal page scrolling has
+priority over history navigation, and live page contents are never snapshotted.
 """
 from PySide6.QtCore import (
     QEasingCurve,
@@ -149,8 +149,6 @@ class _HistorySwipeIndicator(QWidget):
             )
             painter.drawArc(ring, 90 * 16, -int(360 * 16 * self._progress))
 
-            # The arrow points toward the history destination; it is drawn as
-            # vector geometry so it remains crisp at every display scale.
             arrow = QPainterPath()
             if self._direction == _BACK:
                 arrow.moveTo(centre_x + 5.0, centre_y - 8.0)
@@ -187,6 +185,7 @@ class HistorySwipeController(QObject):
     HORIZONTAL_DOMINANCE = 1.45
     END_IDLE_MS = 170
     END_PHASE_MS = 120
+    PREFLIGHT_TIMEOUT_MS = 500
 
     def __init__(self, view: QWidget):
         super().__init__(view)
@@ -197,9 +196,29 @@ class HistorySwipeController(QObject):
         self._distance = 0.0
         self._threshold = 120.0
 
+        self._preflight_id = 0
+        self._preflight_pending = False
+        self._preflight_direction = 0
+        self._preflight_dx = 0.0
+        self._preflight_dy = 0.0
+        self._preflight_distance = 0.0
+        self._preflight_last_phase = Qt.ScrollPhase.NoScrollPhase
+        self._preflight_end_seen = False
+
         self._end_timer = QTimer(self)
         self._end_timer.setSingleShot(True)
         self._end_timer.timeout.connect(self._finish_gesture)
+
+        self._preflight_timer = QTimer(self)
+        self._preflight_timer.setSingleShot(True)
+        self._preflight_timer.setInterval(self.PREFLIGHT_TIMEOUT_MS)
+        self._preflight_timer.timeout.connect(self._cancel_preflight)
+
+        self._ignore_current_gesture = False
+        self._ignore_timer = QTimer(self)
+        self._ignore_timer.setSingleShot(True)
+        self._ignore_timer.timeout.connect(self._clear_ignored_gesture)
+
         view.installEventFilter(self)
 
     def eventFilter(self, watched, event) -> bool:
@@ -246,35 +265,180 @@ class HistorySwipeController(QObject):
         )
 
     def _arm_end_timer(self, phase) -> None:
-        delay = (
-            self.END_PHASE_MS
-            if phase == Qt.ScrollPhase.ScrollEnd
-            else self.END_IDLE_MS
-        )
+        delay = self.END_PHASE_MS if phase == Qt.ScrollPhase.ScrollEnd else self.END_IDLE_MS
         self._end_timer.start(delay)
 
+    def _collect_preflight_delta(self, dx: float, dy: float, phase) -> None:
+        self._preflight_dx += dx
+        self._preflight_dy += dy
+        if dx and abs(dx) >= abs(dy) * self.HORIZONTAL_DOMINANCE:
+            directional_delta = dx if self._preflight_direction == _BACK else -dx
+            self._preflight_distance = max(0.0, self._preflight_distance + directional_delta)
+        if phase == Qt.ScrollPhase.ScrollEnd:
+            self._preflight_end_seen = True
+        self._preflight_last_phase = phase
+
+    def _start_preflight(self, event, dx: float, dy: float, direction: int) -> None:
+        self._preflight_id += 1
+        token = self._preflight_id
+        self._preflight_pending = True
+        self._preflight_direction = direction
+        self._preflight_dx = 0.0
+        self._preflight_dy = 0.0
+        self._preflight_distance = 0.0
+        self._preflight_last_phase = event.phase()
+        self._preflight_end_seen = False
+        self._collect_preflight_delta(dx, dy, event.phase())
+        self._preflight_timer.start()
+
+        point = event.position()
+        self._query_horizontal_scroll(
+            float(point.x()),
+            float(point.y()),
+            dx,
+            lambda can_scroll, request_id=token: self._resolve_preflight(
+                request_id,
+                bool(can_scroll),
+            ),
+        )
+
+    def _query_horizontal_scroll(self, x: float, y: float, dx: float, callback) -> None:
+        """Ask the page whether the target or document can still scroll in this direction."""
+        page_getter = getattr(self.view, "page", None)
+        if not callable(page_getter):
+            callback(False)
+            return
+        try:
+            page = page_getter()
+            runner = getattr(page, "runJavaScript", None)
+            if not callable(runner):
+                callback(False)
+                return
+        except (AttributeError, RuntimeError):
+            callback(False)
+            return
+
+        # Element-level horizontal scroll has priority. If it has reached an
+        # edge, parent scrollers are checked next; only then is history eligible.
+        script = f"""(() => {{
+            const x = {x!r}, y = {y!r}, dx = {dx!r};
+            const canContinue = (element) => {{
+                const style = getComputedStyle(element);
+                if (!/(auto|scroll|overlay)/.test(style.overflowX)) return false;
+                const max = element.scrollWidth - element.clientWidth;
+                if (max <= 2) return false;
+                const left = element.scrollLeft;
+                return dx > 0 ? left < max - 1 : left > 1;
+            }};
+            let element = document.elementFromPoint(x, y);
+            while (element && element !== document.body &&
+                   element !== document.documentElement) {{
+                if (canContinue(element)) return true;
+                element = element.parentElement;
+            }}
+            const root = document.scrollingElement || document.documentElement;
+            const max = root.scrollWidth - root.clientWidth;
+            if (max > 2) {{
+                return dx > 0 ? root.scrollLeft < max - 1 : root.scrollLeft > 1;
+            }}
+            return false;
+        }})()"""
+        try:
+            runner(script, callback)
+        except (RuntimeError, TypeError):
+            callback(False)
+
+    def _clear_preflight_fields(self) -> None:
+        self._preflight_pending = False
+        self._preflight_direction = 0
+        self._preflight_dx = 0.0
+        self._preflight_dy = 0.0
+        self._preflight_distance = 0.0
+        self._preflight_last_phase = Qt.ScrollPhase.NoScrollPhase
+        self._preflight_end_seen = False
+
+    def _resolve_preflight(self, token: int, can_scroll: bool) -> None:
+        if token != self._preflight_id or not self._preflight_pending:
+            return
+        self._preflight_timer.stop()
+
+        direction = self._preflight_direction
+        distance = self._preflight_distance
+        total_dx = self._preflight_dx
+        total_dy = self._preflight_dy
+        last_phase = self._preflight_last_phase
+        end_seen = self._preflight_end_seen
+        self._clear_preflight_fields()
+
+        if can_scroll:
+            # Continue to let the web page receive the full gesture, including
+            # momentum. A later independent gesture can navigate history.
+            self._ignore_current_gesture = True
+            self._ignore_timer.start(self.END_PHASE_MS if end_seen else self.END_IDLE_MS)
+            return
+
+        if (
+            not self._can_navigate(direction)
+            or distance <= 0.0
+            or abs(total_dx) < abs(total_dy) * self.HORIZONTAL_DOMINANCE
+        ):
+            return
+
+        self._start_gesture(direction)
+        self._distance = distance
+        self.indicator.set_gesture_progress(direction, distance, self._threshold)
+        if end_seen:
+            self._end_timer.start(self.END_PHASE_MS)
+        else:
+            self._arm_end_timer(last_phase)
+
+    def _cancel_preflight(self) -> None:
+        if not self._preflight_pending:
+            return
+        self._preflight_id += 1
+        self._clear_preflight_fields()
+
+    def _clear_ignored_gesture(self) -> None:
+        self._ignore_current_gesture = False
+
     def handle_wheel_event(self, event) -> bool:
-        """Return True only while the event belongs to a recognized history swipe."""
+        """Return True only after a horizontal gesture is confirmed as history navigation."""
         phase = event.phase()
 
+        if self._ignore_current_gesture:
+            delay = self.END_PHASE_MS if phase == Qt.ScrollPhase.ScrollEnd else self.END_IDLE_MS
+            self._ignore_timer.start(delay)
+            return False
+
+        if self._preflight_pending:
+            dx, dy = self._wheel_delta(event)
+            self._collect_preflight_delta(dx, dy, phase)
+            # Let the page receive events while the asynchronous scrollability
+            # query decides whether this gesture belongs to the site or browser.
+            return False
+
         if self._active:
-            if phase == Qt.ScrollPhase.ScrollEnd:
-                dx, _dy = self._wheel_delta(event)
-                if dx:
+            if phase == Qt.ScrollPhase.ScrollBegin:
+                self._finish_gesture()
+                # This may be the first event of a new gesture; reclassify it below.
+            else:
+                if phase == Qt.ScrollPhase.ScrollEnd:
+                    dx, _dy = self._wheel_delta(event)
+                    if dx:
+                        self._add_delta(dx)
+                    self._arm_end_timer(phase)
+                    event.accept()
+                    return True
+
+                dx, dy = self._wheel_delta(event)
+                if dx and abs(dx) >= abs(dy) * self.HORIZONTAL_DOMINANCE:
                     self._add_delta(dx)
                 self._arm_end_timer(phase)
                 event.accept()
                 return True
 
-            dx, dy = self._wheel_delta(event)
-            if dx and abs(dx) >= abs(dy) * self.HORIZONTAL_DOMINANCE:
-                self._add_delta(dx)
-            self._arm_end_timer(phase)
-            event.accept()
-            return True
-
-        # Momentum may extend a swipe that was already recognized, but must
-        # never start a new history navigation on its own.
+        # Momentum may extend a swipe already under our control, but cannot
+        # start one by itself.
         if phase == Qt.ScrollPhase.ScrollMomentum:
             return False
 
@@ -284,14 +448,10 @@ class HistorySwipeController(QObject):
 
         direction = _BACK if dx > 0.0 else _FORWARD
         if not self._can_navigate(direction):
-            # Let the page handle the event when history cannot move that way.
             return False
 
-        self._start_gesture(direction)
-        self._add_delta(dx)
-        self._arm_end_timer(phase)
-        event.accept()
-        return True
+        self._start_preflight(event, dx, dy, direction)
+        return False
 
     def _finish_gesture(self) -> None:
         self._end_timer.stop()
@@ -322,6 +482,11 @@ class HistorySwipeController(QObject):
 
     def _cancel_gesture(self) -> None:
         self._end_timer.stop()
+        self._preflight_timer.stop()
+        self._ignore_timer.stop()
+        self._preflight_id += 1
+        self._clear_preflight_fields()
+        self._ignore_current_gesture = False
         self._active = False
         self._direction = 0
         self._distance = 0.0

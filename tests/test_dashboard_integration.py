@@ -814,3 +814,34 @@ def test_resize_handles_cover_and_raise_all_four_window_corners():
     for handle in handles.values():
         handle.setVisible.assert_called_once_with(True)
         handle.raise_.assert_called_once_with()
+
+
+
+def test_dashboard_search_engine_uses_custom_glass_dropdown_and_main_settings_cover_preferences():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    dashboard = root / "ui" / "dashboard"
+    html = (dashboard / "index.html").read_text(encoding="utf-8")
+    css = (dashboard / "dashboard.css").read_text(encoding="utf-8")
+    script = (dashboard / "dashboard.js").read_text(encoding="utf-8")
+    settings_source = (root / "ui" / "settings_window.py").read_text(encoding="utf-8")
+
+    assert 'id="search-engine-button"' in html
+    assert 'id="search-engine-menu"' in html
+    assert '<select id="search-engine"' not in html
+    assert ".engine-menu" in css and "backdrop-filter: blur(26px)" in css
+    assert "setEngineMenuOpen" in script and "selectedEngine" in script
+    for control in (
+        "dashboard_wallpaper_combo",
+        "dashboard_overlay_slider",
+        "dashboard_glass_slider",
+        "dashboard_blur_slider",
+        "dashboard_accent_input",
+        "dashboard_animations_checkbox",
+        "dashboard_density_combo",
+        "dashboard_focus_slider",
+        "dashboard_break_slider",
+        "dashboard_widget_size_combos",
+    ):
+        assert control in settings_source

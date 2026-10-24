@@ -37,7 +37,7 @@ import qtawesome as qta
 from managers.history_manager import History
 from .history_window import HistoryWindow
 from .settings import Settings, default_download_directory
-from managers.dashboard_manager import PRESETS, DashboardManager
+from managers.dashboard_manager import PRESETS, DEFAULTS as DASHBOARD_DEFAULTS, DashboardManager
 
 
 
@@ -471,10 +471,18 @@ class SettingsWindow(QDialog):
         self.dashboard_seconds_checkbox.setChecked(bool(data.get("show_seconds", False)))
         self.dashboard_animations_checkbox = QCheckBox("Use subtle dashboard motion")
         self.dashboard_animations_checkbox.setChecked(bool(data.get("animations", True)))
+        self.dashboard_density_combo = QComboBox()
+        self.dashboard_density_combo.addItem("Comfortable", "comfortable")
+        self.dashboard_density_combo.addItem("Compact", "compact")
+        self.dashboard_density_combo.setCurrentIndex(
+            max(0, self.dashboard_density_combo.findData(data.get("density", "comfortable")))
+        )
         card_layout.addWidget(QLabel("Clock format"))
         card_layout.addWidget(self.dashboard_clock_combo)
         card_layout.addWidget(self.dashboard_seconds_checkbox)
         card_layout.addWidget(self.dashboard_animations_checkbox)
+        card_layout.addWidget(QLabel("Dashboard density"))
+        card_layout.addWidget(self.dashboard_density_combo)
 
         self.dashboard_overlay_slider = QSlider(Qt.Horizontal)
         self.dashboard_overlay_slider.setRange(0, 70)
@@ -505,6 +513,30 @@ class SettingsWindow(QDialog):
         )
         card_layout.addWidget(self.dashboard_blur_label)
         card_layout.addWidget(self.dashboard_blur_slider)
+
+        self.dashboard_focus_slider = QSlider(Qt.Horizontal)
+        self.dashboard_focus_slider.setRange(1, 180)
+        self.dashboard_focus_slider.setValue(int(data.get("focus_minutes", 25)))
+        self.dashboard_focus_label = QLabel(
+            f"Focus session: {self.dashboard_focus_slider.value()} min"
+        )
+        self.dashboard_focus_slider.valueChanged.connect(
+            lambda value: self.dashboard_focus_label.setText(f"Focus session: {value} min")
+        )
+        card_layout.addWidget(self.dashboard_focus_label)
+        card_layout.addWidget(self.dashboard_focus_slider)
+
+        self.dashboard_break_slider = QSlider(Qt.Horizontal)
+        self.dashboard_break_slider.setRange(1, 60)
+        self.dashboard_break_slider.setValue(int(data.get("break_minutes", 5)))
+        self.dashboard_break_label = QLabel(
+            f"Break length: {self.dashboard_break_slider.value()} min"
+        )
+        self.dashboard_break_slider.valueChanged.connect(
+            lambda value: self.dashboard_break_label.setText(f"Break length: {value} min")
+        )
+        card_layout.addWidget(self.dashboard_break_label)
+        card_layout.addWidget(self.dashboard_break_slider)
 
         self.dashboard_accent_input = QLineEdit(str(data.get("accent", "#8db8ff")))
         self.dashboard_accent_input.setObjectName("settingsInput")
@@ -551,15 +583,57 @@ class SettingsWindow(QDialog):
             self.dashboard_widget_size_combos[key] = size_combo
             card_layout.addWidget(row)
 
+        self.dashboard_wallpaper_combo = QComboBox()
+        self.dashboard_wallpaper_combo.setObjectName("dashboardWallpaperCombo")
+        for key, preset in PRESETS.items():
+            self.dashboard_wallpaper_combo.addItem(preset["title"], key)
+        if self.dashboard is not None:
+            try:
+                saved_wallpapers = sorted(
+                    self.dashboard.wallpaper_dir.glob("*.jpg"),
+                    key=lambda path: path.name.casefold(),
+                )
+            except OSError:
+                saved_wallpapers = []
+            for wallpaper_path in saved_wallpapers:
+                wallpaper_key = f"file:{wallpaper_path.name}"
+                if self.dashboard_wallpaper_combo.findData(wallpaper_key) < 0:
+                    self.dashboard_wallpaper_combo.addItem(f"Imported · {wallpaper_path.stem}", wallpaper_key)
+        current_wallpaper = str(data.get("wallpaper", "aurora"))
+        if self.dashboard_wallpaper_combo.findData(current_wallpaper) < 0:
+            if current_wallpaper.startswith("file:"):
+                self.dashboard_wallpaper_combo.addItem("Imported image", current_wallpaper)
+            else:
+                current_wallpaper = "aurora"
+        self.dashboard_wallpaper_combo.setCurrentIndex(
+            max(0, self.dashboard_wallpaper_combo.findData(current_wallpaper))
+        )
+        self.dashboard_wallpaper_combo.currentIndexChanged.connect(
+            self._on_dashboard_wallpaper_changed
+        )
+
         wallpaper_row = QHBoxLayout()
-        self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(data.get("wallpaper", "aurora")))
-        self.dashboard_wallpaper_label.setWordWrap(True)
+        wallpaper_row.addWidget(self.dashboard_wallpaper_combo, 1)
         wallpaper_button = QPushButton("Choose image…")
         wallpaper_button.clicked.connect(self._browse_dashboard_wallpaper)
-        wallpaper_row.addWidget(self.dashboard_wallpaper_label, 1)
         wallpaper_row.addWidget(wallpaper_button)
+        card_layout.addWidget(QLabel("Wallpaper preset or saved image"))
         card_layout.addLayout(wallpaper_row)
-        card_layout.addWidget(self._note("Supported images are copied into this profile's dashboard storage. Add and reorder shortcuts on the start page; drag widget headings to reorder cards and choose each card's size above."))
+        self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(current_wallpaper))
+        self.dashboard_wallpaper_label.setWordWrap(True)
+        card_layout.addWidget(self.dashboard_wallpaper_label)
+        card_layout.addWidget(self._note(
+            "Wallpaper images are copied into this profile. Widget visibility and size, clock, focus timer, "
+            "glass intensity, accent, dimming, blur, density and motion are saved together with browser settings."
+        ))
+        self.dashboard_reset_button = QPushButton("Restore dashboard defaults")
+        self.dashboard_reset_button.clicked.connect(self._reset_dashboard_preferences)
+        card_layout.addWidget(self.dashboard_reset_button)
+        self.dashboard_reset_note = self._note(
+            "Restoring defaults changes the controls in this dialog; choose Save changes to apply them. "
+            "Shortcuts and notes are preserved."
+        )
+        card_layout.addWidget(self.dashboard_reset_note)
         card_layout.addStretch(1)
 
     @staticmethod
@@ -569,6 +643,45 @@ class SettingsWindow(QDialog):
         if isinstance(key, str) and key.startswith("file:"):
             return "Current wallpaper: Imported image"
         return "Current wallpaper: Aurora"
+
+    def _on_dashboard_wallpaper_changed(self, _index: int) -> None:
+        self._wallpaper_source = None
+        if hasattr(self, "dashboard_wallpaper_label"):
+            self.dashboard_wallpaper_label.setText(
+                self._wallpaper_label(str(self.dashboard_wallpaper_combo.currentData() or "aurora"))
+            )
+
+    def _reset_dashboard_preferences(self) -> None:
+        """Restore dashboard presentation defaults without deleting shortcuts or notes."""
+        defaults = DASHBOARD_DEFAULTS
+        self._wallpaper_source = None
+        self.dashboard_wallpaper_combo.setCurrentIndex(
+            max(0, self.dashboard_wallpaper_combo.findData(defaults["wallpaper"]))
+        )
+        self.dashboard_clock_combo.setCurrentIndex(
+            max(0, self.dashboard_clock_combo.findData(defaults["clock_24h"]))
+        )
+        self.dashboard_seconds_checkbox.setChecked(defaults["show_seconds"])
+        self.dashboard_animations_checkbox.setChecked(defaults["animations"])
+        self.dashboard_density_combo.setCurrentIndex(
+            max(0, self.dashboard_density_combo.findData(defaults["density"]))
+        )
+        self.dashboard_overlay_slider.setValue(defaults["overlay"])
+        self.dashboard_glass_slider.setValue(defaults["glass"])
+        self.dashboard_blur_slider.setValue(defaults["blur"])
+        self.dashboard_focus_slider.setValue(defaults["focus_minutes"])
+        self.dashboard_break_slider.setValue(defaults["break_minutes"])
+        self.dashboard_accent_input.setText(defaults["accent"])
+        for key, checkbox in self.dashboard_widget_checks.items():
+            checkbox.setChecked(defaults["widgets"].get(key, True))
+        for key, combo in self.dashboard_widget_size_combos.items():
+            combo.setCurrentIndex(
+                max(0, combo.findData(defaults["widget_sizes"].get(key, "standard")))
+            )
+        self.dashboard_wallpaper_label.setText(self._wallpaper_label(defaults["wallpaper"]))
+        self.dashboard_reset_note.setText(
+            "Defaults restored in this dialog. Save changes to apply them; shortcuts and notes are preserved."
+        )
 
     def _browse_dashboard_wallpaper(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -740,10 +853,14 @@ class SettingsWindow(QDialog):
                 "clock_24h": bool(self.dashboard_clock_combo.currentData()),
                 "show_seconds": self.dashboard_seconds_checkbox.isChecked(),
                 "animations": self.dashboard_animations_checkbox.isChecked(),
+                "density": str(self.dashboard_density_combo.currentData() or "comfortable"),
+                "wallpaper": str(self.dashboard_wallpaper_combo.currentData() or "aurora"),
                 "overlay": self.dashboard_overlay_slider.value(),
                 "glass": self.dashboard_glass_slider.value(),
                 "blur": self.dashboard_blur_slider.value(),
                 "accent": accent,
+                "focus_minutes": self.dashboard_focus_slider.value(),
+                "break_minutes": self.dashboard_break_slider.value(),
                 "widgets": {
                     key: checkbox.isChecked()
                     for key, checkbox in self.dashboard_widget_checks.items()
@@ -770,6 +887,17 @@ class SettingsWindow(QDialog):
         except (OSError, ValueError, TypeError) as exc:
             QMessageBox.critical(self, "Could not save settings", str(exc))
             return
+
+        if self.dashboard is not None and dashboard_values is not None:
+            parent = self.parent()
+            for method_name in ("_sync_dashboard_tabs", "_refresh_chrome_wallpaper"):
+                method = getattr(parent, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except (RuntimeError, TypeError, ValueError):
+                        # Persisted settings must survive a transient page refresh error.
+                        pass
 
         for name in (
             "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder", "site_compatibility_mode",

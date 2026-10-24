@@ -24,7 +24,13 @@
         </span>
         <input id="search-input" type="search" placeholder="Search or enter an address" autocomplete="off" aria-label="Search or enter an address">
         <div class="search-divider" aria-hidden="true"></div>
-        <select id="search-engine" aria-label="Search engine" title="Search engine"></select>
+        <div class="engine-picker" id="engine-picker">
+          <button type="button" id="search-engine-button" class="engine-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="search-engine-menu" aria-label="Search engine">
+            <span id="search-engine-label" class="engine-trigger-label">Browser default</span>
+            <svg class="engine-chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"></path></svg>
+          </button>
+          <div id="search-engine-menu" class="engine-menu glass" role="listbox" aria-label="Choose search engine" hidden></div>
+        </div>
         <button type="button" id="clear-search" class="clear-search" aria-label="Clear search" title="Clear search">×</button>
         <button class="search-submit" type="submit" aria-label="Search" title="Search">
           <svg viewBox="0 0 24 24" focusable="false"><path d="M4 12h14"></path><path d="m12 6 6 6-6 6"></path></svg>

@@ -12,6 +12,7 @@
   let focusRunning = false;
   let toastTimer = 0;
   let dashboardBridge = null;
+  let selectedEngine = 'default';
   const queuedActions = [];
   const byId = id => document.getElementById(id);
   const engines = [
@@ -311,14 +312,51 @@
     });
   }
 
+  function setEngineMenuOpen(open, focusSelection = false) {
+    const button = byId('search-engine-button');
+    const menu = byId('search-engine-menu');
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    if (open && focusSelection) {
+      const selected = menu.querySelector('[aria-selected="true"]');
+      (selected || menu.querySelector('[role="option"]'))?.focus();
+    }
+  }
+
   function renderEngines() {
-    const select = byId('search-engine');
-    select.replaceChildren();
-    engines.forEach(([url, label]) => {
-      const option = document.createElement('option'); option.value = url; option.textContent = label;
-      if (url === 'default') option.selected = true;
-      select.appendChild(option);
+    const button = byId('search-engine-button');
+    const label = byId('search-engine-label');
+    const menu = byId('search-engine-menu');
+    menu.replaceChildren();
+    if (!engines.some(([url]) => url === selectedEngine)) selectedEngine = 'default';
+    label.textContent = engines.find(([url]) => url === selectedEngine)?.[1] || 'Browser default';
+
+    engines.forEach(([url, title]) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'engine-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(url === selectedEngine));
+      option.dataset.engine = url;
+
+      const check = document.createElement('span');
+      check.className = 'engine-option-check';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = url === selectedEngine ? '✓' : '';
+
+      const text = document.createElement('span');
+      text.className = 'engine-option-label';
+      text.textContent = title;
+      option.append(check, text);
+      option.addEventListener('click', () => {
+        selectedEngine = url;
+        renderEngines();
+        setEngineMenuOpen(false);
+        button.focus();
+      });
+      menu.appendChild(option);
     });
+    setEngineMenuOpen(false);
   }
 
   function renderWallpaperChoices() {
@@ -373,7 +411,44 @@
     event.preventDefault();
     const query = byId('search-input').value.trim();
     if (!query) return;
-    send('search', { query, engine: byId('search-engine').value });
+    send('search', { query, engine: selectedEngine });
+  });
+  byId('search-engine-button').addEventListener('click', () => {
+    setEngineMenuOpen(byId('search-engine-menu').hidden, true);
+  });
+  byId('search-engine-button').addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setEngineMenuOpen(true, true);
+    }
+  });
+  byId('search-engine-menu').addEventListener('keydown', event => {
+    const options = [...byId('search-engine-menu').querySelectorAll('[role="option"]')];
+    if (!options.length) return;
+    const current = options.indexOf(document.activeElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setEngineMenuOpen(false);
+      byId('search-engine-button').focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      options[(current + delta + options.length) % options.length].focus();
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      options[event.key === 'Home' ? 0 : options.length - 1].focus();
+    }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (event.target instanceof Element && !event.target.closest('#engine-picker')) {
+      setEngineMenuOpen(false);
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !byId('search-engine-menu').hidden) {
+      setEngineMenuOpen(false);
+      byId('search-engine-button').focus();
+    }
   });
   byId('clear-search').addEventListener('click', () => { byId('search-input').value = ''; byId('search-input').focus(); });
   byId('add-shortcut').addEventListener('click', () => openShortcutDialog(-1));

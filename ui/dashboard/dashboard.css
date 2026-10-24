@@ -931,3 +931,160 @@ html.qt-windows-webengine .modal::backdrop {
   -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
+
+
+/* Browser-owned liquid-glass search-engine picker. Native <select> popups
+   ignore page styles on Windows, so this listbox is rendered inside the page. */
+.search {
+  position: relative;
+  z-index: 30;
+  overflow: visible !important;
+}
+.engine-picker {
+  position: relative;
+  flex: 0 0 116px;
+  width: 116px;
+  min-width: 82px;
+}
+.engine-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 9px 0 11px;
+  border: 1px solid var(--surface-border);
+  border-radius: 11px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.17), rgba(255,255,255,.035) 55%, rgba(0,0,0,.09)),
+    var(--surface-field);
+  color: var(--ink);
+  font-size: 12px;
+  text-align: left;
+  transition: background .16s, border-color .16s, box-shadow .16s;
+}
+.engine-trigger:hover,
+.engine-trigger[aria-expanded="true"] {
+  background:
+    linear-gradient(135deg, rgba(255,255,255,.23), rgba(255,255,255,.065) 55%, rgba(0,0,0,.06)),
+    var(--surface-field);
+  border-color: var(--surface-border-strong);
+}
+.engine-trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 65%, transparent);
+  outline-offset: 2px;
+}
+.engine-trigger-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.engine-chevron {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: .76;
+  transition: transform .16s ease;
+}
+.engine-trigger[aria-expanded="true"] .engine-chevron { transform: rotate(180deg); }
+.engine-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 80;
+  display: grid;
+  gap: 4px;
+  width: max-content;
+  min-width: 206px;
+  max-width: min(260px, calc(100vw - 28px));
+  padding: 7px;
+  overflow: hidden;
+  border: 1px solid var(--surface-border-strong);
+  border-radius: 15px;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.13), rgba(255,255,255,.035) 48%, rgba(0,0,0,.13)),
+    var(--surface-panel-raised);
+  box-shadow: 0 20px 48px rgba(3,10,20,.28), inset 0 1px 0 rgba(255,255,255,.18);
+  -webkit-backdrop-filter: blur(26px) saturate(170%);
+  backdrop-filter: blur(26px) saturate(170%);
+  transform-origin: top right;
+  animation: engine-menu-arrive .15s cubic-bezier(.2,.75,.25,1) both;
+}
+.engine-menu[hidden] { display: none !important; }
+@keyframes engine-menu-arrive {
+  from { opacity: 0; transform: translateY(-4px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.engine-option {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 37px;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font-size: 12px;
+  transition: background .13s, border-color .13s;
+}
+.engine-option:hover,
+.engine-option:focus-visible {
+  outline: none;
+  background: var(--surface-hover);
+  border-color: var(--surface-border);
+}
+.engine-option[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 17%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+.engine-option-check {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  border-radius: 5px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 800;
+}
+.engine-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.qt-windows-webengine .engine-menu {
+  /* Preserve layered translucent glass when backdrop blur is disabled to
+     avoid WebEngine compositor flicker on Windows. */
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.16), rgba(255,255,255,.045) 48%, rgba(0,0,0,.15)),
+    rgba(24, 37, 55, .94);
+}
+html.light.qt-windows-webengine .engine-menu {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.80), rgba(255,255,255,.50) 48%, rgba(225,235,248,.36)),
+    rgba(245, 249, 255, .94);
+}
+body.light .engine-menu {
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.73), rgba(255,255,255,.39) 48%, rgba(218,230,245,.25)),
+    var(--surface-panel-raised);
+}
+@media (max-width: 430px) {
+  .engine-picker { flex-basis: 64px; width: 64px; min-width: 64px; }
+  .engine-trigger { padding-left: 7px; padding-right: 6px; gap: 4px; font-size: 10px; }
+  .engine-chevron { width: 10px; height: 10px; flex-basis: 10px; }
+  .engine-menu { min-width: 190px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .engine-menu { animation: none; }
+  .engine-chevron { transition: none; }
+}
