@@ -1109,6 +1109,7 @@ class BrowserWindow(QMainWindow):
         self.browser_workspace = QWidget(shell)
         self.browser_workspace.setObjectName("browserWorkspace")
         browser_workspace_layout = QVBoxLayout(self.browser_workspace)
+        self.browser_workspace_layout = browser_workspace_layout
         browser_workspace_layout.setContentsMargins(0, 0, 0, 0)
         browser_workspace_layout.setSpacing(0)
         browser_workspace_layout.addWidget(self.tabbar)
@@ -1178,6 +1179,7 @@ class BrowserWindow(QMainWindow):
         shell_layout.addWidget(self.browser_proxy_splitter, 1)
         layout.addWidget(shell, 1)
         self.setCentralWidget(root)
+        self._apply_tabbar_placement()
         QTimer.singleShot(0, self._collapse_downloads_splitter)
         self._setup_download_toast(root)
         self._bind_download_manager()
@@ -2602,7 +2604,7 @@ class BrowserWindow(QMainWindow):
                     "homepage", "startup_page", "new_tab_page", "default_search_engine",
                     "download_folder", "dark_mode", "private_mode", "save_history",
                     "save_cookies", "hardware_acceleration", "webgpu_enabled",
-                    "site_compatibility_mode", "proxy_panel_visible",
+                    "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
                 }
                 if not isinstance(setting_name, str) or setting_name not in allowed_setting_names:
                     raise ValueError("That browser setting is not supported.")
@@ -2620,6 +2622,7 @@ class BrowserWindow(QMainWindow):
                     "webgpu_enabled": bool(self.settings.webgpu_enabled),
                     "site_compatibility_mode": bool(self.settings.site_compatibility_mode),
                     "proxy_panel_visible": bool(self.settings.proxy_panel_visible),
+                    "tabs_in_title_bar": bool(self.settings.tabs_in_title_bar),
                 }
                 payload[setting_name] = setting_value
                 action = "save_browser_settings"
@@ -2664,7 +2667,7 @@ class BrowserWindow(QMainWindow):
                 boolean_fields = (
                     "dark_mode", "private_mode", "save_history", "save_cookies",
                     "hardware_acceleration", "webgpu_enabled",
-                    "site_compatibility_mode", "proxy_panel_visible",
+                    "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
                 )
                 for name in boolean_fields:
                     if type(payload.get(name)) is not bool:
@@ -2714,6 +2717,8 @@ class BrowserWindow(QMainWindow):
 
                 if "proxy_panel_visible" in changed_fields:
                     self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+                if "tabs_in_title_bar" in changed_fields:
+                    self._apply_tabbar_placement()
                 if "dark_mode" in changed_fields:
                     self.apply_theme()
                 elif changed_fields & {"save_history", "private_mode"}:
@@ -3486,6 +3491,7 @@ class BrowserWindow(QMainWindow):
         self.settings = new_settings
         self.navbar.settings = new_settings
         self.change_profile(profile_name)
+        self._apply_tabbar_placement()
         self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
         self.new_tab()
@@ -3566,6 +3572,29 @@ class BrowserWindow(QMainWindow):
 
     def open_settings(self):
         self.navigate("arma://settings/")
+
+    def _apply_tabbar_placement(self) -> None:
+        """Move the tab strip between the workspace row and the title-bar left slot."""
+        title_bar = getattr(self, "title_bar", None)
+        tabbar = getattr(self, "tabbar", None)
+        workspace_layout = getattr(self, "browser_workspace_layout", None)
+        if title_bar is None or tabbar is None or workspace_layout is None:
+            return
+
+        enabled = bool(getattr(self.settings, "tabs_in_title_bar", False))
+        currently_in_title_bar = getattr(title_bar, "tabs_widget", None) is tabbar
+        if enabled and not currently_in_title_bar:
+            workspace_layout.removeWidget(tabbar)
+            title_bar.set_tabs_widget(tabbar)
+        elif not enabled and currently_in_title_bar:
+            title_bar.set_tabs_widget(None)
+            workspace_layout.insertWidget(0, tabbar)
+            tabbar.show()
+
+        tabbar.setProperty("inTitleBar", enabled)
+        tabbar.style().unpolish(tabbar)
+        tabbar.style().polish(tabbar)
+        tabbar.update()
 
     def apply_theme(self):
         try:
