@@ -713,8 +713,16 @@ class CustomTabBar(QFrame):
         QTimer.singleShot(0, self._update_overflow)
         return index
 
+    def set_tab_dashboard(self, index: int, is_dashboard: bool) -> None:
+        """Keep each tab's dashboard marker in sync with the page it currently shows."""
+        if index < 0 or index >= len(self.tabs):
+            return
+        tab = self.tabs[index]
+        tab.setProperty("dashboardTab", bool(is_dashboard))
+        self._sync_tab_close_buttons()
+
     def _sync_tab_close_buttons(self) -> None:
-        """Keep the sole dashboard tab open, but allow normal tab closing otherwise."""
+        """Keep only the sole dashboard tab non-closable."""
         sole_dashboard_tab = (
             len(self.tabs) == 1
             and bool(self.tabs[0].property("dashboardTab"))
@@ -3283,8 +3291,23 @@ class BrowserWindow(QMainWindow):
         return view in self.views and view.page() is page
 
     def request_close_tab(self, index: int):
-        """Remove a tab and all of its widgets as one GUI-thread transition."""
+        """Close a tab, returning the last non-dashboard tab to the dashboard."""
         if index < 0 or index >= len(self.views):
+            return
+
+        # A browser with one page should never force the user to create a throwaway
+        # tab just to dismiss the current site. Reuse that tab for the dashboard;
+        # a sole dashboard tab itself remains open and is not needlessly reloaded.
+        if len(self.views) == 1:
+            sole_view = self.views[index]
+            if BrowserWindow._is_dashboard_address(sole_view.url()):
+                return
+            closed_url = sole_view.url().toString().strip()
+            if closed_url and closed_url != "about:blank":
+                closed_tabs = self._closed_tabs_for_current_session()
+                closed_tabs.append(closed_url)
+                del closed_tabs[:-10]
+            self.navigate(DASHBOARD_URL)
             return
 
         closing_view = self.views.pop(index)
@@ -3395,6 +3418,13 @@ class BrowserWindow(QMainWindow):
         # belongs to its tab label, not to the browser title bar.
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
+        if view not in self.views:
+            return
+        tab_index = self.views.index(view)
+        tabbar = getattr(self, "tabbar", None)
+        set_tab_dashboard = getattr(tabbar, "set_tab_dashboard", None)
+        if callable(set_tab_dashboard):
+            set_tab_dashboard(tab_index, BrowserWindow._is_dashboard_address(url))
         if view is self.current_view():
             self._update_bookmarks_bar_visibility(url)
             self.navbar.url_bar.setText(url.toString())

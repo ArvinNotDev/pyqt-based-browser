@@ -44,25 +44,30 @@ def test_dashboard_homepage_is_internal_and_not_sent_to_search():
     assert not BrowserWindow._is_dashboard_address("arma://other/")
 
 
-def test_closing_the_last_tab_opens_a_fresh_dashboard_tab():
+def test_closing_the_sole_non_dashboard_tab_loads_dashboard_in_the_same_tab():
     view = Mock()
-    view.url.return_value = QUrl("about:blank")
-    placeholder = Mock()
+    view.url.return_value = QUrl("https://www.youtube.com/")
+    closed_urls = []
     browser = SimpleNamespace(
         views=[view],
         current_index=0,
         tabbar=SimpleNamespace(remove_tab=Mock()),
-        _placeholders={view: placeholder},
+        _placeholders={view: Mock()},
         view_layout=SimpleNamespace(removeWidget=Mock()),
         _snapshots={},
         _recorded_history_urls={},
+        _closed_tabs_for_current_session=lambda: closed_urls,
+        navigate=Mock(),
         new_tab=Mock(),
     )
 
     BrowserWindow.request_close_tab(browser, 0)
 
-    assert browser.views == []
-    browser.new_tab.assert_called_once_with(DASHBOARD_URL)
+    assert browser.views == [view]
+    browser.navigate.assert_called_once_with(DASHBOARD_URL)
+    browser.new_tab.assert_not_called()
+    browser.tabbar.remove_tab.assert_not_called()
+    assert closed_urls == ["https://www.youtube.com/"]
 
 
 def test_recently_closed_tabs_are_scoped_to_profile_and_private_session():

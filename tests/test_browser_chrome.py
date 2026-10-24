@@ -140,7 +140,7 @@ def test_custom_maximize_control_toggles_and_updates_its_accessible_state(qapp):
 
 
 
-def test_only_dashboard_tab_hides_close_button_until_another_tab_exists(qapp):
+def test_only_dashboard_tab_hides_close_button_and_navigation_updates_sole_tab_state(qapp):
     tabs = CustomTabBar()
     tabs.add_tab("ARMA Start", is_dashboard=True)
 
