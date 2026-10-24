@@ -426,7 +426,7 @@ def _settings_page(browser) -> str:
 
     sections = (
         ("general", "General", "home homepage startup new tab search engine", "⌂"),
-        ("appearance", "Appearance", "theme light dark colors appearance mode", "◐"),
+        ("appearance", "Appearance", "theme light dark colors appearance mode tabs title bar layout", "◐"),
         ("privacy", "Privacy & security", "private history cookies compatibility profile", "◇"),
         ("performance", "Performance", "hardware gpu acceleration rendering restart", "↯"),
         ("downloads", "Downloads", "download directory folder proxy panel startup", "↓"),
@@ -507,6 +507,12 @@ def _settings_page(browser) -> str:
               <span class="theme-track"><span class="theme-thumb"><span class="theme-symbol">{"☾" if settings.dark_mode else "☀"}</span></span></span>
             </label>
           </div>
+        </div>
+      </section>
+      <section class="panel settings-panel">
+        <div class="panel-head"><h3>Tab layout</h3><p>Choose how the tab strip fits into the browser chrome.</p></div>
+        <div class="panel-body setting-list">
+          {checkbox("tabs_in_title_bar", "Show tabs in the title bar", "Move tabs to the top row, hide the ARMA Browser label, and keep the window controls on the right.", settings.tabs_in_title_bar)}
         </div>
       </section>
       <section class="panel settings-panel">
