@@ -7,7 +7,7 @@ os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
 
 import pytest
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
@@ -317,3 +317,39 @@ def test_proxy_indicator_restores_explicitly_visible_panel_state_on_startup():
     )
     assert source.count("self.navbar.set_proxy_panel_state(not self.dock.isHidden())") == 2
     assert "self.navbar.set_proxy_panel_state(self.dock.isVisible())" not in source
+
+
+def test_title_bar_hosted_tab_strip_new_and_close_controls_emit_actions(qapp):
+    host = _StateTrackingWindow()
+    host.resize(900, 120)
+    host_layout = QVBoxLayout(host)
+    title_bar = CustomTitleBar(host)
+    host_layout.addWidget(title_bar)
+    tab_bar = CustomTabBar()
+    title_bar.set_tabs_widget(tab_bar)
+    host.show()
+    qapp.processEvents()
+
+    new_tab_spy = QSignalSpy(tab_bar.new_tab_requested)
+    close_tab_spy = QSignalSpy(tab_bar.tab_closed)
+
+    # QPushButton.clicked carries a checked bool; the tab-bar signal has no args.
+    QTest.mouseClick(tab_bar.plus_tab, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert new_tab_spy.count() == 1
+
+    tab_bar.add_tab("Closable tab")
+    qapp.processEvents()
+    tab = tab_bar.tabs[0]
+    tab.close_btn.show()
+    qapp.processEvents()
+    QTest.mouseClick(tab.close_btn, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+
+    assert close_tab_spy.count() == 1
+    assert close_tab_spy.at(0)[0] == 0
+
+    host.close()
+    tab_bar.close()
+    title_bar.close()
+    qapp.processEvents()
