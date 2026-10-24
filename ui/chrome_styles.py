@@ -912,3 +912,83 @@ QLabel#titleBarTitle { color: #eef4fc; font-size: 13px; font-weight: 750; }
 QToolButton#windowMinimizeButton, QToolButton#windowMaximizeButton,
 QToolButton#windowCloseButton { min-width: 36px; max-width: 36px; min-height: 30px; max-height: 30px; border-radius: 9px; }
 """
+
+
+# Final tab-strip pass: quieter chrome, clearer active tab, and aligned controls.
+LIGHT_CHROME_POLISH += """
+QFrame#browserTabBar {
+    background: rgba(237, 242, 249, 238);
+    border: 1px solid rgba(210, 221, 236, 225);
+    border-radius: 10px;
+}
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 7px;
+}
+QFrame#browserTab:hover {
+    background: rgba(255, 255, 255, 178);
+    border-color: rgba(195, 210, 231, 190);
+}
+QFrame#browserTab[active="true"] {
+    background: #ffffff;
+    border: 1px solid #d2deef;
+    border-bottom: 2px solid #3979d6;
+}
+QLabel#tabTitle { color: #65758b; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #24354c; font-weight: 700; }
+QPushButton#tabCloseButton:hover { background: #d94c55; color: #ffffff; }
+QPushButton#tabPlusButton, QPushButton#tabScrollButton, QToolButton#tabListButton {
+    border-radius: 7px;
+}
+QPushButton#tabPlusButton:hover, QPushButton#tabScrollButton:hover,
+QToolButton#tabListButton:hover {
+    background: rgba(216, 229, 248, 235);
+    border-color: rgba(178, 200, 232, 220);
+}
+QToolBar#NavigationBar { spacing: 3px; }
+QToolButton#navigationToolButton, QToolButton#utilityToolButton, QToolButton#menuButton {
+    min-width: 34px; max-width: 34px; min-height: 30px; max-height: 30px;
+    padding: 0; border-radius: 9px;
+}
+"""
+
+DARK_CHROME_POLISH += """
+QFrame#browserTabBar {
+    background: rgba(27, 33, 43, 246);
+    border: 1px solid rgba(75, 91, 113, 176);
+    border-radius: 10px;
+}
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 7px;
+}
+QFrame#browserTab:hover {
+    background: rgba(58, 70, 88, 185);
+    border-color: rgba(93, 115, 147, 130);
+}
+QFrame#browserTab[active="true"] {
+    background: #2b3545;
+    border: 1px solid #4b5d77;
+    border-bottom: 2px solid #82aff4;
+}
+QLabel#tabTitle { color: #aab8cc; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #f0f5fd; font-weight: 700; }
+QPushButton#tabCloseButton:hover { background: #c53f49; color: #ffffff; }
+QPushButton#tabPlusButton, QPushButton#tabScrollButton, QToolButton#tabListButton {
+    border-radius: 7px;
+}
+QPushButton#tabPlusButton:hover, QPushButton#tabScrollButton:hover,
+QToolButton#tabListButton:hover {
+    background: rgba(58, 72, 94, 235);
+    border-color: rgba(111, 139, 179, 165);
+}
+QToolBar#NavigationBar { spacing: 3px; }
+QToolButton#navigationToolButton, QToolButton#utilityToolButton, QToolButton#menuButton {
+    min-width: 34px; max-width: 34px; min-height: 30px; max-height: 30px;
+    padding: 0; border-radius: 9px;
+}
+"""
