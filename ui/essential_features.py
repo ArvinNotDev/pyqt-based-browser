@@ -15,8 +15,9 @@ import weakref
 from urllib.parse import urlsplit
 
 from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QFont, QKeySequence
 from PySide6.QtWidgets import (
+    QApplication,
     QDialog,
     QDockWidget,
     QFileDialog,
@@ -712,6 +713,14 @@ def install_essential_features(browser_window_class):
             QMessageBox.warning(self, "Print failed", "Printing is unavailable for this page.")
 
     def _essential_toggle_devtools(self):
+        # A negative Qt point size can leak in from platform/theme defaults.
+        # Normalize it before constructing Chromium's developer-tools widgets.
+        app = QApplication.instance()
+        if app is not None:
+            app_font = QFont(app.font())
+            if app_font.pointSize() <= 0:
+                app_font.setPointSize(10)
+                app.setFont(app_font)
         dock = getattr(self, "_essential_devtools_dock", None)
         if dock is not None and dock.isVisible():
             self._essential_detach_devtools()
