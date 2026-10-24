@@ -377,6 +377,7 @@ class TabButton(QFrame):
         self._site_icon: QIcon | None = None
         self._press_pos = QPoint()
         self._dragging = False
+        self._close_button_allowed = True
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(7, 1, 4, 1)
@@ -452,8 +453,23 @@ class TabButton(QFrame):
         if not self._dragging:
             self.requested_preview.emit()
 
+    def set_close_button_allowed(self, allowed: bool) -> None:
+        """Show a close control only when the tab strip permits closing this tab."""
+        self._close_button_allowed = bool(allowed)
+        if not self._close_button_allowed:
+            self._hover_timer.stop()
+            self.close_btn.hide()
+        elif self.underMouse() and not self._dragging:
+            self._show_close_button_if_allowed()
+
+    def _show_close_button_if_allowed(self) -> None:
+        if self._close_button_allowed and not self._dragging:
+            self.close_btn.show()
+        else:
+            self.close_btn.hide()
+
     def _sync_close_button_visibility(self) -> None:
-        if self._dragging:
+        if not self._close_button_allowed or self._dragging:
             self.close_btn.hide()
             return
         local_cursor = self.mapFromGlobal(QCursor.pos())
@@ -461,7 +477,7 @@ class TabButton(QFrame):
 
     def enterEvent(self, event) -> None:
         if not self._dragging:
-            self.close_btn.show()
+            self._show_close_button_if_allowed()
             self._hover_timer.start()
         super().enterEvent(event)
 
@@ -474,7 +490,7 @@ class TabButton(QFrame):
 
     def event(self, event) -> bool:
         if event.type() == QEvent.Type.HoverEnter and not self._dragging:
-            self.close_btn.show()
+            self._show_close_button_if_allowed()
         elif event.type() == QEvent.Type.HoverLeave:
             self._hover_timer.stop()
             QTimer.singleShot(0, self._sync_close_button_visibility)
@@ -489,7 +505,7 @@ class TabButton(QFrame):
     def mouseMoveEvent(self, event) -> None:
         if not (event.buttons() & Qt.MouseButton.LeftButton) and not self._dragging:
             # Some windowing backends deliver a move before the hover enter.
-            self.close_btn.show()
+            self._show_close_button_if_allowed()
         if event.buttons() & Qt.MouseButton.LeftButton:
             current = event.position().toPoint()
             if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
@@ -508,7 +524,7 @@ class TabButton(QFrame):
             self._dragging = False
             self.setCursor(Qt.CursorShape.PointingHandCursor)
             if self.underMouse():
-                self.close_btn.show()
+                self._show_close_button_if_allowed()
             else:
                 self.close_btn.hide()
             event.accept()
@@ -521,7 +537,7 @@ class TabButton(QFrame):
         if obj is self.close_btn:
             if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
                 if not self._dragging:
-                    self.close_btn.show()
+                    self._show_close_button_if_allowed()
             elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
                 QTimer.singleShot(0, self._sync_close_button_visibility)
         if event.type() == QEvent.Type.ContextMenu:
@@ -669,8 +685,12 @@ class CustomTabBar(QFrame):
         for tab in self.tabs:
             tab.apply_icon_theme(self._dark_mode)
 
-    def add_tab(self, title: str = "New Tab", make_active: bool = True) -> int:
+    def add_tab(
+        self, title: str = "New Tab", make_active: bool = True,
+        is_dashboard: bool = False,
+    ) -> int:
         tab = TabButton(title)
+        tab.setProperty("dashboardTab", bool(is_dashboard))
         tab.apply_icon_theme(self._dark_mode)
         tab.clicked.connect(lambda target=tab: self._on_tab_clicked(target))
         tab.closed.connect(lambda target=tab: self._on_tab_closed(target))
@@ -684,12 +704,22 @@ class CustomTabBar(QFrame):
         insert_pos = max(0, self.holder_layout.count() - (1 if self.plus_inside else 0))
         self.holder_layout.insertWidget(insert_pos, tab)
         self.tabs.append(tab)
+        self._sync_tab_close_buttons()
 
         index = len(self.tabs) - 1
         if make_active or self.active_index < 0:
             self.set_active(index)
         QTimer.singleShot(0, self._update_overflow)
         return index
+
+    def _sync_tab_close_buttons(self) -> None:
+        """Keep the sole dashboard tab open, but allow normal tab closing otherwise."""
+        sole_dashboard_tab = (
+            len(self.tabs) == 1
+            and bool(self.tabs[0].property("dashboardTab"))
+        )
+        for tab in self.tabs:
+            tab.set_close_button_allowed(not (sole_dashboard_tab and tab is self.tabs[0]))
 
     def remove_tab(self, index: int, activate: bool = True) -> None:
         if index < 0 or index >= len(self.tabs):
@@ -699,6 +729,7 @@ class CustomTabBar(QFrame):
         self.holder_layout.removeWidget(tab)
         tab.setParent(None)
         tab.deleteLater()
+        self._sync_tab_close_buttons()
 
         if not self.tabs:
             self.active_index = -1
@@ -3192,7 +3223,7 @@ class BrowserWindow(QMainWindow):
         self.view_layout.addWidget(view)
 
         index = len(self.views) - 1
-        self.tabbar.add_tab("New Tab", make_active=False)
+        self.tabbar.add_tab("New Tab", make_active=False, is_dashboard=is_dashboard)
         if make_active or self.current_index < 0:
             self.tabbar.set_active(index)
         else:

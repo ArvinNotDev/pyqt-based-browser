@@ -140,6 +140,43 @@ def test_custom_maximize_control_toggles_and_updates_its_accessible_state(qapp):
 
 
 
+def test_only_dashboard_tab_hides_close_button_until_another_tab_exists(qapp):
+    tabs = CustomTabBar()
+    tabs.add_tab("ARMA Start", is_dashboard=True)
+
+    dashboard_tab = tabs.tabs[0]
+    assert dashboard_tab.property("dashboardTab") is True
+    assert dashboard_tab._close_button_allowed is False
+    assert dashboard_tab.close_btn.isHidden()
+
+    # Every hover-driven path must respect the non-closable state.
+    dashboard_tab._show_close_button_if_allowed()
+    assert dashboard_tab.close_btn.isHidden()
+
+    tabs.add_tab("Example", make_active=False)
+    assert len(tabs.tabs) == 2
+    assert dashboard_tab._close_button_allowed is True
+    assert tabs.tabs[1]._close_button_allowed is True
+
+    # Returning to a single dashboard tab hides its close button again.
+    tabs.remove_tab(1, activate=False)
+    assert len(tabs.tabs) == 1
+    assert tabs.tabs[0] is dashboard_tab
+    assert dashboard_tab._close_button_allowed is False
+    assert dashboard_tab.close_btn.isHidden()
+
+    # A single non-dashboard tab remains closable, matching normal tab behavior.
+    tabs.add_tab("Example", make_active=False)
+    tabs.remove_tab(0, activate=False)
+    assert len(tabs.tabs) == 1
+    assert tabs.tabs[0].property("dashboardTab") is False
+    assert tabs.tabs[0]._close_button_allowed is True
+
+    tabs.close()
+    tabs.deleteLater()
+    qapp.processEvents()
+
+
 def test_tab_close_button_is_visible_immediately_on_hover_and_stays_visible_over_button(qapp):
     host = QWidget()
     host_layout = QVBoxLayout(host)
