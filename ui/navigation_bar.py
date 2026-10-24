@@ -9,7 +9,7 @@ import os
 import qtawesome as qta
 
 from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer, QObject, Signal
-from PySide6.QtGui import QAction, QFont, QIcon
+from PySide6.QtGui import QAction, QFont, QIcon, QGuiApplication
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -101,7 +101,9 @@ class NavigationBar(QToolBar):
         self.setFixedHeight(50)
         self.setMovable(False)
         self.setFloatable(False)
-        self.setContentsMargins(12, 3, 12, 3)
+        # Keep every navigation control on the same vertical centre-line and let
+        # the menu button sit close to the far-right edge of the browser shell.
+        self.setContentsMargins(10, 3, 4, 3)
         self.setIconSize(QSize(18, 18))
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
@@ -126,6 +128,8 @@ class NavigationBar(QToolBar):
         self.suggestion_popup: QFrame | None = None
         self.suggestion_list: QListWidget | None = None
         self._popup_filter: _SuggestionPopupFilter | None = None
+        self._suggestion_popup_height: int | None = None
+        self._url_load_progress: int | None = None
 
         self._navigation_icon_names = {}
         self.back_btn = self._action("Back", "fa5s.arrow-left")
@@ -162,6 +166,7 @@ class NavigationBar(QToolBar):
         self.url_bar.setToolTip("Search or enter a website address (Ctrl+L)")
         self.url_bar.installEventFilter(self)
         self._add_widget(self.url_bar, expanding=True)
+        self._apply_url_bar_progress_style()
         self.url_bar.returnPressed.connect(self._on_url_entered)
         self.url_bar.textEdited.connect(self._on_url_typed)
         self.url_bar.editingFinished.connect(self._close_suggestion_popup)
@@ -273,8 +278,8 @@ class NavigationBar(QToolBar):
         # precisely centred vector icon instead of the glyph baseline.
         self.menu_button.setText("⋮")
         self.menu_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
-        self.menu_button.setIconSize(QSize(18, 18))
-        self.menu_button.setFixedSize(QSize(36, 32))
+        self.menu_button.setIconSize(QSize(17, 17))
+        self.menu_button.setFixedSize(QSize(34, 30))
         self.menu_button.setToolTip("Browser menu")
         self.menu_button.setAccessibleName("Browser menu")
         self.menu_button.setProperty("menuOpen", False)
@@ -325,6 +330,10 @@ class NavigationBar(QToolBar):
             button.setObjectName("navigationToolButton")
             button.setAccessibleName(action.text())
             button.setFocusPolicy(Qt.StrongFocus)
+            button.setToolButtonStyle(Qt.ToolButtonIconOnly)
+            button.setIconSize(QSize(17, 17))
+            button.setFixedSize(34, 30)
+            button.setAutoRaise(True)
 
     def _button(self, text: str, tooltip: str, object_name: str) -> QToolButton:
         button = QToolButton(self)
@@ -334,6 +343,9 @@ class NavigationBar(QToolBar):
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
         button.setFocusPolicy(Qt.StrongFocus)
+        button.setIconSize(QSize(17, 17))
+        button.setFixedSize(34, 30)
+        button.setAutoRaise(True)
         return button
 
     def _add_widget(self, widget: QWidget, expanding: bool = False) -> None:
@@ -360,19 +372,84 @@ class NavigationBar(QToolBar):
             self._popup_filter = None
 
     def show_url_suggestions(self, suggestions: list[str]):
-        """Backward-compatible entry point for externally supplied suggestions."""
-        self._close_suggestion_popup()
-        if suggestions:
-            self._show_suggestion_popup(suggestions)
+        """Update the visible suggestions without tearing down the popup."""
+        self._update_suggestion_popup(suggestions)
 
     def _on_url_typed(self, text: str):
-        self._close_suggestion_popup()
-        suggestions = self.search_history(text)
-        if suggestions:
-            self._show_suggestion_popup(suggestions)
+        self._update_suggestion_popup(self.search_history(text))
 
     def _show_suggestion_popup(self, suggestions: list[str]):
-        self._close_suggestion_popup()
+        # Keep the older internal entry point available for callers and tests.
+        self._update_suggestion_popup(suggestions)
+
+    @staticmethod
+    def _valid_suggestions(suggestions: list[str]) -> list[str]:
+        valid: list[str] = []
+        seen: set[str] = set()
+        for suggestion in suggestions or []:
+            if not isinstance(suggestion, str) or not suggestion.strip():
+                continue
+            value = suggestion.strip()
+            key = value.casefold()
+            if key not in seen:
+                seen.add(key)
+                valid.append(value)
+        return valid
+
+    def _position_suggestion_popup(self) -> None:
+        popup = self.suggestion_popup
+        if popup is None or self._suggestion_popup_height is None:
+            return
+        anchor = self.url_bar.mapToGlobal(self.url_bar.rect().bottomLeft())
+        screen = QGuiApplication.screenAt(anchor) or QGuiApplication.primaryScreen()
+        width = max(180, self.url_bar.width())
+        height = self._suggestion_popup_height
+        x, y = anchor.x(), anchor.y()
+        if screen is not None:
+            area = screen.availableGeometry()
+            width = min(width, max(180, area.width() - 16))
+            x = min(max(x, area.left() + 8), area.right() - width + 1)
+            if y + height > area.bottom() + 1:
+                above = self.url_bar.mapToGlobal(self.url_bar.rect().topLeft()).y() - height
+                y = above if above >= area.top() else max(area.top(), area.bottom() - height + 1)
+        popup.setGeometry(x, y, width, height)
+
+    def _update_suggestion_popup(self, suggestions: list[str]) -> None:
+        values = self._valid_suggestions(suggestions)
+        if not values:
+            self._close_suggestion_popup()
+            return
+
+        popup = self.suggestion_popup
+        list_widget = self.suggestion_list
+        if popup is not None and list_widget is not None:
+            # Update the model in place: the native Tool window remains the same
+            # widget at the same location, so typing does not flicker or jump.
+            try:
+                selected = list_widget.currentItem().text() if list_widget.currentItem() else None
+                list_widget.setUpdatesEnabled(False)
+                list_widget.clear()
+                for value in values:
+                    QListWidgetItem(value, list_widget)
+                selected_row = next(
+                    (row for row in range(list_widget.count())
+                     if list_widget.item(row).text() == selected),
+                    0,
+                )
+                list_widget.setCurrentRow(selected_row)
+                list_widget.verticalScrollBar().setValue(0)
+                list_widget.setUpdatesEnabled(True)
+                self._position_suggestion_popup()
+                if not popup.isVisible():
+                    popup.show()
+                popup.raise_()
+                return
+            except RuntimeError:
+                # A popup can be destroyed by the window system while it is hidden.
+                self.suggestion_popup = None
+                self.suggestion_list = None
+                self._suggestion_popup_height = None
+
         popup = QFrame(self)
         popup.setObjectName("suggestionPopup")
         popup.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
@@ -382,22 +459,21 @@ class NavigationBar(QToolBar):
         list_widget = QListWidget(popup)
         list_widget.setObjectName("suggestionList")
         list_widget.setFocusPolicy(Qt.NoFocus)
-        for suggestion in suggestions:
-            if isinstance(suggestion, str) and suggestion.strip():
-                QListWidgetItem(suggestion, list_widget)
-        if list_widget.count() == 0:
-            popup.deleteLater()
-            return
+        list_widget.setUniformItemSizes(True)
+        for value in values:
+            QListWidgetItem(value, list_widget)
         list_widget.setCurrentRow(0)
         list_widget.itemClicked.connect(self._on_suggestion_clicked)
 
         layout = QVBoxLayout(popup)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.addWidget(list_widget)
-        popup.resize(self.url_bar.width(), min(240, list_widget.sizeHintForRow(0) * list_widget.count() + 16))
-        popup.move(self.url_bar.mapToGlobal(self.url_bar.rect().bottomLeft()))
+        row_height = max(30, list_widget.sizeHintForRow(0))
+        visible_rows = min(6, max(3, len(values)))
+        self._suggestion_popup_height = min(240, row_height * visible_rows + 8)
         self.suggestion_popup = popup
         self.suggestion_list = list_widget
+        self._position_suggestion_popup()
         popup.show()
         popup.raise_()
         self.url_bar.setFocus(Qt.OtherFocusReason)
@@ -432,6 +508,7 @@ class NavigationBar(QToolBar):
         popup = self.suggestion_popup
         self.suggestion_popup = None
         self.suggestion_list = None
+        self._suggestion_popup_height = None
         if popup is not None:
             popup.close()
             popup.deleteLater()
@@ -490,7 +567,63 @@ class NavigationBar(QToolBar):
             color="#2f81f7" if proxy_open else self._icon_color(),
         ))
         self._refresh_profile_icon()
+        self._apply_url_bar_progress_style()
         self._close_suggestion_popup()
+
+    def set_load_progress(self, progress: int | None) -> None:
+        """Tint the address field by load progress without a page-covering HUD."""
+        if progress is None:
+            normalized = None
+        else:
+            normalized = max(0, min(100, int(progress)))
+        if normalized == self._url_load_progress:
+            return
+        self._url_load_progress = normalized
+        self._apply_url_bar_progress_style()
+
+    def _apply_url_bar_progress_style(self) -> None:
+        if not hasattr(self, "url_bar"):
+            return
+        dark = bool(getattr(self.settings, "dark_mode", False))
+        if dark:
+            text, base = "#e4e8ee", "rgba(37,43,52,235)"
+            border, hover, accent, placeholder = "#3a414b", "#536681", "#82aff4", "#9ba8bc"
+            fill = "rgba(130,175,244,58)"
+            selection = "#405e87"
+        else:
+            text, base = "#20242a", "rgba(255,255,255,235)"
+            border, hover, accent, placeholder = "#d9dde4", "#b8c0cc", "#3979d6", "#78818d"
+            fill = "rgba(57,121,214,54)"
+            selection = "#cfe0fb"
+
+        progress = self._url_load_progress
+        if progress is None:
+            background = base
+        elif progress >= 100:
+            background = fill
+        else:
+            # The address field itself paints the progress behind its editable text.
+            # Keeping the transition point in a stylesheet avoids child overlays,
+            # extra layout, or an extra widget covering the cursor and selection.
+            stop = max(0.015, min(0.995, progress / 100.0))
+            edge = min(0.999, stop + 0.003)
+            background = (
+                "qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+                f"stop:0 {fill}, stop:{stop:.4f} {fill}, "
+                f"stop:{edge:.4f} {base}, stop:1 {base})"
+            )
+
+        self.url_bar.setStyleSheet(f"""
+            QLineEdit#urlBar {{
+                color: {text}; background: {background};
+                border: 1px solid {border}; border-radius: 15px;
+                padding: 5px 12px; min-height: 25px;
+                selection-background-color: {selection};
+            }}
+            QLineEdit#urlBar:hover {{ border-color: {hover}; }}
+            QLineEdit#urlBar:focus {{ border: 1px solid {accent}; }}
+            QLineEdit#urlBar::placeholder {{ color: {placeholder}; }}
+        """)
 
     def set_proxy_panel_state(self, opened: bool) -> None:
         button = getattr(self, "proxy_panel_btn", None)
