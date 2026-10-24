@@ -38,6 +38,46 @@ def test_custom_title_bar_does_not_show_active_page_title(qapp):
     host.close()
 
 
+def test_clicking_an_existing_titlebar_tab_switches_back_to_it(qapp):
+    host = _StateTrackingWindow()
+    host.resize(900, 120)
+    host_layout = QVBoxLayout(host)
+    title_bar = CustomTitleBar(host)
+    host_layout.addWidget(title_bar)
+
+    tab_bar = CustomTabBar()
+    title_bar.set_tabs_widget(tab_bar)
+    tab_bar.add_tab("Previously opened tab", make_active=True)
+    tab_bar.add_tab("Current tab", make_active=True)
+
+    host.show()
+    qapp.processEvents()
+
+    previous_tab = tab_bar.tabs[0]
+    previous_center = previous_tab.mapTo(
+        title_bar, previous_tab.rect().center()
+    )
+    assert _title_bar_point_is_interactive(title_bar, previous_center)
+
+    # The strip's padding and gaps must also remain client area; Windows must
+    # not reinterpret a click near a tab as a window-drag gesture.
+    strip_padding = tab_bar.mapTo(
+        title_bar, QPoint(2, tab_bar.height() // 2)
+    )
+    assert _title_bar_point_is_interactive(title_bar, strip_padding)
+
+    changed = QSignalSpy(tab_bar.tab_changed)
+    QTest.mouseClick(previous_tab, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+
+    assert tab_bar.active_index == 0
+    assert changed.count() == 1
+    assert changed.at(0)[0] == 0
+
+    host.close()
+    qapp.processEvents()
+
+
 def test_tab_strip_can_move_into_title_bar_and_return_to_workspace(qapp):
     from ui.browser_window import BrowserWindow
 
