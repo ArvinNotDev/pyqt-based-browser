@@ -1006,9 +1006,6 @@ QToolBar#NavigationBar::separator {
     max-width: 1px;
     margin: 9px 4px;
 }
-QToolBar#NavigationBar QToolButton:focus {
-    border-color: transparent;
-}
 QToolButton#downloadsModeButton {
     color: #64748b;
     background: transparent;
@@ -1030,7 +1027,6 @@ QToolButton#downloadsModeButton[downloadsPinned="true"]:hover {
     background: rgba(57,121,214,38);
     border-color: rgba(57,121,214,135);
 }
-QToolButton#downloadsModeButton:focus { border-color: transparent; }
 """
 
 DARK_CHROME_POLISH += """
@@ -1043,9 +1039,6 @@ QToolBar#NavigationBar::separator {
     min-width: 1px;
     max-width: 1px;
     margin: 9px 4px;
-}
-QToolBar#NavigationBar QToolButton:focus {
-    border-color: transparent;
 }
 QToolButton#downloadsModeButton {
     color: #c7ced8;
@@ -1068,5 +1061,4 @@ QToolButton#downloadsModeButton[downloadsPinned="true"]:hover {
     background: rgba(130,175,244,42);
     border-color: rgba(130,175,244,140);
 }
-QToolButton#downloadsModeButton:focus { border-color: transparent; }
 """
