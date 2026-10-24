@@ -160,7 +160,7 @@ class DownloadsPanel(QFrame):
         self.mode_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.mode_button.setIconSize(QSize(15, 15))
         self.mode_button.setFixedSize(30, 30)
-        self.mode_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.mode_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.mode_button.clicked.connect(self.mode_toggle_requested.emit)
         header.addWidget(self.mode_button)
         self.close_button.clicked.connect(self.close_requested.emit)
