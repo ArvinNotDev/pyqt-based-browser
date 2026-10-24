@@ -350,7 +350,8 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         views=[view],
         current_view=lambda: view,
         _placeholders={view: placeholder},
-        _page_load_overlays={view: Mock()},
+        _load_progress_by_view={view: 61},
+        navbar=SimpleNamespace(set_load_progress=Mock()),
         tabbar=SimpleNamespace(set_loading=Mock()),
         statusBar=lambda: SimpleNamespace(showMessage=Mock()),
     )
@@ -377,7 +378,8 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
     placeholder.loading_progress.hide.assert_called_once_with()
     placeholder.retry_button.show.assert_called_once_with()
-    browser._page_load_overlays[view].hide.assert_called_once_with()
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert view not in browser._load_progress_by_view
     browser.tabbar.set_loading.assert_called_once_with(0, False)
 
 def test_proxy_panel_is_created_only_when_requested():
@@ -501,20 +503,19 @@ def test_cache_bypass_reload_is_limited_to_web_pages():
 
 
 
-def test_page_load_overlay_hides_after_the_active_navigation_finishes():
+def test_address_bar_progress_clears_immediately_when_a_load_finishes():
     view = Mock()
-    view.page.return_value.isLoading.return_value = False
-    overlay = Mock()
     browser = SimpleNamespace(
         views=[view],
         current_view=lambda: view,
-        _page_load_overlays={view: overlay},
-        _page_load_overlay_for=lambda target: overlay,
+        _load_progress_by_view={view: 100},
+        navbar=SimpleNamespace(set_load_progress=Mock()),
     )
 
-    BrowserWindow._hide_page_load_overlay_if_current(browser, view)
+    BrowserWindow._set_address_load_progress(browser, view, None)
 
-    overlay.hide.assert_called_once_with()
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert view not in browser._load_progress_by_view
 
 
 def test_snap_aligned_geometry_is_detected_for_half_and_quarter_windows():
@@ -567,20 +568,19 @@ def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
 
 
 
-def test_activating_a_loading_tab_shows_its_page_overlay():
-    overlay = Mock()
+def test_activating_a_loading_tab_restores_its_progress_in_the_address_bar():
     loading_view = Mock()
     loading_view.page.return_value.isLoading.return_value = True
     browser = SimpleNamespace(
         current_index=0,
         views=[loading_view],
-        _page_load_overlays={loading_view: overlay},
+        _load_progress_by_view={loading_view: 62},
         _placeholders={loading_view: None},
-        _show_page_load_overlay=lambda target, progress=None: overlay.show_loading(progress),
         _set_tab_visibility=Mock(),
         _update_bookmarks_bar_visibility=Mock(),
         navbar=SimpleNamespace(
             url_bar=SimpleNamespace(setText=Mock()),
+            set_load_progress=Mock(),
             set_site_connection_state=Mock(),
             set_bookmark_state=Mock(),
             back_btn=SimpleNamespace(setEnabled=Mock()),
@@ -593,23 +593,23 @@ def test_activating_a_loading_tab_shows_its_page_overlay():
         tabbar=SimpleNamespace(set_active=Mock()),
     )
     BrowserWindow._activate(browser, 0)
-    overlay.show_loading.assert_called_once_with(None)
+    browser.navbar.set_load_progress.assert_called_once_with(62)
 
 
 
-def test_activating_a_loaded_tab_hides_a_stale_page_overlay():
-    overlay = Mock()
+def test_activating_a_loaded_tab_clears_stale_address_progress():
     loaded_view = Mock()
     loaded_view.page.return_value.isLoading.return_value = False
     browser = SimpleNamespace(
         current_index=0,
         views=[loaded_view],
-        _page_load_overlays={loaded_view: overlay},
+        _load_progress_by_view={loaded_view: 100},
         _placeholders={loaded_view: None},
         _set_tab_visibility=Mock(),
         _update_bookmarks_bar_visibility=Mock(),
         navbar=SimpleNamespace(
             url_bar=SimpleNamespace(setText=Mock()),
+            set_load_progress=Mock(),
             set_site_connection_state=Mock(),
             set_bookmark_state=Mock(),
             back_btn=SimpleNamespace(setEnabled=Mock()),
@@ -624,7 +624,8 @@ def test_activating_a_loaded_tab_hides_a_stale_page_overlay():
 
     BrowserWindow._activate(browser, 0)
 
-    overlay.hide.assert_called_once_with()
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert loaded_view not in browser._load_progress_by_view
 
 
 
