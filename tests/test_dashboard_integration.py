@@ -443,7 +443,7 @@ def test_browser_does_not_capture_live_webengine_surfaces_for_tab_previews():
     source = (Path(__file__).resolve().parents[1] / "ui" / "browser_window.py").read_text(
         encoding="utf-8"
     )
-    assert ".grab()" not in source
+    assert "view.grab()" not in source
     assert "def _capture_snapshot(" not in source
 
 

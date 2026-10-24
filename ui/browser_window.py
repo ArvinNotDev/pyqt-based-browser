@@ -3301,9 +3301,7 @@ class BrowserWindow(QMainWindow):
     def _activate(self, index: int):
         if index < 0 or index >= len(self.views):
             return
-        prev_index = self.current_index
-        if prev_index is not None and prev_index != -1 and prev_index != index:
-    
+
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
