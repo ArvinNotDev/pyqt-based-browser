@@ -467,6 +467,12 @@ def test_download_toast_keeps_its_own_opacity_animation():
     harness.deleteLater()
     app.processEvents()
 
+def test_show_bookmarks_opens_the_integrated_internal_page():
+    browser = SimpleNamespace(navigate=Mock())
+    BrowserWindow.show_bookmarks(browser)
+    browser.navigate.assert_called_once_with("arma://bookmarks/")
+
+
 def test_bookmarks_menu_stays_available_on_every_page():
     bar = Mock()
     browser = SimpleNamespace(bookmarks_bar=bar)
