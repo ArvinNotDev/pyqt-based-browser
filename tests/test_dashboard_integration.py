@@ -362,6 +362,10 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         url=lambda: QUrl("https://offline.example/"),
         errorString=lambda: "Operation canceled",
     )
+    browser._set_address_load_progress = lambda target, progress: BrowserWindow._set_address_load_progress(
+        browser, target, progress
+    )
+
     BrowserWindow._on_loading_changed(browser, aborted, view, object())
     assert placeholder._load_error is False
     placeholder.loading_title_label.setText.assert_not_called()
@@ -592,6 +596,10 @@ def test_activating_a_loading_tab_restores_its_progress_in_the_address_bar():
         _update_navigation_actions=Mock(),
         tabbar=SimpleNamespace(set_active=Mock()),
     )
+    browser._set_address_load_progress = lambda target, progress: BrowserWindow._set_address_load_progress(
+        browser, target, progress
+    )
+
     BrowserWindow._activate(browser, 0)
     browser.navbar.set_load_progress.assert_called_once_with(62)
 
