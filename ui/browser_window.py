@@ -174,18 +174,6 @@ def _title_bar_point_is_interactive(title_bar: QWidget, point: QPoint) -> bool:
     buttons and tab widgets while allowing blank header space to drag the window.
     """
     try:
-        # On Windows, native caption hit-testing can intercept clicks before Qt
-        # sees them. Treat the whole hosted tab-strip rectangle as client area,
-        # including its scroll-area margins and gaps, not just the tab buttons.
-        tabs_widget = getattr(title_bar, "tabs_widget", None)
-        if tabs_widget is not None:
-            tabs_rect = QRect(
-                tabs_widget.mapTo(title_bar, QPoint(0, 0)),
-                tabs_widget.size(),
-            )
-            if tabs_rect.contains(point):
-                return True
-
         target = title_bar.childAt(point)
         while target is not None and target is not title_bar:
             if (
