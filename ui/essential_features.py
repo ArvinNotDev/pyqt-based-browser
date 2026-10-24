@@ -31,6 +31,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineUrlRequestInterceptor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
+from ui.session_store import load_last_session, sanitize_session_data
+
 logger = logging.getLogger(__name__)
 
 # Domain rules are intentionally conservative and easy to inspect. The user can
@@ -280,30 +282,8 @@ def _write_json(path, value):
 
 
 def _stored_session_for_startup():
-    """Load the last valid non-private session without initializing WebEngine."""
-    from ui.settings import Settings
-
-    settings = Settings()
-    settings.load_profile_settings()
-    profiles = settings.profiles_list or ["Guest"]
-    default_profile = "Guest" if "Guest" in profiles else profiles[0]
-
-    session = sanitize_session_data(_read_json(_last_session_path()))
-    if session is not None and session.get("profile") in profiles:
-        profile = session["profile"]
-    else:
-        profile = default_profile
-        session = sanitize_session_data(_read_json(_session_path(None, profile)))
-
-    settings.load(profile)
-    if not settings.restore_session or settings.private_mode:
-        return None
-    if session is None:
-        session = sanitize_session_data(_read_json(_session_path(None, profile)))
-    if session is None:
-        return None
-    session["profile"] = profile
-    return session
+    """Use the shared, validated loader for callers outside main.py."""
+    return load_last_session()
 
 
 def install_essential_features(browser_window_class):
@@ -319,6 +299,7 @@ def install_essential_features(browser_window_class):
     original_connect_page = browser_window_class._connect_page
     original_set_tab_visibility = browser_window_class._set_tab_visibility
     original_close_event = browser_window_class.closeEvent
+    original_internal_page_action = browser_window_class._handle_internal_page_action
 
     def _ensure_interceptor(self, profile):
         collection = getattr(self, "_essential_interceptors", None)
@@ -360,9 +341,11 @@ def install_essential_features(browser_window_class):
         self._ensure_session_timer()
         if getattr(self, "_closing", False):
             return
-        if not getattr(getattr(self, "settings", None), "restore_session", True):
-            return
-        if getattr(getattr(self, "settings", None), "private_mode", False):
+        if (
+            not getattr(getattr(self, "settings", None), "restore_session", True)
+            or getattr(getattr(self, "settings", None), "private_mode", False)
+        ):
+            self._essential_save_session_now()
             return
         self._essential_session_timer.start()
 
@@ -386,15 +369,10 @@ def install_essential_features(browser_window_class):
                     logger.debug("Could not remove disabled session store", exc_info=True)
             return
         tabs = []
-        active_url = ""
         views = list(getattr(self, "views", []))
         current_index = getattr(self, "current_index", 0)
-        if isinstance(current_index, int) and 0 <= current_index < len(views):
-            try:
-                active_url = views[current_index].url().toString()
-            except (AttributeError, RuntimeError):
-                active_url = ""
-        for view in views[:50]:
+        active_index = None
+        for view_index, view in enumerate(views[:50]):
             try:
                 raw_url = view.url().toString()
             except (AttributeError, RuntimeError):
@@ -403,6 +381,7 @@ def install_essential_features(browser_window_class):
                 continue
             try:
                 parsed = urlsplit(raw_url)
+                _ = parsed.port
             except ValueError:
                 continue
             if (
@@ -411,12 +390,18 @@ def install_essential_features(browser_window_class):
                 and parsed.username is None
                 and parsed.password is None
             ):
-                tabs.append(raw_url)
+                saved_url = raw_url
             elif parsed.scheme == "arma" and parsed.netloc.casefold() == "dashboard":
-                tabs.append("arma://dashboard/")
+                saved_url = "arma://dashboard/"
+            else:
+                continue
+            if view_index == current_index:
+                active_index = len(tabs)
+            tabs.append(saved_url)
         if not tabs:
             return
-        active_index = tabs.index(active_url) if active_url in tabs else 0
+        if active_index is None:
+            active_index = 0
         document = {
             "profile": profile_name,
             "tabs": tabs,
@@ -526,12 +511,19 @@ def install_essential_features(browser_window_class):
         self._schedule_session_save()
 
     def _wrapped_close_event(self, event):
-        original_close_event(self, event)
+        # The modern browser's closeEvent calls prepare_shutdown(), which clears
+        # self.views before returning. Persist the latest tabs before delegating.
         try:
-            if event.isAccepted():
-                self._essential_save_session_now()
+            self._essential_save_session_now()
         except (AttributeError, RuntimeError):
-            logger.debug("Could not save session during close", exc_info=True)
+            logger.debug("Could not save session before shutdown", exc_info=True)
+        original_close_event(self, event)
+
+    def _wrapped_internal_page_action(self, page, view, host, action, payload):
+        result = original_internal_page_action(self, page, view, host, action, payload)
+        if host == "settings" and action in {"set_browser_setting", "save_browser_settings"}:
+            self._essential_settings_changed()
+        return result
 
     def _settings_changed(self):
         enabled = bool(getattr(self.settings, "ad_blocking_enabled", True))
@@ -542,7 +534,13 @@ def install_essential_features(browser_window_class):
             action.blockSignals(True)
             action.setChecked(enabled)
             action.blockSignals(False)
-        self._schedule_session_save()
+        if (
+            not getattr(self.settings, "restore_session", True)
+            or getattr(self.settings, "private_mode", False)
+        ):
+            self._essential_save_session_now()
+        else:
+            self._schedule_session_save()
 
     def _toggle_ad_blocking(self, enabled):
         self.settings.ad_blocking_enabled = bool(enabled)
@@ -961,5 +959,6 @@ def install_essential_features(browser_window_class):
     browser_window_class._connect_page = _wrapped_connect_page
     browser_window_class.new_tab = _wrapped_new_tab
     browser_window_class._set_tab_visibility = _wrapped_tab_visibility
+    browser_window_class._handle_internal_page_action = _wrapped_internal_page_action
     browser_window_class.__init__ = _wrapped_init
     browser_window_class.closeEvent = _wrapped_close_event
