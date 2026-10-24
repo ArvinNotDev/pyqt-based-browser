@@ -1058,18 +1058,6 @@ from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
 
 # Keep legacy dialog/feature styles intact, then apply one final coherent chrome layer.
 light_theme = f"{light_theme}\n{LIGHT_CHROME_POLISH}" + """
-QFrame#pageLoadOverlay {
-    background: rgba(250, 253, 255, 246);
-    border: 1px solid rgba(176, 196, 223, 235);
-    border-radius: 12px;
-}
-QLabel#pageLoadOverlayTitle { color: #243248; font-size: 11px; font-weight: 700; }
-QLabel#pageLoadOverlayPercent { color: #3979d6; font-size: 10px; font-weight: 700; }
-QProgressBar#pageLoadOverlayProgress {
-    background: #dfe8f5; border: none; border-radius: 2px;
-    min-height: 4px; max-height: 4px; margin: 0; padding: 0;
-}
-QProgressBar#pageLoadOverlayProgress::chunk { background: #3979d6; border-radius: 2px; }
 QFrame#downloadsPanel {
     background: rgba(244, 247, 252, 250);
     border: 1px solid rgba(209, 220, 236, 225);
@@ -1129,18 +1117,6 @@ QPushButton#downloadsSecondaryButton {
 QPushButton#downloadsSecondaryButton:hover { color: #285eae; border-color: #91b5e8; background: #f5f9ff; }
 """
 dark_theme = f"{dark_theme}\n{DARK_CHROME_POLISH}" + """
-QFrame#pageLoadOverlay {
-    background: rgba(29, 37, 49, 248);
-    border: 1px solid rgba(126, 151, 184, 150);
-    border-radius: 12px;
-}
-QLabel#pageLoadOverlayTitle { color: #edf4ff; font-size: 11px; font-weight: 700; }
-QLabel#pageLoadOverlayPercent { color: #8bbaff; font-size: 10px; font-weight: 700; }
-QProgressBar#pageLoadOverlayProgress {
-    background: #3b4759; border: none; border-radius: 2px;
-    min-height: 4px; max-height: 4px; margin: 0; padding: 0;
-}
-QProgressBar#pageLoadOverlayProgress::chunk { background: #82aff4; border-radius: 2px; }
 QFrame#downloadsPanel {
     background: rgba(23, 29, 39, 250);
     border: 1px solid rgba(82, 98, 121, 170);
