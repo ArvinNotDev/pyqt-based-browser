@@ -274,7 +274,7 @@ class TabButton(QFrame):
         self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.close_btn.setToolTip("Close tab")
         self.close_btn.setAccessibleName("Close tab")
-        self.close_btn.clicked.connect(self.closed.emit)
+        self.close_btn.clicked.connect(lambda _checked=False: self.closed.emit())
 
         layout.addWidget(self.favicon)
         layout.addWidget(self.label, 1)
@@ -492,7 +492,7 @@ class CustomTabBar(QFrame):
         self.plus_tab.setToolTip("New tab")
         self.plus_tab.setAccessibleName("New tab")
         self.plus_tab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.plus_tab.clicked.connect(self.new_tab_requested.emit)
+        self.plus_tab.clicked.connect(lambda _checked=False: self.new_tab_requested.emit())
 
         self.external_plus = QPushButton(self)
         self.external_plus.setObjectName("tabPlusButton")
@@ -501,7 +501,7 @@ class CustomTabBar(QFrame):
         self.external_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.external_plus.setToolTip("New tab")
         self.external_plus.setAccessibleName("New tab")
-        self.external_plus.clicked.connect(self.new_tab_requested.emit)
+        self.external_plus.clicked.connect(lambda _checked=False: self.new_tab_requested.emit())
         self.external_plus.hide()
         self.holder_layout.addWidget(self.plus_tab)
 
@@ -634,7 +634,7 @@ class CustomTabBar(QFrame):
         if self.tabs:
             self.tab_list_menu.addSeparator()
         new_tab_action = QAction(qta.icon("fa5s.plus"), "New tab", self.tab_list_menu)
-        new_tab_action.triggered.connect(self.new_tab_requested.emit)
+        new_tab_action.triggered.connect(lambda _checked=False: self.new_tab_requested.emit())
         self.tab_list_menu.addAction(new_tab_action)
 
     def ensure_tab_visible(self, index: int) -> None:
