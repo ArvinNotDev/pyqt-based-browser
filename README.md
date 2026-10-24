@@ -15,7 +15,7 @@ This README documents the features available in the source and the current relea
 - Choose a built-in gradient or import a local dashboard wallpaper. Dashboard appearance, shortcuts, notes, widgets, and timer settings are kept separately for each profile.
 - Hover over an inactive tab to preview it. Resize tab widths to fit the window, then use the tab-strip scroll controls when the window has more tabs than can fit.
 - Right-click a tab to open, reload, duplicate, copy its address, close it, close other tabs, close tabs to its right, or reopen a recently closed tab.
-- Closing the final tab opens a fresh dashboard tab. ARMA Browser does not restore the previous set of tabs at startup.
+- Closing the final tab opens a fresh dashboard tab. When **Restore previous session** is enabled, normal browsing tabs and the active profile are saved and restored at startup; private sessions are never stored.
 
 ### Bookmarks and history
 
@@ -43,16 +43,19 @@ Settings are scoped to the selected profile. The Settings window includes:
 - History saving, cookie persistence, and private browsing controls.
 - Website compatibility mode, which adjusts the browser user-agent string.
 - The option to show the proxy panel when the browser starts.
+- Restore-session and built-in ad/tracker-blocking preferences.
 - Hardware acceleration preference, which requires a restart to change the running Chromium process.
 - A built-in keyboard shortcut reference.
 
-Private browsing uses a separate in-memory Qt WebEngine profile and does not keep browsing history or cookies between sessions. It does not restore tabs after restart. Downloads are still written to the configured folder, and any downloaded files remain there.
+Private browsing uses a separate in-memory Qt WebEngine profile and does not keep browsing history, cookies, remembered site permissions, or session tabs between sessions. Downloads are still written to the configured folder, and any downloaded files remain there.
 
 ### Proxy and Tor tools
 
 The browser includes an optional proxy panel for local proxy and Tor configuration, along with host blocking and route-exclusion rules. Tor routing depends on a usable Tor expert bundle, available local ports, and network access; bridge routes also need valid bridge lines and compatible transport support. A successful UI setup does not guarantee that a particular network or website will be reachable.
 
 The browser uses its normal Qt/system network route by default. The proxy panel does not start a local proxy until you choose **Connect**. Switching between Tor and regular browsing restarts the browser so WebEngine applies the selected route from profile startup; open tabs are restored. The browser menu can switch the proxy panel, connect the current site directly when Tor routing is active, and toggle Gaming mode. Gaming mode temporarily disables ARMA Browser's registered browser keyboard shortcuts; turn it off from the same menu to restore them.
+
+The browser menu also includes **Site permissions**, **Find in page** (`Ctrl+F`), zoom controls (`Ctrl+=`, `Ctrl+-`, and `Ctrl+0`), **Developer tools** (`F12` or `Ctrl+Shift+I`), **Save page as PDF**, **Print page**, and a screenshot of the currently visible page. Supported site permissions prompt before granting protected capabilities and can be remembered per site; previously saved decisions can be cleared from **Site permissions**.
 
 ## Keyboard shortcuts
 
@@ -150,7 +153,7 @@ See [packaging and release notes](docs/PACKAGING.md) and the [release checklist]
 
 ## Current scope and troubleshooting
 
-- **Ad blocking and browser extensions:** ARMA Browser does not include an ad-blocking extension or an extension store. Website compatibility mode only changes the user-agent string; it does not disable a site's ad-block detection or change proxy behavior.
+- **Ad blocking and browser extensions:** ARMA Browser includes a lightweight host-based blocker for common ad/tracker domains, but not a full EasyList-compatible or cosmetic filter, and it has no extension store. Some ads may remain and some embedded content may need the blocker disabled. Website compatibility mode only changes the user-agent string; it does not disable a site's ad-block detection or change proxy behavior.
 - **A website blocks access or a download:** the site may require an extension, login, cookie, or network route that is unavailable in the current session. Check the proxy panel and the site's own requirements. ARMA Browser does not promise to bypass a site's access checks.
 - **Qt WebEngine fails to start on Linux:** install the distribution's Qt WebEngine dependencies, including OpenGL, XCB, and xkbcommon libraries, and launch from a graphical session.
 - **QR scanner or camera errors:** install the OS `zbar` library and check camera permissions. QR scanning is optional for browsing.
