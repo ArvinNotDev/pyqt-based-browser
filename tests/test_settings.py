@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 
 import pytest
 
@@ -28,6 +29,10 @@ def test_defaults_are_independent_and_stable():
     assert first.download_folder == default_download_directory()
     assert first.show_dev_tools is False
     assert first.hardware_acceleration is True
+    assert first.webgpu_enabled is False
+    assert first.tabs_in_title_bar is False
+    assert first.restore_session is True
+    assert first.ad_blocking_enabled is True
     assert first.profile is not second.profile
     assert first.profiles_list is not second.profiles_list
 
@@ -64,6 +69,7 @@ def test_loading_older_settings_keeps_new_defaults_and_ignores_unknown_keys(tmp_
     assert settings.homepage == "https://old.example/"
     assert settings.startup_page == "homepage"
     assert settings.hardware_acceleration is True
+    assert settings.webgpu_enabled is False
     assert not hasattr(settings, "future_option")
 
 
@@ -89,12 +95,16 @@ def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
     settings = Settings(file_path=str(settings_file))
     settings.startup_page = "homepage"
     settings.new_tab_page = "homepage"
+    settings.restore_session = False
+    settings.ad_blocking_enabled = False
     settings.save("Guest")
 
     loaded = Settings(file_path=str(settings_file))
     loaded.load("Guest")
     assert loaded.startup_page == "homepage"
     assert loaded.new_tab_page == "homepage"
+    assert loaded.restore_session is False
+    assert loaded.ad_blocking_enabled is False
 
     settings_file.write_text(
         json.dumps({"Guest": {"startup_page": "javascript", "new_tab_page": "broken"}}),
@@ -103,6 +113,26 @@ def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
     loaded.load("Guest")
     assert loaded.startup_page == "dashboard"
     assert loaded.new_tab_page == "dashboard"
+
+
+def test_tabs_in_title_bar_preference_round_trips_and_rejects_invalid_values(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    settings = Settings(file_path=str(settings_file))
+    assert settings.tabs_in_title_bar is False
+
+    settings.tabs_in_title_bar = True
+    settings.save("Guest")
+
+    loaded = Settings(file_path=str(settings_file))
+    loaded.load("Guest")
+    assert loaded.tabs_in_title_bar is True
+
+    settings_file.write_text(
+        json.dumps({"Guest": {"tabs_in_title_bar": "yes"}}),
+        encoding="utf-8",
+    )
+    loaded.load("Guest")
+    assert loaded.tabs_in_title_bar is False
 
 
 def test_old_project_relative_download_default_migrates_to_system_downloads(tmp_path):
@@ -166,3 +196,24 @@ def test_load_profile_settings_uses_this_machines_profile_list(tmp_path, monkeyp
     settings.load_profile_settings()
 
     assert settings.profiles_list == ["Guest", "Research"]
+
+
+
+def test_webgpu_flag_preserves_unrelated_chromium_flags(monkeypatch):
+    monkeypatch.setenv(
+        "QTWEBENGINE_CHROMIUM_FLAGS",
+        "--no-sandbox --enable-features=Vulkan,TranslateUI --disable-features=Translate",
+    )
+
+    Settings.configure_webgpu(False)
+    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+    assert "--no-sandbox" in flags
+    assert "--enable-features=Vulkan,TranslateUI" in flags
+    assert "--disable-features=Translate,WebGPU" in flags
+
+    Settings.configure_webgpu(True)
+    flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+    assert "--no-sandbox" in flags
+    assert "--enable-features=Vulkan,TranslateUI" in flags
+    assert "--disable-features=Translate" in flags
+    assert not any("WebGPU" in flag for flag in flags)

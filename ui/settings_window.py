@@ -7,7 +7,8 @@ import os
 import re
 import sys
 
-from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QVariantAnimation, QTimer
+from PySide6.QtCore import QEvent, QEasingCurve, Qt, QPropertyAnimation, QVariantAnimation, QTimer, QRectF
+from PySide6.QtGui import QColor, QPainter, QLinearGradient
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,10 +32,137 @@ from PySide6.QtWidgets import (
     QSizePolicy,
 )
 
+import qtawesome as qta
+
 from managers.history_manager import History
 from .history_window import HistoryWindow
 from .settings import Settings, default_download_directory
-from managers.dashboard_manager import PRESETS, DashboardManager
+from managers.dashboard_manager import PRESETS, DEFAULTS as DASHBOARD_DEFAULTS, DashboardManager
+
+
+
+
+class ThemeSwitch(QCheckBox):
+    """Compact, keyboard-accessible sun/moon switch with pointer dragging."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("themeSwitch")
+        self.setText("Dark theme")
+        self.setAccessibleName("Dark theme")
+        self.setAccessibleDescription("Drag to switch between light and dark appearance.")
+        self.setToolTip("Drag or click to change the browser theme")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setFixedSize(68, 36)
+
+        self._position = 1.0 if self.isChecked() else 0.0
+        self._press_x = 0.0
+        self._dragging = False
+        self._animation = QVariantAnimation(self)
+        self._animation.setDuration(170)
+        self._animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._animation.valueChanged.connect(self._set_position)
+        self.toggled.connect(self._animate_to_state)
+
+    def _set_position(self, value) -> None:
+        self._position = max(0.0, min(1.0, float(value)))
+        self.update()
+
+    def _animate_to_state(self, checked: bool) -> None:
+        self._animation.stop()
+        self._animation.setStartValue(self._position)
+        self._animation.setEndValue(1.0 if checked else 0.0)
+        self._animation.start()
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+        dark = self.isChecked()
+        track = QRectF(1.0, 1.0, self.width() - 2.0, self.height() - 2.0)
+        gradient = QLinearGradient(track.topLeft(), track.bottomRight())
+        if dark:
+            gradient.setColorAt(0.0, QColor("#344b68"))
+            gradient.setColorAt(1.0, QColor("#202d40"))
+            border = QColor("#536b8a")
+        else:
+            gradient.setColorAt(0.0, QColor("#e9f0fa"))
+            gradient.setColorAt(1.0, QColor("#d6e2f2"))
+            border = QColor("#c7d5e8")
+
+        painter.setPen(border)
+        painter.setBrush(gradient)
+        painter.drawRoundedRect(track, track.height() / 2.0, track.height() / 2.0)
+
+        diameter = 28.0
+        travel = self.width() - diameter - 8.0
+        thumb_x = 4.0 + self._position * travel
+        thumb = QRectF(thumb_x, 4.0, diameter, diameter)
+
+        shadow = QRectF(thumb)
+        shadow.translate(0.0, 1.0)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(15, 26, 42, 30))
+        painter.drawEllipse(shadow)
+
+        painter.setPen(QColor("#ffffff") if not dark else QColor("#9ec6ff"))
+        painter.setBrush(QColor("#ffffff") if not dark else QColor("#79a9eb"))
+        painter.drawEllipse(thumb)
+
+        icon_name = "fa5s.moon" if dark else "fa5s.sun"
+        icon_color = "#ffffff" if dark else "#c58a16"
+        icon_pixmap = qta.icon(icon_name, color=icon_color).pixmap(16, 16)
+        painter.drawPixmap(
+            int(thumb.center().x() - icon_pixmap.width() / 2),
+            int(thumb.center().y() - icon_pixmap.height() / 2),
+            icon_pixmap,
+        )
+
+        if self.hasFocus():
+            painter.setBrush(Qt.NoBrush)
+            painter.setPen(QColor("#6195e2") if not dark else QColor("#8db8ff"))
+            painter.drawRoundedRect(
+                QRectF(0.5, 0.5, self.width() - 1.0, self.height() - 1.0),
+                self.height() / 2.0,
+                self.height() / 2.0,
+            )
+        painter.end()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._animation.stop()
+            self._press_x = event.position().x()
+            self._dragging = False
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if event.buttons() & Qt.LeftButton:
+            current_x = event.position().x()
+            if abs(current_x - self._press_x) > 3.0:
+                self._dragging = True
+            if self._dragging:
+                diameter = 28.0
+                travel = max(1.0, self.width() - diameter - 8.0)
+                self._set_position((current_x - diameter / 2.0 - 4.0) / travel)
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            if self._dragging:
+                checked = self._position >= 0.5
+            else:
+                checked = not self.isChecked()
+            self.setChecked(checked)
+            self._dragging = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class SmoothScrollArea(QScrollArea):
@@ -117,10 +245,13 @@ class SettingsWindow(QDialog):
 
         self.section_list = QListWidget()
         self.section_list.setObjectName("settingsNav")
-        self.section_list.setFixedWidth(172)
-        self.section_list.setSpacing(3)
+        self.section_list.setFixedWidth(190)
+        self.section_list.setSpacing(4)
+        self.section_list.setLayoutDirection(Qt.LeftToRight)
         self.section_list.setAccessibleName("Settings sections")
-        content.addWidget(self.section_list)
+        content.setContentsMargins(0, 0, 0, 0)
+        content.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        content.addWidget(self.section_list, 0, Qt.AlignLeft)
 
         self.pages = QStackedWidget()
         self.pages.setObjectName("settingsPages")
@@ -299,11 +430,28 @@ class SettingsWindow(QDialog):
             "Appearance",
             "Choose the browser theme. The change is applied as soon as you save.",
         )
-        self.dark_mode_checkbox = QCheckBox("Use the dark theme")
-        self.dark_mode_checkbox.setChecked(self.settings.dark_mode)
         card_layout.setContentsMargins(18, 18, 18, 18)
-        card_layout.addWidget(self.dark_mode_checkbox)
-        card_layout.addWidget(self._note("The theme applies to the browser controls and its built-in dialogs."))
+
+        theme_row = QHBoxLayout()
+        theme_row.setSpacing(16)
+        theme_copy = QVBoxLayout()
+        theme_copy.setSpacing(4)
+        theme_title = QLabel("Appearance mode")
+        theme_title.setObjectName("settingsSectionTitle")
+        theme_description = QLabel("Light by day, dark when you need less glare.")
+        theme_description.setObjectName("settingsSectionDescription")
+        theme_description.setWordWrap(True)
+        theme_copy.addWidget(theme_title)
+        theme_copy.addWidget(theme_description)
+        theme_row.addLayout(theme_copy, 1)
+
+        self.dark_mode_checkbox = ThemeSwitch()
+        self.dark_mode_checkbox.setChecked(self.settings.dark_mode)
+        theme_row.addWidget(self.dark_mode_checkbox, 0, Qt.AlignVCenter)
+        card_layout.addLayout(theme_row)
+        card_layout.addWidget(
+            self._note("The theme applies to browser controls and built-in dialogs.")
+        )
         card_layout.addStretch(1)
 
     def _add_dashboard_page(self) -> None:
@@ -323,10 +471,18 @@ class SettingsWindow(QDialog):
         self.dashboard_seconds_checkbox.setChecked(bool(data.get("show_seconds", False)))
         self.dashboard_animations_checkbox = QCheckBox("Use subtle dashboard motion")
         self.dashboard_animations_checkbox.setChecked(bool(data.get("animations", True)))
+        self.dashboard_density_combo = QComboBox()
+        self.dashboard_density_combo.addItem("Comfortable", "comfortable")
+        self.dashboard_density_combo.addItem("Compact", "compact")
+        self.dashboard_density_combo.setCurrentIndex(
+            max(0, self.dashboard_density_combo.findData(data.get("density", "comfortable")))
+        )
         card_layout.addWidget(QLabel("Clock format"))
         card_layout.addWidget(self.dashboard_clock_combo)
         card_layout.addWidget(self.dashboard_seconds_checkbox)
         card_layout.addWidget(self.dashboard_animations_checkbox)
+        card_layout.addWidget(QLabel("Dashboard density"))
+        card_layout.addWidget(self.dashboard_density_combo)
 
         self.dashboard_overlay_slider = QSlider(Qt.Horizontal)
         self.dashboard_overlay_slider.setRange(0, 70)
@@ -358,6 +514,30 @@ class SettingsWindow(QDialog):
         card_layout.addWidget(self.dashboard_blur_label)
         card_layout.addWidget(self.dashboard_blur_slider)
 
+        self.dashboard_focus_slider = QSlider(Qt.Horizontal)
+        self.dashboard_focus_slider.setRange(1, 180)
+        self.dashboard_focus_slider.setValue(int(data.get("focus_minutes", 25)))
+        self.dashboard_focus_label = QLabel(
+            f"Focus session: {self.dashboard_focus_slider.value()} min"
+        )
+        self.dashboard_focus_slider.valueChanged.connect(
+            lambda value: self.dashboard_focus_label.setText(f"Focus session: {value} min")
+        )
+        card_layout.addWidget(self.dashboard_focus_label)
+        card_layout.addWidget(self.dashboard_focus_slider)
+
+        self.dashboard_break_slider = QSlider(Qt.Horizontal)
+        self.dashboard_break_slider.setRange(1, 60)
+        self.dashboard_break_slider.setValue(int(data.get("break_minutes", 5)))
+        self.dashboard_break_label = QLabel(
+            f"Break length: {self.dashboard_break_slider.value()} min"
+        )
+        self.dashboard_break_slider.valueChanged.connect(
+            lambda value: self.dashboard_break_label.setText(f"Break length: {value} min")
+        )
+        card_layout.addWidget(self.dashboard_break_label)
+        card_layout.addWidget(self.dashboard_break_slider)
+
         self.dashboard_accent_input = QLineEdit(str(data.get("accent", "#8db8ff")))
         self.dashboard_accent_input.setObjectName("settingsInput")
         self.dashboard_accent_input.setMaxLength(7)
@@ -365,28 +545,95 @@ class SettingsWindow(QDialog):
         card_layout.addWidget(self.dashboard_accent_input)
 
         widgets = data.get("widgets", {})
+        widget_sizes = data.get("widget_sizes", {})
         self.dashboard_widget_checks = {}
+        self.dashboard_widget_size_combos = {}
+        card_layout.addWidget(QLabel("Widgets · visibility and size"))
+        card_layout.addWidget(self._note(
+            "Turn cards on or off here. On the start page, drag a card by its heading to change its position."
+        ))
         for key, label in (
-            ("bookmarks", "Show bookmarks"),
-            ("recent", "Show recently visited"),
-            ("closed", "Show recently closed"),
-            ("notes", "Show quick notes"),
-            ("focus", "Show focus timer"),
+            ("bookmarks", "Bookmarks"),
+            ("recent", "Recently visited"),
+            ("closed", "Recently closed"),
+            ("notes", "Quick notes"),
+            ("focus", "Focus timer"),
         ):
+            row = QWidget()
+            row.setObjectName("dashboardWidgetOptionRow")
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(12)
             checkbox = QCheckBox(label)
             checkbox.setChecked(bool(widgets.get(key, True)))
+            checkbox.setAccessibleName(f"Show {label.lower()} widget")
+            size_combo = QComboBox()
+            size_combo.setObjectName("dashboardWidgetSize")
+            size_combo.addItem("Compact", "compact")
+            size_combo.addItem("Standard", "standard")
+            size_combo.addItem("Wide", "wide")
+            size_combo.setCurrentIndex(max(
+                0, size_combo.findData(widget_sizes.get(key, "standard"))
+            ))
+            size_combo.setToolTip(f"Width of the {label.lower()} widget")
+            size_combo.setAccessibleName(f"{label} widget size")
+            row_layout.addWidget(checkbox, 1)
+            row_layout.addWidget(size_combo, 0)
             self.dashboard_widget_checks[key] = checkbox
-            card_layout.addWidget(checkbox)
+            self.dashboard_widget_size_combos[key] = size_combo
+            card_layout.addWidget(row)
+
+        self.dashboard_wallpaper_combo = QComboBox()
+        self.dashboard_wallpaper_combo.setObjectName("dashboardWallpaperCombo")
+        for key, preset in PRESETS.items():
+            self.dashboard_wallpaper_combo.addItem(preset["title"], key)
+        if self.dashboard is not None:
+            try:
+                saved_wallpapers = sorted(
+                    self.dashboard.wallpaper_dir.glob("*.jpg"),
+                    key=lambda path: path.name.casefold(),
+                )
+            except OSError:
+                saved_wallpapers = []
+            for wallpaper_path in saved_wallpapers:
+                wallpaper_key = f"file:{wallpaper_path.name}"
+                if self.dashboard_wallpaper_combo.findData(wallpaper_key) < 0:
+                    self.dashboard_wallpaper_combo.addItem(f"Imported · {wallpaper_path.stem}", wallpaper_key)
+        current_wallpaper = str(data.get("wallpaper", "aurora"))
+        if self.dashboard_wallpaper_combo.findData(current_wallpaper) < 0:
+            if current_wallpaper.startswith("file:"):
+                self.dashboard_wallpaper_combo.addItem("Imported image", current_wallpaper)
+            else:
+                current_wallpaper = "aurora"
+        self.dashboard_wallpaper_combo.setCurrentIndex(
+            max(0, self.dashboard_wallpaper_combo.findData(current_wallpaper))
+        )
+        self.dashboard_wallpaper_combo.currentIndexChanged.connect(
+            self._on_dashboard_wallpaper_changed
+        )
 
         wallpaper_row = QHBoxLayout()
-        self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(data.get("wallpaper", "aurora")))
-        self.dashboard_wallpaper_label.setWordWrap(True)
+        wallpaper_row.addWidget(self.dashboard_wallpaper_combo, 1)
         wallpaper_button = QPushButton("Choose image…")
         wallpaper_button.clicked.connect(self._browse_dashboard_wallpaper)
-        wallpaper_row.addWidget(self.dashboard_wallpaper_label, 1)
         wallpaper_row.addWidget(wallpaper_button)
+        card_layout.addWidget(QLabel("Wallpaper preset or saved image"))
         card_layout.addLayout(wallpaper_row)
-        card_layout.addWidget(self._note("Supported images are copied into this profile's dashboard storage. Use the dashboard itself to add, edit, or reorder shortcuts."))
+        self.dashboard_wallpaper_label = QLabel(self._wallpaper_label(current_wallpaper))
+        self.dashboard_wallpaper_label.setWordWrap(True)
+        card_layout.addWidget(self.dashboard_wallpaper_label)
+        card_layout.addWidget(self._note(
+            "Wallpaper images are copied into this profile. Widget visibility and size, clock, focus timer, "
+            "glass intensity, accent, dimming, blur, density and motion are saved together with browser settings."
+        ))
+        self.dashboard_reset_button = QPushButton("Restore dashboard defaults")
+        self.dashboard_reset_button.clicked.connect(self._reset_dashboard_preferences)
+        card_layout.addWidget(self.dashboard_reset_button)
+        self.dashboard_reset_note = self._note(
+            "Restoring defaults changes the controls in this dialog; choose Save changes to apply them. "
+            "Shortcuts and notes are preserved."
+        )
+        card_layout.addWidget(self.dashboard_reset_note)
         card_layout.addStretch(1)
 
     @staticmethod
@@ -396,6 +643,45 @@ class SettingsWindow(QDialog):
         if isinstance(key, str) and key.startswith("file:"):
             return "Current wallpaper: Imported image"
         return "Current wallpaper: Aurora"
+
+    def _on_dashboard_wallpaper_changed(self, _index: int) -> None:
+        self._wallpaper_source = None
+        if hasattr(self, "dashboard_wallpaper_label"):
+            self.dashboard_wallpaper_label.setText(
+                self._wallpaper_label(str(self.dashboard_wallpaper_combo.currentData() or "aurora"))
+            )
+
+    def _reset_dashboard_preferences(self) -> None:
+        """Restore dashboard presentation defaults without deleting shortcuts or notes."""
+        defaults = DASHBOARD_DEFAULTS
+        self._wallpaper_source = None
+        self.dashboard_wallpaper_combo.setCurrentIndex(
+            max(0, self.dashboard_wallpaper_combo.findData(defaults["wallpaper"]))
+        )
+        self.dashboard_clock_combo.setCurrentIndex(
+            max(0, self.dashboard_clock_combo.findData(defaults["clock_24h"]))
+        )
+        self.dashboard_seconds_checkbox.setChecked(defaults["show_seconds"])
+        self.dashboard_animations_checkbox.setChecked(defaults["animations"])
+        self.dashboard_density_combo.setCurrentIndex(
+            max(0, self.dashboard_density_combo.findData(defaults["density"]))
+        )
+        self.dashboard_overlay_slider.setValue(defaults["overlay"])
+        self.dashboard_glass_slider.setValue(defaults["glass"])
+        self.dashboard_blur_slider.setValue(defaults["blur"])
+        self.dashboard_focus_slider.setValue(defaults["focus_minutes"])
+        self.dashboard_break_slider.setValue(defaults["break_minutes"])
+        self.dashboard_accent_input.setText(defaults["accent"])
+        for key, checkbox in self.dashboard_widget_checks.items():
+            checkbox.setChecked(defaults["widgets"].get(key, True))
+        for key, combo in self.dashboard_widget_size_combos.items():
+            combo.setCurrentIndex(
+                max(0, combo.findData(defaults["widget_sizes"].get(key, "standard")))
+            )
+        self.dashboard_wallpaper_label.setText(self._wallpaper_label(defaults["wallpaper"]))
+        self.dashboard_reset_note.setText(
+            "Defaults restored in this dialog. Save changes to apply them; shortcuts and notes are preserved."
+        )
 
     def _browse_dashboard_wallpaper(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -437,8 +723,14 @@ class SettingsWindow(QDialog):
         self.hw_accel_checkbox = QCheckBox("Use hardware acceleration (restart required)")
         self.hw_accel_checkbox.setChecked(self.settings.hardware_acceleration)
         card_layout.addWidget(self.hw_accel_checkbox)
+        self.webgpu_checkbox = QCheckBox("Enable WebGPU (restart required)")
+        self.webgpu_checkbox.setChecked(self.settings.webgpu_enabled)
+        self.webgpu_checkbox.setToolTip(
+            "Enable Chromium WebGPU only if your graphics driver can create a WebGPU context."
+        )
+        card_layout.addWidget(self.webgpu_checkbox)
         card_layout.addWidget(
-            self._note("This setting takes effect after the browser restarts. Gaming mode temporarily pauses browser keyboard shortcuts.")
+            self._note("Graphics startup settings take effect after restarting the browser. Disable WebGPU to avoid repeated context-provider errors.")
         )
         card_layout.addStretch(1)
 
@@ -534,6 +826,7 @@ class SettingsWindow(QDialog):
             return
 
         old_hardware_acceleration = self.settings.hardware_acceleration
+        old_webgpu_enabled = self.settings.webgpu_enabled
         candidate = copy.copy(self.settings)
         candidate.homepage = homepage
         candidate.startup_page = str(self.startup_combo.currentData())
@@ -547,6 +840,7 @@ class SettingsWindow(QDialog):
         candidate.save_cookies = self.save_cookies_checkbox.isChecked()
         candidate.private_mode = self.private_mode_checkbox.isChecked()
         candidate.hardware_acceleration = self.hw_accel_checkbox.isChecked()
+        candidate.webgpu_enabled = self.webgpu_checkbox.isChecked()
 
         dashboard_values = None
         if self.dashboard is not None:
@@ -559,13 +853,21 @@ class SettingsWindow(QDialog):
                 "clock_24h": bool(self.dashboard_clock_combo.currentData()),
                 "show_seconds": self.dashboard_seconds_checkbox.isChecked(),
                 "animations": self.dashboard_animations_checkbox.isChecked(),
+                "density": str(self.dashboard_density_combo.currentData() or "comfortable"),
+                "wallpaper": str(self.dashboard_wallpaper_combo.currentData() or "aurora"),
                 "overlay": self.dashboard_overlay_slider.value(),
                 "glass": self.dashboard_glass_slider.value(),
                 "blur": self.dashboard_blur_slider.value(),
                 "accent": accent,
+                "focus_minutes": self.dashboard_focus_slider.value(),
+                "break_minutes": self.dashboard_break_slider.value(),
                 "widgets": {
                     key: checkbox.isChecked()
                     for key, checkbox in self.dashboard_widget_checks.items()
+                },
+                "widget_sizes": {
+                    key: combo.currentData()
+                    for key, combo in self.dashboard_widget_size_combos.items()
                 },
             }
             if self._wallpaper_source:
@@ -586,15 +888,29 @@ class SettingsWindow(QDialog):
             QMessageBox.critical(self, "Could not save settings", str(exc))
             return
 
+        if self.dashboard is not None and dashboard_values is not None:
+            parent = self.parent()
+            for method_name in ("_sync_dashboard_tabs", "_refresh_chrome_wallpaper"):
+                method = getattr(parent, method_name, None)
+                if callable(method):
+                    try:
+                        method()
+                    except (RuntimeError, TypeError, ValueError):
+                        # Persisted settings must survive a transient page refresh error.
+                        pass
+
         for name in (
             "homepage", "startup_page", "new_tab_page", "default_search_engine", "download_folder", "site_compatibility_mode",
             "proxy_panel_visible", "dark_mode",
-            "save_history", "save_cookies", "private_mode", "hardware_acceleration",
+            "save_history", "save_cookies", "private_mode", "hardware_acceleration", "webgpu_enabled",
         ):
             setattr(self.settings, name, getattr(candidate, name))
 
         if old_hardware_acceleration != candidate.hardware_acceleration:
             Settings.configure_hardware_acceleration(candidate.hardware_acceleration)
+            self.restart_required = True
+        if old_webgpu_enabled != candidate.webgpu_enabled:
+            Settings.configure_webgpu(candidate.webgpu_enabled)
             self.restart_required = True
 
         self.accept()

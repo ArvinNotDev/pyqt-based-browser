@@ -4,7 +4,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QSize, Qt, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QColor
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel, QProgressBar, QPushButton
@@ -14,12 +14,36 @@ from ui.bookmarks_dialog import BookmarksDialog
 from ui.downloads_dialog import DownloadsDialog
 from ui.navigation_bar import NavigationBar
 from ui.settings import Settings
+from ui.settings_window import ThemeSwitch
 from ui.themes import dark_theme, light_theme
 
 
 @pytest.fixture(scope="session")
 def qapp():
     return QApplication.instance() or QApplication([])
+
+
+def test_theme_switch_keeps_checkbox_state_and_changes_with_click(qapp):
+    switch = ThemeSwitch()
+    switch.setChecked(False)
+    switch.show()
+    qapp.processEvents()
+
+    assert switch.isChecked() is False
+    assert switch.accessibleName() == "Dark theme"
+    assert switch.toolTip()
+
+    QTest.mouseClick(switch, Qt.LeftButton, pos=QPoint(18, 18))
+    qapp.processEvents()
+    assert switch.isChecked() is True
+
+    QTest.mouseClick(switch, Qt.LeftButton, pos=QPoint(50, 18))
+    qapp.processEvents()
+    assert switch.isChecked() is False
+
+    switch.setChecked(True)
+    assert switch.isChecked() is True
+    switch.close()
 
 
 def test_navigation_bar_stays_fixed_when_entering_long_or_rtl_search(qapp):
@@ -196,45 +220,42 @@ def test_bookmark_activation_is_explicit_and_emits_once_for_keyboard_and_button(
     assert emitted == ["https://example.com"]
 
 
-def test_bookmark_bar_replaces_records_overflows_resizes_and_activates_by_keyboard(qapp):
+def test_bookmark_bar_uses_compact_dropdown_and_activates_saved_bookmarks(qapp):
     bar = BookmarksBar()
-    bar.resize(260, 38)
     bar.show()
+    records = [
+        bookmark(f"id-{i}", f"Bookmark {i}", f"https://example.com/{i}")
+        for i in range(8)
+    ]
+    bar.set_bookmarks(records)
     qapp.processEvents()
-    long_records = [bookmark(f"id-{i}", f"A long bookmark title number {i}", f"https://example.com/{i}") for i in range(8)]
-    bar.set_bookmarks(long_records)
-    qapp.processEvents()
-    assert bar.more_button.isVisible()
-    assert bar._more_menu.actions()
+
+    assert bar.objectName() == "bookmarkMenuButton"
+    assert bar.menu() is bar._more_menu
+    assert len(bar.bookmark_actions) == len(records)
+    assert bar._more_menu.actions()[-1].text() == "Manage bookmarks…"
 
     emitted = []
     bar.url_activated.connect(emitted.append)
-    overflow_action = bar._more_menu.actions()[0]
-    overflow_action.trigger()
-    overflow_url = overflow_action.toolTip()
-    assert emitted == [overflow_url]
-
-    bar.resize(2200, 38)
-    qapp.processEvents()
-    assert not bar.more_button.isVisible()
-    mouse_url = bar._bookmarks[0]["url"]
-    QTest.mouseClick(bar._buttons[0], Qt.LeftButton)
-    assert emitted == [overflow_url, mouse_url]
+    first_action = bar.bookmark_actions[0]
+    first_action.trigger()
+    assert emitted == ["https://example.com/0"]
 
     manage_requests = []
     bar.manage_requested.connect(lambda: manage_requests.append(True))
-    QTest.mouseClick(bar.manage_button, Qt.LeftButton)
+    bar._manage_action.trigger()
     assert manage_requests == [True]
 
     bar.set_bookmarks([bookmark("new", "Updated", "https://updated.example")])
-    qapp.processEvents()
-    assert len(bar._buttons) == 1
-    bar._buttons[0].setFocus()
-    QTest.keyClick(bar._buttons[0], Qt.Key_Space)
-    assert emitted == [overflow_url, mouse_url, "https://updated.example"]
+    assert len(bar.bookmark_actions) == 1
+    bar.bookmark_actions[0].trigger()
+    assert emitted == ["https://example.com/0", "https://updated.example"]
 
     bar.set_bookmarks([])
-    assert bar.empty_label.isVisible()
+    assert any(
+        action.text() == "No bookmarks yet" and not action.isEnabled()
+        for action in bar._more_menu.actions()
+    )
 
 
 def test_download_dialog_maps_all_manager_states_and_actions(qapp, tmp_path):
@@ -368,6 +389,7 @@ def _contrast(foreground, background):
         (light_theme, "#3f4752", "#f7f8fa"),
         (dark_theme, "#c7ced8", "#1b1e23"),
     ],
+    ids=("light-theme", "dark-theme"),
 )
 def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreground, background):
     qapp.setStyleSheet(stylesheet)
@@ -388,6 +410,19 @@ def test_theme_styles_dialogs_and_toolbar_glyph_contrast(qapp, stylesheet, foreg
     assert QColor(foreground).isValid() and QColor(background).isValid()
     assert _contrast(foreground, background) >= 4.5
     assert dialog.table.rowCount() == 1
-    assert bar._buttons[0].accessibleName() == "Open bookmark: Example"
+    assert bar.bookmark_actions[0].text() == "Example"
     dialog.close()
     qapp.setStyleSheet("")
+
+
+
+def test_theme_toggle_is_not_a_navigation_header_control(qapp):
+    navbar = NavigationBar(["Guest"], settings=Settings())
+
+    assert not hasattr(navbar, "theme_btn")
+    assert not hasattr(navbar, "theme_toggle_requested")
+    assert navbar.settings_btn in navbar.browser_menu.actions()
+
+    navbar.close()
+    navbar.deleteLater()
+    qapp.processEvents()

@@ -11,6 +11,7 @@ from PySide6.QtWebEngineCore import (
 DASHBOARD_SCHEME = b"arma"
 DASHBOARD_URL = "arma://dashboard/"
 DASHBOARD_DEFAULT_PORT = 443
+INTERNAL_PAGE_HOSTS = frozenset({"dashboard", "bookmarks", "settings", "history", "downloads", "profile"})
 _scheme_registered = False
 
 
@@ -28,6 +29,7 @@ def register_dashboard_scheme() -> None:
     scheme.setFlags(
         QWebEngineUrlScheme.Flag.SecureScheme
         | QWebEngineUrlScheme.Flag.LocalScheme
+        | QWebEngineUrlScheme.Flag.LocalAccessAllowed
     )
     QWebEngineUrlScheme.registerScheme(scheme)
     _scheme_registered = True
@@ -51,17 +53,22 @@ class DashboardSchemeHandler(QWebEngineUrlSchemeHandler):
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
         request = job.requestUrl()
-        if request.host().lower() != "dashboard":
+        host = request.host().lower()
+        if host not in INTERNAL_PAGE_HOSTS:
             job.fail(QWebEngineUrlRequestJob.Error.RequestDenied)
             return
         path = request.path()
         if path in {"", "/", "/index.html"}:
             try:
-                self._reply(job, b"text/html; charset=utf-8", self.browser._dashboard_document())
-            except (OSError, RuntimeError):
+                if host == "dashboard":
+                    document = self.browser._dashboard_document()
+                else:
+                    document = self.browser._internal_page_document(host)
+                self._reply(job, b"text/html; charset=utf-8", document)
+            except (OSError, RuntimeError, ValueError):
                 job.fail(QWebEngineUrlRequestJob.Error.RequestFailed)
             return
-        if path.startswith("/wallpaper/"):
+        if host == "dashboard" and path.startswith("/wallpaper/"):
             filename = path.rsplit("/", 1)[-1]
             manager = getattr(self.browser, "dashboard_manager", None)
             content = manager.read_wallpaper(filename) if manager is not None else None

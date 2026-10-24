@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 import re
+import time
+from datetime import datetime
 from copy import deepcopy
 from pathlib import Path
 from threading import Lock
@@ -46,6 +48,8 @@ class DownloadManager(QObject):
         self._downloads: list[dict[str, Any]] = []
         self._requests: dict[str, Any] = {}
         self._request_signal_slots: dict[str, list[tuple[Any, Any]]] = {}
+        self._speed_clock: dict[str, tuple[float, int]] = {}
+        self._download_started_monotonic: dict[str, float] = {}
         self._closed = False
         self._profile: Any = None
         self._attached_profile_download_path: str | None = None
@@ -135,6 +139,11 @@ class DownloadManager(QObject):
         return str(value or "")
 
     @staticmethod
+    def _timestamp_now() -> str:
+        """Return a local, timezone-aware timestamp suitable for download details."""
+        return datetime.now().astimezone().isoformat(timespec="seconds")
+
+    @staticmethod
     def _safe_file_name(suggested: str, url: str) -> str:
         raw_name = os.path.basename(str(suggested or "").replace("\\", "/"))
         if not raw_name or raw_name in {".", ".."}:
@@ -219,6 +228,11 @@ class DownloadManager(QObject):
                 "state": "requested",
                 "paused": False,
                 "error": "",
+                "requested_at": self._timestamp_now(),
+                "started_at": "",
+                "finished_at": "",
+                "speed_bytes_per_sec": 0.0,
+                "speed_samples": [],
             }
             source_page = self._request_value(request, "page", None)
             self._downloads.append(record)
@@ -257,10 +271,19 @@ class DownloadManager(QObject):
                     "total_bytes": -1,
                     "state": "failed",
                     "error": str(exc),
+                    "requested_at": self._timestamp_now(),
+                    "started_at": "",
+                    "finished_at": self._timestamp_now(),
+                    "speed_bytes_per_sec": 0.0,
+                    "speed_samples": [],
                 })
             else:
                 failed["state"] = "failed"
                 failed["error"] = str(exc)
+                failed["finished_at"] = failed.get("finished_at") or self._timestamp_now()
+                failed["speed_bytes_per_sec"] = 0.0
+            self._speed_clock.pop(download_id, None)
+            self._download_started_monotonic.pop(download_id, None)
             self.downloads_changed.emit()
 
     def _refresh(self, download_id: str) -> None:
@@ -270,12 +293,15 @@ class DownloadManager(QObject):
         record = next((item for item in self._downloads if item["id"] == download_id), None)
         if request is None or record is None:
             return
+        previous_state = record["state"]
         previous = (
             record["received_bytes"],
             record["total_bytes"],
             record["state"],
             record.get("paused", False),
             record["error"],
+            record.get("speed_bytes_per_sec", 0.0),
+            len(record.get("speed_samples", [])),
         )
         received = self._request_value(request, "receivedBytes", record["received_bytes"])
         total = self._request_value(request, "totalBytes", record["total_bytes"])
@@ -287,11 +313,66 @@ class DownloadManager(QObject):
             record["total_bytes"] = int(total)
         except (TypeError, ValueError):
             pass
+
+        now = time.monotonic()
         record["state"] = self._state_name(request)
         record["paused"] = bool(self._request_value(request, "isPaused", False))
-        if record["state"] == "failed":
+        state = record["state"]
+        received_bytes = record["received_bytes"]
+        samples = record.setdefault("speed_samples", [])
+
+        if state == "downloading":
+            if not record.get("started_at"):
+                record["started_at"] = self._timestamp_now()
+                self._download_started_monotonic[download_id] = now
+            self._download_started_monotonic.setdefault(download_id, now)
+            if not samples:
+                samples.append({"elapsed_seconds": 0.0, "bytes_per_second": 0.0})
+
+            previous_sample = self._speed_clock.get(download_id)
+            if record["paused"]:
+                record["speed_bytes_per_sec"] = 0.0
+                self._speed_clock[download_id] = (now, received_bytes)
+            elif previous_sample is None:
+                self._speed_clock[download_id] = (now, received_bytes)
+            else:
+                elapsed = now - previous_sample[0]
+                if elapsed >= 0.2:
+                    delta = max(0, received_bytes - previous_sample[1])
+                    speed = delta / max(elapsed, 0.001)
+                    record["speed_bytes_per_sec"] = speed
+                    elapsed_from_start = max(
+                        0.0, now - self._download_started_monotonic.get(download_id, now)
+                    )
+                    samples.append({
+                        "elapsed_seconds": round(elapsed_from_start, 2),
+                        "bytes_per_second": round(speed, 1),
+                    })
+                    if len(samples) > 90:
+                        del samples[:-90]
+                    self._speed_clock[download_id] = (now, received_bytes)
+            record["finished_at"] = ""
+        else:
+            record["speed_bytes_per_sec"] = 0.0
+            if state in self._TERMINAL_STATES:
+                if state == "completed" and not record.get("started_at"):
+                    record["started_at"] = record.get("requested_at", "")
+                if not record.get("finished_at"):
+                    record["finished_at"] = self._timestamp_now()
+                if previous_state not in self._TERMINAL_STATES:
+                    started = self._download_started_monotonic.get(download_id, now)
+                    samples.append({
+                        "elapsed_seconds": round(max(0.0, now - started), 2),
+                        "bytes_per_second": 0.0,
+                    })
+                    if len(samples) > 90:
+                        del samples[:-90]
+                self._speed_clock.pop(download_id, None)
+                self._download_started_monotonic.pop(download_id, None)
+
+        if state == "failed":
             record["error"] = str(self._request_value(request, "interruptReasonString", "") or "Download interrupted")
-        elif record["state"] in {"downloading", "completed", "cancelled"}:
+        elif state in {"downloading", "completed", "cancelled"}:
             record["error"] = ""
         current = (
             record["received_bytes"],
@@ -299,8 +380,10 @@ class DownloadManager(QObject):
             record["state"],
             record.get("paused", False),
             record["error"],
+            record.get("speed_bytes_per_sec", 0.0),
+            len(record.get("speed_samples", [])),
         )
-        if record["state"] in self._TERMINAL_STATES:
+        if state in self._TERMINAL_STATES:
             self._requests.pop(download_id, None)
             self._disconnect_request_signals(download_id)
         if current != previous:
@@ -336,6 +419,8 @@ class DownloadManager(QObject):
             if record is not None and record["state"] not in self._TERMINAL_STATES:
                 record["state"] = "cancelled"
                 record["error"] = ""
+                record["finished_at"] = record.get("finished_at") or self._timestamp_now()
+                record["speed_bytes_per_sec"] = 0.0
         self._requests.clear()
 
     def get_downloads(self) -> list[dict]:
@@ -352,12 +437,20 @@ class DownloadManager(QObject):
             if record["state"] not in self._TERMINAL_STATES:
                 record["error"] = str(exc)
                 record["state"] = "failed"
+                record["finished_at"] = record.get("finished_at") or self._timestamp_now()
+                record["speed_bytes_per_sec"] = 0.0
+                self._speed_clock.pop(download_id, None)
+                self._download_started_monotonic.pop(download_id, None)
                 self._requests.pop(download_id, None)
                 self.downloads_changed.emit()
             return False
         if record["state"] not in self._TERMINAL_STATES:
             record["state"] = "cancelled"
             record["error"] = ""
+            record["finished_at"] = record.get("finished_at") or self._timestamp_now()
+            record["speed_bytes_per_sec"] = 0.0
+            self._speed_clock.pop(download_id, None)
+            self._download_started_monotonic.pop(download_id, None)
             self._requests.pop(download_id, None)
             self.downloads_changed.emit()
         return record["state"] == "cancelled"

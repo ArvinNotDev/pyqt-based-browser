@@ -1,17 +1,11 @@
-"""Compact, overflow-aware bookmarks strip for a browser window."""
+"""Compact dropdown menu for saved bookmarks in the browser toolbar."""
 
 import logging
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QFontMetrics
-from PySide6.QtWidgets import (
-    QHBoxLayout,
-    QLabel,
-    QMenu,
-    QSizePolicy,
-    QToolButton,
-    QWidget,
-)
+from PySide6.QtCore import QPoint, QSize, Qt, Signal
+from PySide6.QtWidgets import QMenu, QToolButton
+
+import qtawesome as qta
 
 from ._manager_ui import normalize_bookmark
 
@@ -20,6 +14,8 @@ logger = logging.getLogger(__name__)
 
 
 class BookmarkOverflowMenu(QMenu):
+    """Bookmark menu that forwards context actions to the browser window."""
+
     bookmark_context_requested = Signal(dict, QPoint)
 
     def contextMenuEvent(self, event):
@@ -32,70 +28,42 @@ class BookmarkOverflowMenu(QMenu):
         super().contextMenuEvent(event)
 
 
-class BookmarksBar(QWidget):
+class BookmarksBar(QToolButton):
+    """Toolbar button that opens bookmarks in a clean, compact menu."""
+
     url_activated = Signal(str)
     manage_requested = Signal()
     bookmark_context_requested = Signal(dict, QPoint)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName("BookmarksBar")
-        self.setFixedHeight(38)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setObjectName("bookmarkMenuButton")
+        self.setText("Bookmarks")
+        self.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.setIconSize(QSize(14, 14))
+        self.setIcon(qta.icon("fa5s.bookmark", color="#53647c"))
+        self.setFixedHeight(30)
+        self.setMinimumWidth(100)
+        self.setMaximumWidth(126)
+        self.setToolTip("Open saved bookmarks")
+        self.setAccessibleName("Saved bookmarks")
+        self.setFocusPolicy(Qt.StrongFocus)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setPopupMode(QToolButton.InstantPopup)
+
         self._bookmarks = []
-        self._buttons = []
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 2, 8, 2)
-        layout.setSpacing(4)
-
-        self.heading = QLabel("Bookmarks", self)
-        self.heading.setObjectName("bookmarksHeading")
-        self.heading.setFixedWidth(72)
-        self.heading.setAccessibleName("Bookmarks")
-        layout.addWidget(self.heading)
-
-        self.empty_label = QLabel("No bookmarks yet", self)
-        self.empty_label.setObjectName("bookmarksEmpty")
-        self.empty_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        layout.addWidget(self.empty_label, 1)
-
-        # Keep the actions anchored at the trailing edge as bookmark buttons are
-        # inserted and removed. The flexible space belongs after the bookmarks.
-        layout.addStretch(1)
-
+        self._bookmark_actions = []
         self._more_menu = BookmarkOverflowMenu(self)
+        self._more_menu.setObjectName("bookmarksPopupMenu")
         self._more_menu.bookmark_context_requested.connect(self.bookmark_context_requested)
-        self.more_button = QToolButton(self)
-        self.more_button.setObjectName("bookmarkMore")
-        self.more_button.setText("More ▾")
-        self.more_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.more_button.setToolTip("Show bookmarks that do not fit in the bar")
-        self.more_button.setAccessibleName("More bookmarks")
-        self.more_button.setPopupMode(QToolButton.InstantPopup)
-        self.more_button.setFixedWidth(72)
-        self.more_button.setMenu(self._more_menu)
-        self.more_button.hide()
-        layout.addWidget(self.more_button)
-
-        self.manage_button = QToolButton(self)
-        self.manage_button.setObjectName("bookmarkManage")
-        self.manage_button.setText("Manage")
-        self.manage_button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-        self.manage_button.setToolTip("Manage bookmarks")
-        self.manage_button.setAccessibleName("Manage bookmarks")
-        self.manage_button.setFixedWidth(68)
-        self.manage_button.clicked.connect(self.manage_requested.emit)
-        layout.addWidget(self.manage_button)
-        self._layout = layout
+        self.setMenu(self._more_menu)
+        self.set_bookmarks([])
 
     def set_bookmarks(self, items):
-        """Replace the visible records; malformed entries are safely omitted."""
-        for button in self._buttons:
-            self._layout.removeWidget(button)
-            button.deleteLater()
-        self._buttons.clear()
+        """Replace menu entries, safely omitting malformed bookmark records."""
+        self._more_menu.clear()
         self._bookmarks = []
+        self._bookmark_actions = []
         invalid_count = 0
 
         try:
@@ -105,6 +73,7 @@ class BookmarksBar(QWidget):
         except TypeError:
             records = []
             invalid_count = 1
+
         for item in records:
             try:
                 normalized = normalize_bookmark(item)
@@ -115,79 +84,51 @@ class BookmarksBar(QWidget):
             if normalized is None:
                 invalid_count += 1
                 continue
+
+            normalized = dict(normalized)
             self._bookmarks.append(normalized)
-            title = normalized["title"]
-            display = QFontMetrics(self.font()).elidedText(title, Qt.ElideRight, 150)
-            button = QToolButton(self)
-            button.setObjectName("bookmarkItem")
-            button.setText(display)
-            button.setToolButtonStyle(Qt.ToolButtonTextOnly)
-            button.setToolTip(f"{title}\n{normalized['url']}")
-            button.setAccessibleName(f"Open bookmark: {title}")
-            button.setFocusPolicy(Qt.StrongFocus)
-            button.setCursor(Qt.PointingHandCursor)
-            button.setContextMenuPolicy(Qt.CustomContextMenu)
-            width = max(64, min(172, QFontMetrics(button.font()).horizontalAdvance(display) + 22))
-            button.setFixedWidth(width)
-            button.clicked.connect(lambda checked=False, url=normalized["url"]: self.url_activated.emit(url))
-            button.customContextMenuRequested.connect(
-                lambda pos, item=dict(normalized), target=button:
-                    self.bookmark_context_requested.emit(item, target.mapToGlobal(pos))
+            action = self._more_menu.addAction(qta.icon("fa5s.bookmark", color="#53647c"), normalized["title"])
+            action.setToolTip(normalized["url"])
+            action.setStatusTip(normalized["url"])
+            action.setData(normalized)
+            action.triggered.connect(
+                lambda checked=False, url=normalized["url"]: self.url_activated.emit(url)
             )
-            self._buttons.append(button)
-            self._layout.insertWidget(self._layout.count() - 3, button)
+            self._bookmark_actions.append(action)
 
-        self.empty_label.setVisible(not self._bookmarks)
-        if invalid_count and not self._bookmarks:
-            self.empty_label.setText("No usable bookmarks")
-        else:
-            self.empty_label.setText("No bookmarks yet")
+        if not self._bookmarks:
+            empty_action = self._more_menu.addAction(
+                qta.icon("fa5s.bookmark", color="#8c99ab"), "No bookmarks yet"
+            )
+            empty_action.setEnabled(False)
+
+        self._more_menu.addSeparator()
+        self._manage_action = self._more_menu.addAction(
+            qta.icon("fa5s.list", color="#53647c"), "Manage bookmarks…"
+        )
+        self._manage_action.setToolTip("Open the bookmark manager")
+        self._manage_action.triggered.connect(
+            lambda checked=False: self.manage_requested.emit()
+        )
+
         if invalid_count:
-            self.setToolTip(f"Skipped {invalid_count} invalid bookmark record(s).")
+            self.setToolTip(f"Open saved bookmarks ({invalid_count} invalid record(s) skipped)")
         else:
-            self.setToolTip("")
-        self._layout_visible_items()
+            self.setToolTip("Open saved bookmarks")
 
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self._layout_visible_items()
+    @property
+    def bookmark_actions(self):
+        """Return current bookmark actions for accessibility and UI tests."""
+        return tuple(self._bookmark_actions)
 
-    def _layout_visible_items(self):
-        if not hasattr(self, "_buttons"):
-            return
-        self.heading.setVisible(self.width() >= 450)
-        self.empty_label.setVisible(not self._bookmarks)
-        if not self._buttons:
-            self.more_button.hide()
-            self._more_menu.clear()
-            return
-
-        heading_width = self.heading.width() if self.width() >= 450 else 0
-        fixed_width = heading_width + self.manage_button.width() + 3 * self._layout.spacing()
-        available = max(0, self.contentsRect().width() - fixed_width)
-        total_width = sum(button.width() for button in self._buttons)
-        spacing = self._layout.spacing()
-        overflow = total_width + spacing * max(0, len(self._buttons) - 1) > available
-        if overflow:
-            available = max(0, available - self.more_button.width() - spacing)
-
-        visible = []
-        used = 0
-        for button in self._buttons:
-            next_width = button.width() + (spacing if visible else 0)
-            if used + next_width > available:
-                break
-            visible.append(button)
-            used += next_width
-
-        for button in self._buttons:
-            button.setVisible(button in visible)
-
-        overflow_items = self._bookmarks[len(visible):]
-        self.more_button.setVisible(bool(overflow_items))
-        self._more_menu.clear()
-        for item in overflow_items:
-            action = self._more_menu.addAction(item["title"])
-            action.setToolTip(item["url"])
-            action.setData(dict(item))
-            action.triggered.connect(lambda checked=False, url=item["url"]: self.url_activated.emit(url))
+    def apply_icon_theme(self, dark: bool) -> None:
+        """Tint menu icons to maintain contrast in either browser theme."""
+        color = "#c7d4e6" if dark else "#53647c"
+        self.setIcon(qta.icon("fa5s.bookmark", color=color))
+        for action in self._bookmark_actions:
+            action.setIcon(qta.icon("fa5s.bookmark", color=color))
+        if not self._bookmarks:
+            for action in self._more_menu.actions():
+                if action.text() == "No bookmarks yet":
+                    action.setIcon(qta.icon("fa5s.bookmark", color="#8492a6"))
+        self._manage_action.setIcon(qta.icon("fa5s.list", color=color))

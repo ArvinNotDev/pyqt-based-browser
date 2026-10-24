@@ -2,6 +2,11 @@ import os
 import re
 import time
 import json
+import copy
+import base64
+import shutil
+import ctypes
+from ctypes import wintypes
 import logging
 import heapq
 import sys
@@ -11,22 +16,25 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from PySide6.QtCore import (
-    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QPropertyAnimation, QProcess,
+    QEvent, Qt, QUrl, QUrlQuery, QTimer, Signal, QPoint, QRect, QRectF, QSize, QPropertyAnimation, QProcess,
     QVariantAnimation, QEasingCurve,
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QProgressBar, QFrame, QSizePolicy,
-    QScrollArea, QGraphicsOpacityEffect, QDockWidget, QInputDialog,
-    QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog
+    QAbstractButton, QPushButton, QToolButton, QLabel, QProgressBar, QFrame, QSizePolicy,
+    QScrollArea, QGraphicsOpacityEffect, QInputDialog,
+    QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
-from PySide6.QtGui import QPixmap, QAction, QKeySequence, QFontMetrics, QDesktopServices
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap, QImage, QIcon, QAction, QKeySequence, QFontMetrics, QDesktopServices, QCursor
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings, QWebEngineLoadingInfo
 from PySide6.QtWebEngineCore import QWebEngineFullScreenRequest
 from PySide6.QtWebChannel import QWebChannel
 
+import qtawesome as qta
+
 from .settings import Settings
+from .history_swipe import HistorySwipeController
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
 from .title_bar import CustomTitleBar, ResizeHandle
@@ -35,10 +43,16 @@ from .downloads_panel import DownloadsPanel
 from .dashboard.internal_page import (
     DASHBOARD_SCHEME,
     DASHBOARD_URL,
+    INTERNAL_PAGE_HOSTS,
     DashboardSchemeHandler,
     register_dashboard_scheme,
 )
+# Custom URL schemes must be registered before QApplication/QWebEngine profiles exist.
+register_dashboard_scheme()
+from .internal_pages import render_internal_page
 from managers.history_manager import History
+from managers.storage import profile_data_path
+from app_paths import user_data_path
 from managers.dashboard_manager import DashboardManager
 from .dashboard.bridge import DashboardBridge
 from .themes import light_theme, dark_theme
@@ -68,21 +82,123 @@ except ModuleNotFoundError as exc:
         raise
     BookmarksBar = None
 
-try:
-    from .bookmarks_dialog import BookmarksDialog
-except ModuleNotFoundError as exc:
-    if exc.name != "ui.bookmarks_dialog":
-        raise
-    BookmarksDialog = None
-
-TAB_WIDTH = 160
-MIN_TAB_WIDTH = 112
-MAX_TAB_WIDTH = 220
-TAB_HEIGHT = 38
-TAB_SPACING = 4
-SCROLL_STEP = 140
 logger = logging.getLogger(__name__)
-register_dashboard_scheme()
+
+TAB_WIDTH = 150
+MIN_TAB_WIDTH = 92
+MAX_TAB_WIDTH = 198
+TAB_HEIGHT = 30
+TAB_SPACING = 4
+SCROLL_STEP = 220
+
+# Keep Qt's custom frameless chrome while restoring native Windows resizing and
+# snap capabilities that Qt normally removes with FramelessWindowHint.
+_WIN_GWL_STYLE = -16
+_WIN_WS_CAPTION = 0x00C00000
+_WIN_WS_SYSMENU = 0x00080000
+_WIN_WS_THICKFRAME = 0x00040000
+_WIN_WS_MINIMIZEBOX = 0x00020000
+_WIN_WS_MAXIMIZEBOX = 0x00010000
+_WIN_SWP_NOSIZE = 0x0001
+_WIN_SWP_NOMOVE = 0x0002
+_WIN_SWP_NOZORDER = 0x0004
+_WIN_SWP_NOACTIVATE = 0x0010
+_WIN_SWP_FRAMECHANGED = 0x0020
+_WIN_WM_NCHITTEST = 0x0084
+_WIN_HTCLIENT = 1
+_WIN_HTCAPTION = 2
+_WIN_DWMWA_WINDOW_CORNER_PREFERENCE = 33
+_WIN_DWMWCP_DONOTROUND = 1
+_WIN_DWMWCP_ROUND = 2
+_WIN_HTLEFT = 10
+_WIN_HTRIGHT = 11
+_WIN_HTTOP = 12
+_WIN_HTTOPLEFT = 13
+_WIN_HTTOPRIGHT = 14
+_WIN_HTBOTTOM = 15
+_WIN_HTBOTTOMLEFT = 16
+_WIN_HTBOTTOMRIGHT = 17
+
+
+def _with_resizable_frameless_windows_style(style: int) -> int:
+    """Retain the custom title bar, but keep the native resize/snap styles."""
+    style |= (
+        _WIN_WS_THICKFRAME
+        | _WIN_WS_SYSMENU
+        | _WIN_WS_MINIMIZEBOX
+        | _WIN_WS_MAXIMIZEBOX
+    )
+    return style & ~_WIN_WS_CAPTION
+
+def _is_snap_aligned_geometry(frame: QRect, available: QRect) -> bool:
+    """Detect common Windows Snap Layout cells without relying on maximize state."""
+    if frame.isEmpty() or available.isEmpty():
+        return False
+    tolerance = max(8, int(min(available.width(), available.height()) * 0.006))
+    fractions = (0.0, 0.25, 1 / 3, 0.5, 2 / 3, 0.75, 1.0)
+
+    def boundaries(origin: int, length: int) -> tuple[int, ...]:
+        return tuple(origin + round(length * fraction) for fraction in fractions)
+
+    x_grid = boundaries(available.x(), available.width())
+    y_grid = boundaries(available.y(), available.height())
+    frame_edges = (
+        frame.x(),
+        frame.x() + frame.width(),
+        frame.y(),
+        frame.y() + frame.height(),
+    )
+    x_aligned = (
+        any(abs(frame_edges[0] - value) <= tolerance for value in x_grid)
+        and any(abs(frame_edges[1] - value) <= tolerance for value in x_grid)
+    )
+    y_aligned = (
+        any(abs(frame_edges[2] - value) <= tolerance for value in y_grid)
+        and any(abs(frame_edges[3] - value) <= tolerance for value in y_grid)
+    )
+    # Avoid classifying a small, ordinary window as snapped just because two
+    # of its edges happen to land near grid lines.
+    large_enough = (
+        frame.width() >= available.width() * 0.18
+        and frame.height() >= available.height() * 0.18
+    )
+    return bool(x_aligned and y_aligned and large_enough)
+
+
+def _title_bar_point_is_interactive(title_bar: QWidget, point: QPoint) -> bool:
+    """Return True for real title-bar controls/tabs, not empty drag space.
+
+    On Windows the native WM_NCHITTEST result can classify the entire custom
+    title bar as HTCAPTION. That causes Windows to consume clicks on child
+    widgets before Qt can deliver them. Preserve client hit-testing for actual
+    buttons and tab widgets while allowing blank header space to drag the window.
+    """
+    try:
+        target = title_bar.childAt(point)
+        while target is not None and target is not title_bar:
+            if (
+                isinstance(target, QAbstractButton)
+                or target.objectName() == "browserTab"
+            ):
+                return True
+            child = target.childAt(target.mapFrom(title_bar, point))
+            if child is None:
+                break
+            target = child
+
+        # Some controls contain an internal child at the exact hit point. Walk
+        # back through its ancestors so the enclosing button/tab stays clickable.
+        while target is not None and target is not title_bar:
+            if (
+                isinstance(target, QAbstractButton)
+                or target.objectName() == "browserTab"
+            ):
+                return True
+            target = target.parentWidget()
+    except RuntimeError:
+        # Widgets can be deleted while Qt is processing a close/reparent event.
+        return False
+    return False
 
 
 class _DownloadsOverlayDismissArea(QFrame):
@@ -91,111 +207,487 @@ class _DownloadsOverlayDismissArea(QFrame):
     dismissed = Signal()
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.dismissed.emit()
         event.accept()
 
 
+# Page-load progress is rendered in the address field, never over web content.
+
+
+class _RoundedWebView(QWebEngineView):
+    """Square WebEngine viewport; no fake corner frame around live page pixels."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("browserPageView")
+
+
+class _ProxyPanelHost(QFrame):
+    """Opaque, resizable proxy pane aligned with the browser tabs and viewport."""
+
+    visibilityChanged = Signal(bool)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setObjectName("proxyDock")
+        self.setMinimumWidth(0)
+        self.setMaximumWidth(420)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding)
+        self._panel_layout = QVBoxLayout(self)
+        self._panel_layout.setContentsMargins(0, 0, 0, 0)
+        self._panel_layout.setSpacing(0)
+        self._hosted_widget = None
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def setWidget(self, widget):
+        if self._hosted_widget is widget:
+            return
+        if self._hosted_widget is not None:
+            self._panel_layout.removeWidget(self._hosted_widget)
+            self._hosted_widget.setParent(None)
+        self._hosted_widget = widget
+        if widget is not None:
+            widget.setParent(self)
+            self._panel_layout.addWidget(widget)
+
+    def setVisible(self, visible):
+        visible = bool(visible)
+        was_hidden = self.isHidden()
+        super().setVisible(visible)
+        # Only explicit pane toggles emit this signal; minimization/hiding the
+        # whole browser window must not silently change the saved preference.
+        if was_hidden == visible:
+            self.visibilityChanged.emit(visible)
+
+
+class _BrowserShell(QFrame):
+    """Paint the selected dashboard wallpaper beneath the browser's top chrome."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._header_wallpaper = QPixmap()
+        self._header_title_bar = None
+        self._header_navigation_bar = None
+        self._header_dark_mode = False
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+    def set_header_wallpaper(
+        self,
+        image_data: bytes | None,
+        title_bar: QWidget | None,
+        navigation_bar: QWidget | None,
+        dark_mode: bool,
+    ) -> bool:
+        """Set an imported dashboard wallpaper for a translucent header.
+
+        Returns True only when the bytes decode into a usable image; bundled
+        gradient presets intentionally keep the normal solid/gradient chrome.
+        """
+        pixmap = QPixmap()
+        if image_data:
+            pixmap.loadFromData(image_data)
+        self._header_wallpaper = pixmap
+        self._header_title_bar = title_bar
+        self._header_navigation_bar = navigation_bar
+        self._header_dark_mode = bool(dark_mode)
+        self.update()
+        return not pixmap.isNull()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        pixmap = self._header_wallpaper
+        if pixmap.isNull():
+            return
+
+        header_bottom = 0
+        for widget in (self._header_title_bar, self._header_navigation_bar):
+            if widget is None or widget.isHidden():
+                continue
+            try:
+                origin = widget.mapTo(self, QPoint(0, 0))
+                header_bottom = max(header_bottom, origin.y() + widget.height())
+            except (RuntimeError, TypeError):
+                continue
+
+        header_bottom = min(self.height(), max(0, header_bottom))
+        if header_bottom <= 0 or self.width() <= 0:
+            return
+
+        header_rect = QRect(0, 0, self.width(), header_bottom)
+        scaled = pixmap.scaled(
+            header_rect.size(),
+            Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        origin = QPoint(
+            (self.width() - scaled.width()) // 2,
+            (header_bottom - scaled.height()) // 2,
+        )
+
+        # Build one combined clip path instead of relying on a version-sensitive
+        # enum lookup after a QPainter has started painting.
+        header_clip = QPainterPath()
+        header_clip.addRect(QRectF(header_rect))
+        radius = 0 if self.property("edgeToEdge") is True else 12
+        if radius:
+            rounded_shell = QPainterPath()
+            rounded_shell.addRoundedRect(QRectF(self.rect()), radius, radius)
+            header_clip = rounded_shell.intersected(header_clip)
+
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.setClipPath(header_clip)
+            painter.drawPixmap(origin, scaled)
+
+            # Subtle theme-aware glass lets the image remain visible while
+            # keeping icons, tabs and address controls readable above it.
+            tint = (
+                QColor(13, 19, 29, 118)
+                if self._header_dark_mode
+                else QColor(242, 247, 254, 112)
+            )
+            painter.fillRect(header_rect, tint)
+        finally:
+            # An exception in a paint event must never leave the paint device
+            # active; Qt otherwise reports QBackingStore/endPaint warnings and
+            # subsequent widgets may not repaint correctly.
+            painter.end()
+
+
 class TabButton(QFrame):
+    """A compact, draggable browser tab with favicon, loading state and hover close."""
+
     clicked = Signal()
     closed = Signal()
     requested_preview = Signal()
+    preview_dismiss_requested = Signal()
     context_requested = Signal(QPoint)
+    drag_moved = Signal(QPoint)
 
     def __init__(self, title: str = "New Tab"):
         super().__init__()
         self.setObjectName("browserTab")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(MIN_TAB_WIDTH)
         self.setMaximumWidth(MAX_TAB_WIDTH)
-        self.setFixedHeight(TAB_HEIGHT)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setFixedHeight(TAB_HEIGHT - 4)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self._title = title or "New Tab"
-
         self._active = False
-
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 2, 6, 2)
-        layout.setSpacing(6)
-
-        self.label = QLabel(self._title)
-        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        self.label.setMinimumWidth(0)
-        self.label.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
-
-        self.close_btn = QPushButton("×")
-        self.close_btn.setObjectName("tabCloseButton")
-        self.close_btn.setFixedSize(18, 18)
-        self.close_btn.setFocusPolicy(Qt.NoFocus)
-        self.close_btn.setToolTip("Close tab")
-        self.label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        self.installEventFilter(self)
-        self.close_btn.installEventFilter(self)
-
-        layout.addWidget(self.label)
-        layout.addWidget(self.close_btn)
-        self.close_btn.clicked.connect(lambda: self.closed.emit())
-
+        self._dark_mode = False
+        self._loading = False
+        self._site_icon: QIcon | None = None
+        self._press_pos = QPoint()
+        self._dragging = False
+        self._close_button_allowed = True
         self._hover_timer = QTimer(self)
         self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(500)
+        self._hover_timer.setInterval(460)
         self._hover_timer.timeout.connect(self._emit_preview)
 
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(7, 1, 4, 1)
+        layout.setSpacing(5)
+
+        self.favicon = QLabel(self)
+        self.favicon.setObjectName("tabFavicon")
+        self.favicon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.favicon.setFixedSize(16, 16)
+        self.favicon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self.label = QLabel(self._title, self)
+        self.label.setObjectName("tabTitle")
+        self.label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.label.setMinimumWidth(0)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self.close_btn = QPushButton(self)
+        self.close_btn.setObjectName("tabCloseButton")
+        self.close_btn.setIconSize(QSize(11, 11))
+        self.close_btn.setFixedSize(18, 18)
+        self.close_btn.hide()
+        self.close_btn.setMouseTracking(True)
+        self.close_btn.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.close_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.close_btn.setToolTip("Close tab")
+        self.close_btn.setAccessibleName("Close tab")
+        self.close_btn.clicked.connect(lambda _checked=False: self.closed.emit())
+
+        layout.addWidget(self.favicon)
+        layout.addWidget(self.label, 1)
+        layout.addWidget(self.close_btn)
+
+        self.installEventFilter(self)
+        self.close_btn.installEventFilter(self)
+        self.set_title(title)
+        self.apply_icon_theme(False)
         self.set_active(False)
 
-    def _emit_preview(self):
-        self.requested_preview.emit()
+    def apply_icon_theme(self, dark: bool) -> None:
+        self._dark_mode = bool(dark)
+        close_color = "#a8b6c9" if self._dark_mode else "#6a788d"
+        self.close_btn.setIcon(qta.icon("fa5s.times", color=close_color))
+        self._refresh_favicon()
 
-    def enterEvent(self, event):
-        self._hover_timer.start()
+    def set_site_icon(self, icon: QIcon | None) -> None:
+        self._site_icon = icon if isinstance(icon, QIcon) and not icon.isNull() else None
+        self._refresh_favicon()
+
+    def set_loading(self, loading: bool) -> None:
+        self._loading = bool(loading)
+        self._refresh_favicon()
+
+    def _refresh_favicon(self) -> None:
+        accent = "#82aff4" if self._dark_mode else "#3477d4"
+        if self._loading:
+            icon = qta.icon("fa5s.sync-alt", color=accent)
+        elif self._site_icon is not None:
+            icon = self._site_icon
+        else:
+            icon = qta.icon("fa5s.globe", color=accent if self._active else (
+                "#a4b0c0" if self._dark_mode else "#8795a8"
+            ))
+        self.favicon.setPixmap(icon.pixmap(QSize(16, 16)))
+        self.favicon.setToolTip("Loading page…" if self._loading else "Site icon")
+
+    def _emit_preview(self) -> None:
+        if self.underMouse() and not self._dragging:
+            self.requested_preview.emit()
+
+    def set_close_button_allowed(self, allowed: bool) -> None:
+        """Show a close control only when the tab strip permits closing this tab."""
+        self._close_button_allowed = bool(allowed)
+        if not self._close_button_allowed:
+            self._hover_timer.stop()
+            self.close_btn.hide()
+        elif self.underMouse() and not self._dragging:
+            self._show_close_button_if_allowed()
+
+    def _show_close_button_if_allowed(self) -> None:
+        if self._close_button_allowed and not self._dragging:
+            self.close_btn.show()
+        else:
+            self.close_btn.hide()
+
+    def _sync_close_button_visibility(self) -> None:
+        if not self._close_button_allowed or self._dragging:
+            self.close_btn.hide()
+            return
+        local_cursor = self.mapFromGlobal(QCursor.pos())
+        self.close_btn.setVisible(self.rect().contains(local_cursor))
+
+    def enterEvent(self, event) -> None:
+        if not self._dragging:
+            self._show_close_button_if_allowed()
+            self._hover_timer.start()
         super().enterEvent(event)
 
-    def leaveEvent(self, event):
+    def leaveEvent(self, event) -> None:
         self._hover_timer.stop()
+        self.preview_dismiss_requested.emit()
+        # Qt may report Leave as the pointer crosses the child close button.
+        # Recheck the cursor after event dispatch before deciding to hide it.
+        QTimer.singleShot(0, self._sync_close_button_visibility)
         super().leaveEvent(event)
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
+    def event(self, event) -> bool:
+        if event.type() == QEvent.Type.HoverEnter and not self._dragging:
+            self._show_close_button_if_allowed()
+        elif event.type() == QEvent.Type.HoverLeave:
+            self._hover_timer.stop()
+            self.preview_dismiss_requested.emit()
+            QTimer.singleShot(0, self._sync_close_button_visibility)
+        return super().event(event)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._hover_timer.stop()
+            self.preview_dismiss_requested.emit()
+            self._press_pos = event.position().toPoint()
+            self._dragging = False
+            # Switch on press, as desktop browsers do, rather than waiting for
+            # release. This keeps tab selection immediate and avoids losing a
+            # switch when hover UI changes underneath the pointer.
             if not self.close_btn.underMouse():
                 self.clicked.emit()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) and not self._dragging:
+            # Some windowing backends deliver a move before the hover enter.
+            self._show_close_button_if_allowed()
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            current = event.position().toPoint()
+            if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
+                self._dragging = True
+                self._hover_timer.stop()
+                self.preview_dismiss_requested.emit()
+                self.close_btn.hide()
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            if self._dragging:
+                self.drag_moved.emit(event.globalPosition().toPoint())
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
+            if self.underMouse():
+                self._show_close_button_if_allowed()
+            else:
+                self.close_btn.hide()
+            event.accept()
+            return
+        # Selection is emitted on mouse-down; do not emit a second activation
+        # here. The close button has its own independent click handler.
         super().mouseReleaseEvent(event)
 
-    def eventFilter(self, obj, event):
-        if event.type() == QEvent.ContextMenu:
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.close_btn:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self._hover_timer.stop()
+                self.preview_dismiss_requested.emit()
+            if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
+                if not self._dragging:
+                    self._show_close_button_if_allowed()
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.HoverLeave):
+                QTimer.singleShot(0, self._sync_close_button_visibility)
+        if event.type() == QEvent.Type.ContextMenu:
             self.context_requested.emit(event.globalPos())
             return True
         return super().eventFilter(obj, event)
 
-    def set_active(self, active: bool):
-        self._active = active
-        self.setProperty("active", bool(active))
-        style = self.style()
-        style.unpolish(self)
-        style.polish(self)
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self.setProperty("active", self._active)
+        self.setAccessibleName(self._title if not self._loading else f"{self._title}, loading")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._refresh_favicon()
         self.update()
 
-    def set_title(self, title: str):
-        self._title = title or "New Tab"
+    def set_title(self, title: str) -> None:
+        self._title = str(title or "New Tab")
         self.setToolTip(self._title)
+        self.setAccessibleName(self._title)
         self._update_elided_title()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_elided_title()
 
-    def _update_elided_title(self):
+    def _update_elided_title(self) -> None:
         metrics = QFontMetrics(self.label.font())
-        self.label.setText(metrics.elidedText(self._title, Qt.ElideRight, max(0, self.label.width())))
+        self.label.setText(
+            metrics.elidedText(self._title, Qt.TextElideMode.ElideRight, max(0, self.label.width()))
+        )
+
+
+class _TabPreviewPopup(QFrame):
+    """A display-only tab preview that never captures mouse or keyboard input."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setObjectName("tabPreviewPopup")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedWidth(320)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+
+        self.brand_label = QLabel("ARMA  •  TAB PREVIEW", self)
+        self.brand_label.setObjectName("tabPreviewBrand")
+        layout.addWidget(self.brand_label)
+
+        self.title_label = QLabel("New Tab", self)
+        self.title_label.setObjectName("tabPreviewTitle")
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
+
+        self.url_label = QLabel("", self)
+        self.url_label.setObjectName("tabPreviewUrl")
+        self.url_label.setWordWrap(True)
+        layout.addWidget(self.url_label)
+
+        self.status_label = QLabel("", self)
+        self.status_label.setObjectName("tabPreviewStatus")
+        layout.addWidget(self.status_label)
+
+        self.loading_bar = QProgressBar(self)
+        self.loading_bar.setObjectName("tabPreviewLoadingBar")
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedHeight(3)
+        layout.addWidget(self.loading_bar)
+        self.hide()
+
+    def set_page_details(self, title: str, url: str, loading: bool, dark: bool) -> None:
+        self.title_label.setText((title or "New Tab").strip() or "New Tab")
+        self.title_label.setToolTip(title or "New Tab")
+        self.url_label.setText(url or "No address")
+        self.url_label.setToolTip(url or "No address")
+        self.status_label.setText("Loading in background…" if loading else "Ready to switch")
+        self.status_label.setVisible(bool(loading))
+        self.loading_bar.setVisible(bool(loading))
+
+        if dark:
+            background, border = "#1b2431", "#3a485c"
+            title_color, muted, accent = "#eef4fd", "#9aabc2", "#82aff4"
+        else:
+            background, border = "#ffffff", "#d6e0ed"
+            title_color, muted, accent = "#1e2b3d", "#687991", "#3979d6"
+        self.setStyleSheet(f"""
+            QFrame#tabPreviewPopup {{
+                background: {background};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            QLabel#tabPreviewBrand {{
+                color: {accent}; font-size: 9px; font-weight: 800;
+                letter-spacing: 1px;
+            }}
+            QLabel#tabPreviewTitle {{
+                color: {title_color}; font-size: 12px; font-weight: 700;
+            }}
+            QLabel#tabPreviewUrl, QLabel#tabPreviewStatus {{
+                color: {muted}; font-size: 10px;
+            }}
+            QProgressBar#tabPreviewLoadingBar {{
+                background: {border}; border: none; border-radius: 1px;
+                min-height: 3px; max-height: 3px;
+            }}
+            QProgressBar#tabPreviewLoadingBar::chunk {{
+                background: {accent}; border-radius: 1px;
+            }}
+        """)
 
 
 class CustomTabBar(QFrame):
+    """Responsive tab strip with favicon updates, scrolling and drag reordering."""
+
     tab_changed = Signal(int)
     tab_closed = Signal(int)
+    tab_reordered = Signal(int, int)
     new_tab_requested = Signal()
     tab_preview_requested = Signal(int)
+    tab_preview_dismiss_requested = Signal()
     tab_context_requested = Signal(int, QPoint)
 
     def __init__(self):
         super().__init__()
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(TAB_HEIGHT + 4)
         self.tabs: List[TabButton] = []
         self.active_index: int = -1
@@ -203,80 +695,146 @@ class CustomTabBar(QFrame):
         self._updating = False
 
         root = QHBoxLayout(self)
-        root.setContentsMargins(4, 2, 4, 2)
-        root.setSpacing(0)
+        root.setContentsMargins(7, 2, 7, 2)
+        root.setSpacing(3)
 
-        self.btn_left = QPushButton("◀")
-        self.btn_left.setFixedSize(26, TAB_HEIGHT)
-        self.btn_left.setFocusPolicy(Qt.NoFocus)
+        self._dark_mode = False
+        self.btn_left = QPushButton(self)
+        self.btn_left.setObjectName("tabScrollButton")
+        self.btn_left.setIconSize(QSize(11, 11))
+        self.btn_left.setFixedSize(22, TAB_HEIGHT - 4)
+        self.btn_left.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_left.setToolTip("Scroll tabs left")
         self.btn_left.clicked.connect(lambda: self._scroll(-SCROLL_STEP))
         self.btn_left.hide()
 
-        self.btn_right = QPushButton("▶")
-        self.btn_right.setFixedSize(26, TAB_HEIGHT)
-        self.btn_right.setFocusPolicy(Qt.NoFocus)
+        self.btn_right = QPushButton(self)
+        self.btn_right.setObjectName("tabScrollButton")
+        self.btn_right.setIconSize(QSize(11, 11))
+        self.btn_right.setFixedSize(22, TAB_HEIGHT - 4)
+        self.btn_right.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.btn_right.setToolTip("Scroll tabs right")
         self.btn_right.clicked.connect(lambda: self._scroll(SCROLL_STEP))
         self.btn_right.hide()
 
         self.holder = QWidget()
+        self.holder.setObjectName("tabStripHolder")
         self.holder_layout = QHBoxLayout(self.holder)
         self.holder_layout.setContentsMargins(0, 0, 0, 0)
         self.holder_layout.setSpacing(TAB_SPACING)
-        self.holder_layout.setAlignment(Qt.AlignLeft)
+        self.holder_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
-        self.scroll = QScrollArea()
+        self.scroll = QScrollArea(self)
+        self.scroll.setObjectName("tabStripScroll")
         self.scroll.setWidgetResizable(True)
-        self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.scroll.setWidget(self.holder)
-        self.scroll.setFixedHeight(TAB_HEIGHT)
-        self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.scroll.setFixedHeight(TAB_HEIGHT - 4)
+        self.scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.scroll.installEventFilter(self)
+        self.scroll.viewport().installEventFilter(self)
 
-        self.plus_tab = QPushButton("+")
+        self.plus_tab = QPushButton(self)
         self.plus_tab.setObjectName("tabPlusButton")
-        self.plus_tab.setFixedSize(38, TAB_HEIGHT)
+        self.plus_tab.setIconSize(QSize(13, 13))
+        self.plus_tab.setFixedSize(24, TAB_HEIGHT - 6)
         self.plus_tab.setToolTip("New tab")
-        self.plus_tab.setFocusPolicy(Qt.NoFocus)
-        self.plus_tab.setToolTip("New tab")
-        self.plus_tab.clicked.connect(lambda: self.new_tab_requested.emit())
+        self.plus_tab.setAccessibleName("New tab")
+        self.plus_tab.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.plus_tab.clicked.connect(lambda _checked=False: self.new_tab_requested.emit())
 
-        self.external_plus = QPushButton("+")
+        self.external_plus = QPushButton(self)
         self.external_plus.setObjectName("tabPlusButton")
-        self.external_plus.setFixedSize(38, TAB_HEIGHT)
-        self.external_plus.setFocusPolicy(Qt.NoFocus)
+        self.external_plus.setIconSize(QSize(13, 13))
+        self.external_plus.setFixedSize(24, TAB_HEIGHT - 6)
+        self.external_plus.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.external_plus.setToolTip("New tab")
-        self.external_plus.clicked.connect(lambda: self.new_tab_requested.emit())
+        self.external_plus.setAccessibleName("New tab")
+        self.external_plus.clicked.connect(lambda _checked=False: self.new_tab_requested.emit())
         self.external_plus.hide()
-
         self.holder_layout.addWidget(self.plus_tab)
+
+        self.tab_list_button = QToolButton(self)
+        self.tab_list_button.setObjectName("tabListButton")
+        self.tab_list_button.setIconSize(QSize(12, 12))
+        self.tab_list_button.setFixedSize(22, TAB_HEIGHT - 4)
+        self.tab_list_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.tab_list_button.setAutoRaise(True)
+        self.tab_list_button.setToolTip("List all open tabs")
+        self.tab_list_button.setAccessibleName("List all open tabs")
+        self.tab_list_menu = QMenu(self.tab_list_button)
+        self.tab_list_menu.aboutToShow.connect(self._populate_tab_list_menu)
+        self.tab_list_button.setMenu(self.tab_list_menu)
+        self.tab_list_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.tab_list_button.hide()
 
         root.addWidget(self.btn_left)
         root.addWidget(self.scroll, 1)
         root.addWidget(self.btn_right)
+        root.addWidget(self.tab_list_button)
         root.addWidget(self.external_plus)
+        self.apply_icon_theme(False)
 
-    def add_tab(self, title: str = "New Tab", make_active: bool = True) -> int:
+    def apply_icon_theme(self, dark: bool) -> None:
+        self._dark_mode = bool(dark)
+        color = "#a9b7c9" if self._dark_mode else "#68778b"
+        plus_color = "#c2d0e4" if self._dark_mode else "#526985"
+        self.btn_left.setIcon(qta.icon("fa5s.chevron-left", color=color))
+        self.btn_right.setIcon(qta.icon("fa5s.chevron-right", color=color))
+        self.tab_list_button.setIcon(qta.icon("fa5s.list-ul", color=color))
+        self.plus_tab.setIcon(qta.icon("fa5s.plus", color=plus_color))
+        self.external_plus.setIcon(qta.icon("fa5s.plus", color=plus_color))
+        for tab in self.tabs:
+            tab.apply_icon_theme(self._dark_mode)
+
+    def add_tab(
+        self, title: str = "New Tab", make_active: bool = True,
+        is_dashboard: bool = False,
+    ) -> int:
         tab = TabButton(title)
-        tab.clicked.connect(lambda t=tab: self._on_tab_clicked(t))
-        tab.closed.connect(lambda t=tab: self._on_tab_closed(t))
-        tab.requested_preview.connect(lambda t=tab: self._on_tab_preview_requested(t))
+        tab.setProperty("dashboardTab", bool(is_dashboard))
+        tab.apply_icon_theme(self._dark_mode)
+        tab.clicked.connect(lambda target=tab: self._on_tab_clicked(target))
+        tab.closed.connect(lambda target=tab: self._on_tab_closed(target))
+        tab.requested_preview.connect(lambda target=tab: self._on_tab_preview_requested(target))
+        tab.preview_dismiss_requested.connect(self.tab_preview_dismiss_requested.emit)
+        tab.drag_moved.connect(lambda pos, target=tab: self._on_tab_drag_moved(target, pos))
         tab.context_requested.connect(
-            lambda pos, t=tab: self.tab_context_requested.emit(self.tabs.index(t), pos)
-            if t in self.tabs else None
+            lambda pos, target=tab: self.tab_context_requested.emit(self.tabs.index(target), pos)
+            if target in self.tabs else None
         )
 
         insert_pos = max(0, self.holder_layout.count() - (1 if self.plus_inside else 0))
         self.holder_layout.insertWidget(insert_pos, tab)
         self.tabs.append(tab)
+        self._sync_tab_close_buttons()
 
-        idx = len(self.tabs) - 1
+        index = len(self.tabs) - 1
         if make_active or self.active_index < 0:
-            self.set_active(idx)
+            self.set_active(index)
         QTimer.singleShot(0, self._update_overflow)
-        return idx
+        return index
 
-    def remove_tab(self, index: int, activate: bool = True):
+    def set_tab_dashboard(self, index: int, is_dashboard: bool) -> None:
+        """Keep each tab's dashboard marker in sync with the page it currently shows."""
+        if index < 0 or index >= len(self.tabs):
+            return
+        tab = self.tabs[index]
+        tab.setProperty("dashboardTab", bool(is_dashboard))
+        self._sync_tab_close_buttons()
+
+    def _sync_tab_close_buttons(self) -> None:
+        """Keep only the sole dashboard tab non-closable."""
+        sole_dashboard_tab = (
+            len(self.tabs) == 1
+            and bool(self.tabs[0].property("dashboardTab"))
+        )
+        for tab in self.tabs:
+            tab.set_close_button_allowed(not (sole_dashboard_tab and tab is self.tabs[0]))
+
+    def remove_tab(self, index: int, activate: bool = True) -> None:
         if index < 0 or index >= len(self.tabs):
             return
         old_active_index = self.active_index
@@ -284,8 +842,9 @@ class CustomTabBar(QFrame):
         self.holder_layout.removeWidget(tab)
         tab.setParent(None)
         tab.deleteLater()
+        self._sync_tab_close_buttons()
 
-        if len(self.tabs) == 0:
+        if not self.tabs:
             self.active_index = -1
             if activate and old_active_index != -1:
                 self.tab_changed.emit(-1)
@@ -296,13 +855,13 @@ class CustomTabBar(QFrame):
             self.active_index = min(index, len(self.tabs) - 1)
         elif self.active_index > index:
             self.active_index -= 1
-        for i, tab_button in enumerate(self.tabs):
-            tab_button.set_active(i == self.active_index)
+        for current, item in enumerate(self.tabs):
+            item.set_active(current == self.active_index)
         if activate and self.active_index != old_active_index:
             self.tab_changed.emit(self.active_index)
         QTimer.singleShot(0, self._update_overflow)
 
-    def set_active(self, index: int):
+    def set_active(self, index: int) -> None:
         if not self.tabs:
             self.active_index = -1
             self.tab_changed.emit(-1)
@@ -310,50 +869,122 @@ class CustomTabBar(QFrame):
         index = max(0, min(index, len(self.tabs) - 1))
         changed = index != self.active_index
         self.active_index = index
-        for i, t in enumerate(self.tabs):
-            t.set_active(i == index)
+        for current, tab in enumerate(self.tabs):
+            tab.set_active(current == index)
         if changed:
             self.tab_changed.emit(index)
-        QTimer.singleShot(0, lambda: self.ensure_tab_visible(index))
+        QTimer.singleShot(0, lambda target=index: self.ensure_tab_visible(target))
 
-    def set_title(self, index: int, title: str):
+    def set_title(self, index: int, title: str) -> None:
         if 0 <= index < len(self.tabs):
             self.tabs[index].set_title(title)
 
-    def ensure_tab_visible(self, index: int):
+    def set_icon(self, index: int, icon: QIcon | None) -> None:
+        if 0 <= index < len(self.tabs):
+            self.tabs[index].set_site_icon(icon)
+
+    def set_loading(self, index: int, loading: bool) -> None:
+        if 0 <= index < len(self.tabs):
+            self.tabs[index].set_loading(loading)
+
+    def _populate_tab_list_menu(self) -> None:
+        """Build a quick-access list when many tabs no longer fit in one row."""
+        self.tab_list_menu.clear()
+        for index, tab in enumerate(self.tabs):
+            if tab._loading:
+                color = "#82aff4" if self._dark_mode else "#3477d4"
+                icon = qta.icon("fa5s.sync-alt", color=color)
+            elif tab._site_icon is not None:
+                icon = tab._site_icon
+            else:
+                color = "#a9b7c9" if self._dark_mode else "#68778b"
+                icon = qta.icon("fa5s.globe", color=color)
+            label = tab._title.strip() or "New Tab"
+            action = QAction(icon, label, self.tab_list_menu)
+            action.setCheckable(True)
+            action.setChecked(index == self.active_index)
+            action.setToolTip(tab._title)
+            action.triggered.connect(lambda _checked=False, target=index: self.set_active(target))
+            self.tab_list_menu.addAction(action)
+        if self.tabs:
+            self.tab_list_menu.addSeparator()
+        new_tab_action = QAction(qta.icon("fa5s.plus"), "New tab", self.tab_list_menu)
+        new_tab_action.triggered.connect(lambda _checked=False: self.new_tab_requested.emit())
+        self.tab_list_menu.addAction(new_tab_action)
+
+    def ensure_tab_visible(self, index: int) -> None:
         if index < 0 or index >= len(self.tabs):
             return
         tab = self.tabs[index]
         try:
             local_x = tab.mapTo(self.holder, tab.rect().topLeft()).x()
-            tab_w = tab.width()
-            view_w = self.scroll.viewport().width()
-            cur = self.scroll.horizontalScrollBar().value()
-            if local_x < cur:
+            tab_width = tab.width()
+            visible_width = self.scroll.viewport().width()
+            current = self.scroll.horizontalScrollBar().value()
+            if local_x < current:
                 self.scroll.horizontalScrollBar().setValue(local_x)
-            elif local_x + tab_w > cur + view_w:
-                self.scroll.horizontalScrollBar().setValue(local_x + tab_w - view_w)
+            elif local_x + tab_width > current + visible_width:
+                self.scroll.horizontalScrollBar().setValue(local_x + tab_width - visible_width)
         except RuntimeError:
             logger.debug("Skipped tab visibility update for a widget being destroyed", exc_info=True)
 
-    def _scroll(self, delta: int):
+    def _scroll(self, delta: int) -> None:
         bar = self.scroll.horizontalScrollBar()
-        bar.setValue(max(0, bar.value() + delta))
+        bar.setValue(max(bar.minimum(), min(bar.maximum(), bar.value() + int(delta))))
 
-    def _update_overflow(self):
+    def _move_tab_to(self, tab: TabButton, target_index: int) -> None:
+        if tab not in self.tabs:
+            return
+        old_index = self.tabs.index(tab)
+        target_index = max(0, min(int(target_index), len(self.tabs) - 1))
+        if old_index == target_index:
+            return
+
+        active = self.active_index
+        self.tabs.pop(old_index)
+        self.tabs.insert(target_index, tab)
+        self.holder_layout.removeWidget(tab)
+        self.holder_layout.insertWidget(target_index, tab)
+
+        if active == old_index:
+            self.active_index = target_index
+        elif old_index < active <= target_index:
+            self.active_index = active - 1
+        elif target_index <= active < old_index:
+            self.active_index = active + 1
+
+        for index, current in enumerate(self.tabs):
+            current.set_active(index == self.active_index)
+        self.tab_reordered.emit(old_index, target_index)
+        QTimer.singleShot(0, self._update_overflow)
+        if self.active_index >= 0:
+            QTimer.singleShot(0, lambda index=self.active_index: self.ensure_tab_visible(index))
+
+    def _on_tab_drag_moved(self, tab: TabButton, global_position: QPoint) -> None:
+        if tab not in self.tabs or len(self.tabs) < 2:
+            return
+        pointer_x = self.holder.mapFromGlobal(global_position).x()
+        target_index = sum(
+            1 for other in self.tabs
+            if other is not tab and pointer_x > other.geometry().center().x()
+        )
+        self._move_tab_to(tab, target_index)
+
+    def _update_overflow(self) -> None:
         if self._updating:
             return
         self._updating = True
         try:
             count = len(self.tabs)
-            available = max(0, self.width() - 8)
-            target_width = (
-                available - self.plus_tab.width() - TAB_SPACING * count
+            width_without_controls = max(0, self.width() - 16)
+            preferred_tab_width = (
+                width_without_controls - self.plus_tab.width() - TAB_SPACING * count
             ) // max(1, count)
-            overflow = bool(count and target_width < MIN_TAB_WIDTH)
+            overflow = bool(count and preferred_tab_width < MIN_TAB_WIDTH)
 
             self.btn_left.setVisible(overflow)
             self.btn_right.setVisible(overflow)
+            self.tab_list_button.setVisible(overflow)
             if overflow and self.plus_inside:
                 self.holder_layout.removeWidget(self.plus_tab)
                 self.plus_tab.setParent(None)
@@ -364,43 +995,60 @@ class CustomTabBar(QFrame):
                 self.plus_tab.setParent(self.holder)
                 self.external_plus.hide()
                 self.plus_inside = True
-            width = MIN_TAB_WIDTH if overflow else min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, target_width))
+
+            if overflow:
+                tab_width = MIN_TAB_WIDTH
+            else:
+                margins = self.layout().contentsMargins()
+                available = max(
+                    0,
+                    self.width() - margins.left() - margins.right()
+                    - self.plus_tab.width() - TAB_SPACING * count
+                    - self.layout().spacing() * max(0, count),
+                )
+                tab_width = min(MAX_TAB_WIDTH, max(MIN_TAB_WIDTH, available // max(1, count)))
             for tab in self.tabs:
-                tab.setFixedWidth(width)
-            content_width = count * width + TAB_SPACING * max(0, count - 1)
+                tab.setFixedWidth(tab_width)
+
+            content_width = count * tab_width + TAB_SPACING * max(0, count - 1)
             if self.plus_inside:
                 content_width += self.plus_tab.width() + (TAB_SPACING if count else 0)
             self.holder.setMinimumWidth(content_width)
             if overflow:
                 self.scroll.horizontalScrollBar().setPageStep(max(1, self.scroll.viewport().width()))
                 if self.active_index >= 0:
-                    QTimer.singleShot(
-                        0,
-                        lambda index=self.active_index: self.ensure_tab_visible(index),
-                    )
+                    QTimer.singleShot(0, lambda index=self.active_index: self.ensure_tab_visible(index))
         finally:
             self._updating = False
 
-    def resizeEvent(self, event):
+    def eventFilter(self, watched, event) -> bool:
+        if watched in (getattr(self, "scroll", None), getattr(getattr(self, "scroll", None), "viewport", lambda: None)()) and event.type() == QEvent.Type.Wheel:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if delta:
+                self._scroll(-int(delta / 120 * SCROLL_STEP))
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         QTimer.singleShot(0, self._update_overflow)
 
-    def _on_tab_clicked(self, tab: TabButton):
+    def _on_tab_clicked(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.set_active(self.tabs.index(tab))
 
-    def _on_tab_closed(self, tab: TabButton):
+    def _on_tab_closed(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.tab_closed.emit(self.tabs.index(tab))
 
-    def _on_tab_preview_requested(self, tab: TabButton):
+    def _on_tab_preview_requested(self, tab: TabButton) -> None:
         try:
-            idx = self.tabs.index(tab)
+            index = self.tabs.index(tab)
         except ValueError:
             return
-        if idx != self.active_index:
-            self.tab_preview_requested.emit(idx)
-
+        if index != self.active_index:
+            self.tab_preview_requested.emit(index)
 
 class BrowserPage(QWebEnginePage):
     """Page that routes web requests for a new window into a browser tab."""
@@ -442,7 +1090,7 @@ class BrowserPage(QWebEnginePage):
         )
         if view is None or view is not browser.current_view():
             return
-        browser.statusBar().showMessage(
+        _show_status_message(browser, 
             "This page could not decode an audio asset. Try Browser menu → Open in default browser; audio codec support may differ.",
             10000,
         )
@@ -462,16 +1110,19 @@ class BrowserPage(QWebEnginePage):
         self.setWebChannel(None)
 
     def acceptNavigationRequest(self, url, navigation_type, is_main_frame):
-        if url.scheme() == "arma" and url.host() == "dashboard":
-            if not is_main_frame:
+        scheme = url.scheme().lower()
+        host = url.host().lower()
+        if scheme == "arma":
+            if not is_main_frame or host not in INTERNAL_PAGE_HOSTS:
                 return False
-            # Browser history can return to the internal page after external
-            # navigation. Its content always comes from our scheme handler.
             self._enable_dashboard_bridge()
-            self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
+            # Only the existing dashboard is allowed to fetch remote wallpaper assets.
+            self.settings().setAttribute(
+                QWebEngineSettings.LocalContentCanAccessRemoteUrls,
+                host == "dashboard",
+            )
             return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
         if is_main_frame and self._dashboard_active:
-            # The dashboard origin is served only by our app-owned handler.
             self._disable_dashboard_bridge()
             self.settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, False)
         return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
@@ -483,11 +1134,123 @@ class BrowserPage(QWebEnginePage):
         return None
 
 
+class _StatusMessageOverlay(QFrame):
+    """Non-interactive status toast positioned over the active web page."""
+
+    def __init__(self, parent: QWidget, *, dark: bool = False):
+        super().__init__(parent)
+        self.setObjectName("browserStatusOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setMaximumWidth(460)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(13, 8, 15, 8)
+        self.label = QLabel(self)
+        self.label.setObjectName("browserStatusOverlayText")
+        self.label.setWordWrap(True)
+        self.label.setMinimumWidth(0)
+        layout.addWidget(self.label)
+
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+        parent.installEventFilter(self)
+        self.set_theme(dark)
+
+    def set_theme(self, dark: bool) -> None:
+        if dark:
+            self.setStyleSheet(
+                "QFrame#browserStatusOverlay { background: rgba(24,31,43,242); "
+                "color: #edf4ff; border: 1px solid rgba(133,164,212,190); "
+                "border-radius: 11px; } "
+                "QLabel#browserStatusOverlayText { background: transparent; "
+                "color: #edf4ff; font-size: 12px; font-weight: 550; }"
+            )
+        else:
+            self.setStyleSheet(
+                "QFrame#browserStatusOverlay { background: rgba(250,252,255,246); "
+                "color: #25364c; border: 1px solid rgba(159,177,202,205); "
+                "border-radius: 11px; } "
+                "QLabel#browserStatusOverlayText { background: transparent; "
+                "color: #25364c; font-size: 12px; font-weight: 550; }"
+            )
+
+    def showMessage(self, message: str, timeout: int = 0) -> None:
+        text = str(message or "").strip()
+        if not text:
+            self.clearMessage()
+            return
+        parent = self.parentWidget()
+        max_width = 460
+        self.label.setText(text)
+        if parent is not None:
+            max_width = max(190, min(460, parent.width() - 28))
+            self.setMaximumWidth(max_width)
+            self.label.setMaximumWidth(max(150, max_width - 30))
+        self.adjustSize()
+        if parent is not None:
+            width = min(max_width, max(190, self.sizeHint().width()))
+            self.resize(width, min(100, self.sizeHint().height()))
+            self._position()
+        self.show()
+        self.raise_()
+        self._timer.stop()
+        if int(timeout) > 0:
+            self._timer.start(int(timeout))
+
+    def clearMessage(self) -> None:
+        self._timer.stop()
+        self.hide()
+
+    def _position(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        x = min(15, max(0, parent.width() - self.width() - 8))
+        y = max(8, parent.height() - self.height() - 14)
+        self.move(x, y)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self.parentWidget() and event.type() in (
+            QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show,
+        ):
+            if self.isVisible():
+                QTimer.singleShot(0, self._position)
+        return super().eventFilter(watched, event)
+
+
+def _show_status_message(window, message: str, timeout: int = 0) -> None:
+    """Route legacy status-bar calls to the overlay; retain fallback for unit-test doubles."""
+    display = getattr(window, "_show_status_overlay", None)
+    if callable(display):
+        display(message, timeout)
+        return
+    status_bar_getter = getattr(window, "statusBar", None)
+    if callable(status_bar_getter):
+        status_bar = status_bar_getter()
+        show_message = getattr(status_bar, "showMessage", None)
+        if callable(show_message):
+            show_message(message, timeout)
+
+
 class BrowserWindow(QMainWindow):
     def __init__(self, tor_mode: bool = False, restored_session: Optional[dict] = None):
         super().__init__()
+        self._window_handle_connected = None
+        self._native_refresh_pending = False
+        self._native_style_hwnd = 0
+        self._edge_to_edge_frame_state = None
+        self._snap_frame_sync_timer = QTimer(self)
+        self._snap_frame_sync_timer.setSingleShot(True)
+        self._snap_frame_sync_timer.setInterval(75)
+        self._snap_frame_sync_timer.timeout.connect(self._sync_window_frame)
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        # Per-pixel translucent top-level windows can leave Chromium/WebEngine
+        # surfaces stale or transparent during native moves and monitor-DPI changes.
+        # Keep non-Windows compositing unchanged, but use an opaque native surface on Windows.
+        self.setAttribute(Qt.WA_TranslucentBackground, sys.platform != "win32")
         proxy_routing.load_exclude()
         self.tor_mode = bool(tor_mode)
         # Tor must configure its proxy before WebEngine profiles exist. In ordinary
@@ -554,17 +1317,17 @@ class BrowserWindow(QMainWindow):
         self._setup_feature_managers()
 
         self.navbar = NavigationBar(self.settings.profiles_list, settings=self.settings)
+        if self.bookmarks_bar is not None:
+            # Keep bookmarks one click away without reserving a dedicated header row.
+            self.navbar.insertWidget(self.navbar.profile_btn, self.bookmarks_bar)
         self.navbar.history = self.history.history if self.history else {}
-        self.navbar.profile_selected.connect(self.on_profile_selected)
+        self.navbar.set_profiles(self.settings.profiles_list, self.selected_profile)
+        self.navbar.profile_selected.connect(
+            lambda name: self.on_profile_selected(name, open_new_tab=False)
+        )
+        self.navbar.open_profiles_requested.connect(self.open_profiles)
+        self.navbar.create_profile_requested.connect(self.open_profiles_for_creation)
         self.navbar.new_tab_requested.connect(lambda: self.new_tab(self._new_tab_address()))
-
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(4)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("QProgressBar::chunk { background-color: #29a3ef; }")
-        self.progress_bar.hide()
 
         self.tabbar = CustomTabBar()
         self.tabbar.setObjectName("browserTabBar")
@@ -573,54 +1336,73 @@ class BrowserWindow(QMainWindow):
         # connect to our custom close flow
         self.tabbar.tab_closed.connect(self.request_close_tab)
         self.tabbar.tab_preview_requested.connect(self._show_tab_preview)
+        self.tabbar.tab_preview_dismiss_requested.connect(self._hide_tab_preview)
         self.tabbar.tab_context_requested.connect(self._show_tab_context_menu)
+        self.tabbar.tab_reordered.connect(self._move_tab)
 
         self.views: List[QWebEngineView] = []
+        self._load_progress_by_view: Dict[QWebEngineView, int] = {}
+        self._status_overlays: Dict[object, _StatusMessageOverlay] = {}
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
-        self._snapshots: Dict[QWebEngineView, QPixmap] = {}
+        self._renderer_recovery_attempts: Dict[QWebEngineView, int] = {}
+        self._renderer_recovery_pending: set[QWebEngineView] = set()
         self._recorded_history_urls: Dict[QWebEngineView, str] = {}
         self.current_index: int = -1
         self.view_container = QWidget()
         self.view_container.setObjectName("browserContentCard")
+        self.view_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.view_container.setAutoFillBackground(False)
+        # Hide the old bottom status strip; notifications now float over the page.
+        self.statusBar().hide()
         self.view_layout = QVBoxLayout(self.view_container)
-        self.view_layout.setContentsMargins(5, 5, 5, 5)
+        # This is a layout host, not a visible card. Let the page meet the browser
+        # shell directly so the viewport has one clean rounded edge, not two boxes.
+        self.view_layout.setContentsMargins(0, 0, 0, 0)
 
-        self._preview_label = QLabel(self)
-        self._preview_label.setWindowFlags(Qt.ToolTip)
-        self._preview_label.setStyleSheet("border:1px solid #222; background-color: white;")
-        self._preview_label.setScaledContents(True)
-        self._preview_label.hide()
-        self._preview_animation = QPropertyAnimation(self._preview_label, b"windowOpacity")
-        self._preview_animation.setDuration(180)
+        # This preview is a regular child overlay, not a top-level Qt.ToolTip.
+        # It is transparent to mouse events so it can never intercept tab clicks.
+        self._tab_preview_popup = _TabPreviewPopup(self)
+        self._tab_preview_opacity = QGraphicsOpacityEffect(self._tab_preview_popup)
+        self._tab_preview_popup.setGraphicsEffect(self._tab_preview_opacity)
+        self._tab_preview_opacity.setOpacity(1.0)
 
         root = QWidget()
         root.setObjectName("browserWindowRoot")
         layout = QVBoxLayout(root)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(4, 4, 4, 4)
         self._root_layout = layout
         layout.setSpacing(0)
-        shell = QFrame(root)
+        shell = _BrowserShell(root)
         shell.setObjectName("browserShell")
         self._shell = shell
         shell_layout = QVBoxLayout(shell)
-        shell_layout.setContentsMargins(1, 1, 1, 1)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(0)
+        self._shell_layout = shell_layout
         self.title_bar = CustomTitleBar(self)
         shell_layout.addWidget(self.title_bar)
         shell_layout.addWidget(self.navbar)
-        if self.bookmarks_bar is not None:
-            # The bookmark strip belongs to the start page, not every website.
-            self.bookmarks_bar.hide()
-            shell_layout.addWidget(self.bookmarks_bar)
-        shell_layout.addWidget(self.tabbar)
-        shell_layout.addWidget(self.progress_bar)
-        self.content_row = QWidget(root)
+
+        # Keep tabs and the website viewport together in the left workspace.
+        # The proxy is a sibling of this workspace, not a dock around the
+        # outside of the custom browser shell.
+        self.browser_workspace = QWidget(shell)
+        self.browser_workspace.setObjectName("browserWorkspace")
+        browser_workspace_layout = QVBoxLayout(self.browser_workspace)
+        self.browser_workspace_layout = browser_workspace_layout
+        browser_workspace_layout.setContentsMargins(0, 0, 0, 0)
+        browser_workspace_layout.setSpacing(0)
+        browser_workspace_layout.addWidget(self.tabbar)
+
+        self.content_row = QWidget(self.browser_workspace)
         content_layout = QHBoxLayout(self.content_row)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
         self.downloads_panel = DownloadsPanel(self.download_manager, self.content_row)
         self.downloads_panel.close_requested.connect(self._close_downloads_panel)
         self.downloads_panel.mode_toggle_requested.connect(self._toggle_downloads_panel_mode)
+        self.downloads_panel.open_manager_requested.connect(self.show_downloads)
+        self.downloads_panel.state_changed.connect(self._on_downloads_panel_state_changed)
         self.downloads_panel.hide()
         self._downloads_panel_mode = "overlay"
         self._downloads_mode_transitioning = False
@@ -648,9 +1430,36 @@ class BrowserWindow(QMainWindow):
         self._downloads_splitter_animating = False
         self._downloads_splitter_animation = None
         content_layout.addWidget(self.downloads_splitter, 1)
-        shell_layout.addWidget(self.content_row, 1)
+        browser_workspace_layout.addWidget(self.content_row, 1)
+
+        self.browser_proxy_splitter = QSplitter(Qt.Orientation.Horizontal, shell)
+        self.browser_proxy_splitter.setObjectName("browserProxySplitter")
+        self.browser_proxy_splitter.setChildrenCollapsible(False)
+        self.browser_proxy_splitter.setHandleWidth(7)
+        self.browser_proxy_splitter.setStretchFactor(0, 1)
+        self.browser_proxy_splitter.setStretchFactor(1, 0)
+        self.browser_proxy_splitter.addWidget(self.browser_workspace)
+
+        self.dock = _ProxyPanelHost(self.browser_proxy_splitter)
+        self.dock.setMinimumWidth(320)
+        self.dock.setMaximumWidth(420)
+        self._proxy_placeholder = None
+        if self.proxy_panel is not None:
+            self.dock.setWidget(self.proxy_panel)
+        else:
+            self._proxy_placeholder = QWidget(self.dock)
+            self._proxy_placeholder.setObjectName("deferredProxyPlaceholder")
+            self.dock.setWidget(self._proxy_placeholder)
+        self.browser_proxy_splitter.addWidget(self.dock)
+        self.browser_proxy_splitter.setSizes([
+            max(1, self.settings.window_width - 340), 330
+        ])
+        self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
+        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+        shell_layout.addWidget(self.browser_proxy_splitter, 1)
         layout.addWidget(shell, 1)
         self.setCentralWidget(root)
+        self._apply_tabbar_placement()
         QTimer.singleShot(0, self._collapse_downloads_splitter)
         self._setup_download_toast(root)
         self._bind_download_manager()
@@ -693,6 +1502,8 @@ class BrowserWindow(QMainWindow):
                 self.navbar.show_history_requested.connect(self.show_history)
             if hasattr(self.navbar, "show_downloads_requested"):
                 self.navbar.show_downloads_requested.connect(self.show_downloads)
+            if hasattr(self.navbar, "downloads_panel_requested"):
+                self.navbar.downloads_panel_requested.connect(self.toggle_downloads_panel)
             if hasattr(self.navbar, "open_external_requested"):
                 self.navbar.open_external_requested.connect(self.open_current_page_externally)
             if hasattr(self.navbar, "reload_bypass_cache_requested"):
@@ -710,28 +1521,16 @@ class BrowserWindow(QMainWindow):
             QTimer.singleShot(100, self.proxy_panel.proxyWidget._toggle)
         self._last_progress_ts = 0
         
-        self.dock = QDockWidget("Proxy", self)
-        self.dock.setObjectName("proxyDock")
-        self.dock.setMinimumWidth(300)
-        self.dock.setMaximumWidth(400)
-        self._proxy_placeholder = None
-        if self.proxy_panel is not None:
-            self.dock.setWidget(self.proxy_panel)
-        else:
-            # A tiny placeholder avoids constructing the proxy UI on every normal launch.
-            self._proxy_placeholder = QWidget(self.dock)
-            self._proxy_placeholder.setObjectName("deferredProxyPlaceholder")
-            self.dock.setWidget(self._proxy_placeholder)
-        self.dock.setFloating(False)
-        self.dock.setFeatures(QDockWidget.DockWidgetClosable)
-        self.addDockWidget(Qt.RightDockWidgetArea, self.dock)
-        self.dock.visibilityChanged.connect(self._on_proxy_visibility_changed)
         if self.settings.proxy_panel_visible:
             self._ensure_proxy_panel()
-        self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+            self.browser_proxy_splitter.setSizes([
+                max(1, self.width() - 350), 330
+            ])
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
+        self.navbar.set_proxy_panel_state(not self.dock.isHidden())
+        self.navbar.set_downloads_panel_state(self.downloads_panel.is_open)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
         QTimer.singleShot(120, self._initialize_deferred_history)
@@ -832,15 +1631,58 @@ class BrowserWindow(QMainWindow):
         self._proxy_placeholder = None
         if placeholder is not None:
             placeholder.deleteLater()
+        dark_mode = bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+        panel.apply_theme("dark" if dark_mode else "light")
         return panel
 
     def show_proxy(self):
-        if not self.dock.isVisible():
+        # QWidget.isHidden reflects the explicit panel toggle even while the
+        # whole browser window is being shown or minimized.
+        visible = self.dock.isHidden()
+        if visible:
             self._ensure_proxy_panel()
+            self.dock.setMinimumWidth(320)
             self.dock.setVisible(True)
+            total_width = max(1, self.browser_proxy_splitter.width())
+            pane_width = min(380, max(320, int(total_width * 0.32)))
+            self.browser_proxy_splitter.setSizes([max(1, total_width - pane_width), pane_width])
+        else:
+            self.dock.setVisible(False)
+        if hasattr(self, "navbar"):
+            self.navbar.set_proxy_panel_state(not self.dock.isHidden())
             self.dock.raise_()
         else:
             self.dock.setVisible(False)
+
+    def toggle_downloads_panel(self) -> None:
+        """Toggle the compact left downloads drawer; the toolbar icon mirrors it."""
+        if getattr(self, "_downloads_mode_transitioning", False) or getattr(self, "_downloads_splitter_animating", False):
+            return
+        opening = not bool(self.downloads_panel.is_open)
+        self._animate_downloads_panel(opening)
+
+    def _on_downloads_panel_state_changed(self, opened: bool) -> None:
+        navbar = getattr(self, "navbar", None)
+        if navbar is not None:
+            navbar.set_downloads_panel_state(opened)
+
+    def toggle_theme(self) -> None:
+        """Compatibility helper; the visible theme control lives in Settings."""
+        previous = bool(self.settings.dark_mode)
+        self.settings.dark_mode = not previous
+        try:
+            self.settings.save(self.selected_profile)
+        except (OSError, ValueError, TypeError):
+            self.settings.dark_mode = previous
+            logger.exception("Could not save browser theme")
+            _show_status_message(self, "Could not save browser theme.", 3500)
+            return
+        self.apply_theme()
+        _show_status_message(self, "Dark theme enabled." if self.settings.dark_mode else "Light theme enabled.", 1800)
+
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self._schedule_snap_frame_sync()
 
     def changeEvent(self, event):
         super().changeEvent(event)
@@ -848,20 +1690,65 @@ class BrowserWindow(QMainWindow):
             self.title_bar.sync_maximize_button()
             self._update_resize_handles()
             self._sync_window_frame()
+            # Qt can change native window styles during maximize/fullscreen transitions.
+            self._queue_window_frame_refresh()
+
+    def _is_edge_to_edge_geometry(self) -> bool:
+        edge_to_edge = self.isMaximized() or self.isFullScreen()
+        if sys.platform != "win32" or edge_to_edge:
+            return bool(edge_to_edge)
+        screen = self.screen()
+        handle = self.windowHandle()
+        if handle is not None and handle.screen() is not None:
+            screen = handle.screen()
+        return bool(
+            screen is not None
+            and _is_snap_aligned_geometry(
+                self.frameGeometry(), screen.availableGeometry()
+            )
+        )
+
+    def _apply_shell_corner_mask(self, edge_to_edge: bool | None = None) -> None:
+        """Use native/widget antialiasing instead of a staircase-shaped QRegion mask."""
+        shell = getattr(self, "_shell", None)
+        if shell is None:
+            return
+        if edge_to_edge is None:
+            edge_to_edge = self._is_edge_to_edge_geometry()
+        # A QWidget mask cannot reliably clip WebEngine's compositor surface.
+        # Keep page pixels square and apply a subtle curve only to the outer shell.
+        shell.clearMask()
 
     def _sync_window_frame(self) -> None:
         if not hasattr(self, "_root_layout") or not hasattr(self, "_shell"):
             return
-        edge_to_edge = self.isMaximized() or self.isFullScreen()
-        margin = 0 if edge_to_edge else 8
+        edge_to_edge = self._is_edge_to_edge_geometry()
+        if getattr(self, "_edge_to_edge_frame_state", None) == edge_to_edge:
+            self._apply_shell_corner_mask(edge_to_edge)
+            return
+        self._edge_to_edge_frame_state = edge_to_edge
+        margin = 0 if edge_to_edge else 4
+        shell_margin = 0
         self._root_layout.setContentsMargins(margin, margin, margin, margin)
+        shell_layout = getattr(self, "_shell_layout", None)
+        if shell_layout is not None:
+            shell_layout.setContentsMargins(shell_margin, shell_margin, shell_margin, shell_margin)
         self._shell.setProperty("edgeToEdge", edge_to_edge)
         self._shell.style().unpolish(self._shell)
         self._shell.style().polish(self._shell)
         self._shell.update()
+        self._apply_shell_corner_mask(edge_to_edge)
+        self._apply_native_window_corner_preference(edge_to_edge)
+
+    def _schedule_snap_frame_sync(self) -> None:
+        timer = getattr(self, "_snap_frame_sync_timer", None)
+        if timer is not None and not self.isMaximized() and not self.isFullScreen():
+            timer.start()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
+        self._apply_shell_corner_mask()
+        self._schedule_snap_frame_sync()
         self._update_resize_handles()
         self._position_download_toast()
         if getattr(self, "_downloads_panel_mode", "split") == "overlay":
@@ -881,14 +1768,24 @@ class BrowserWindow(QMainWindow):
         if not handles:
             return
         width, height = self.width(), self.height()
-        edge, corner = 6, 12
+        edge, corner = 8, 14
+        title_bar = getattr(self, "title_bar", None)
+        try:
+            # Resize handles are sibling overlays above the central widget. If
+            # the top strip extends into the custom title bar it steals clicks
+            # from tabs, tab-close/plus controls and the window buttons.
+            title_top = max(0, int(title_bar.mapTo(self, QPoint(0, 0)).y())) if title_bar else edge
+        except (RuntimeError, TypeError):
+            title_top = edge
+        top_edge_height = min(edge, title_top)
+        top_corner_height = min(corner, title_top)
         geometries = {
-            "top": QRect(corner, 0, max(0, width - 2 * corner), edge),
+            "top": QRect(corner, 0, max(0, width - 2 * corner), top_edge_height),
             "bottom": QRect(corner, max(0, height - edge), max(0, width - 2 * corner), edge),
             "left": QRect(0, corner, edge, max(0, height - 2 * corner)),
             "right": QRect(max(0, width - edge), corner, edge, max(0, height - 2 * corner)),
-            "top_left": QRect(0, 0, corner, corner),
-            "top_right": QRect(max(0, width - corner), 0, corner, corner),
+            "top_left": QRect(0, 0, corner, top_corner_height),
+            "top_right": QRect(max(0, width - corner), 0, corner, top_corner_height),
             "bottom_left": QRect(0, max(0, height - corner), corner, corner),
             "bottom_right": QRect(
                 max(0, width - corner), max(0, height - corner), corner, corner
@@ -898,6 +1795,10 @@ class BrowserWindow(QMainWindow):
         for name, handle in handles.items():
             handle.setGeometry(geometries[name])
             handle.setVisible(not hidden)
+        if not hidden:
+            # Keep the resize targets above the web viewport and rounded shell.
+            for handle in handles.values():
+                handle.raise_()
 
     def _update_proxy_menu_action(self, visible: bool) -> None:
         self.navbar.proxy_panel_action.setText("Hide proxy panel" if visible else "Show proxy panel")
@@ -905,6 +1806,9 @@ class BrowserWindow(QMainWindow):
     def _on_proxy_visibility_changed(self, visible: bool) -> None:
         if visible and self.proxy_panel is None:
             self._ensure_proxy_panel()
+        navbar = getattr(self, "navbar", None)
+        if navbar is not None:
+            navbar.set_proxy_panel_state(visible)
         self._update_proxy_menu_action(visible)
         if self._closing or bool(self.settings.proxy_panel_visible) == bool(visible):
             return
@@ -937,7 +1841,7 @@ class BrowserWindow(QMainWindow):
             proxy_routing.save_exclude()
         except (OSError, ValueError, UnicodeError) as error:
             logger.exception("Could not update direct route exception for %s", host)
-            self.statusBar().showMessage(f"Could not update site connection: {error}", 5000)
+            _show_status_message(self, f"Could not update site connection: {error}", 5000)
             self._sync_site_connection_action(view.url().toString())
             return
         self._sync_site_connection_action(view.url().toString())
@@ -951,7 +1855,7 @@ class BrowserWindow(QMainWindow):
             message = (
                 f"Direct-route preference saved for {host}; it applies when Tor routing is enabled."
             )
-        self.statusBar().showMessage(message, 3500)
+        _show_status_message(self, message, 3500)
 
     def _install_browser_shortcuts(self) -> None:
         """Install Chrome-style browser shortcuts that Gaming mode can pause."""
@@ -1017,7 +1921,7 @@ class BrowserWindow(QMainWindow):
         )
         self.navbar.menu_button.style().unpolish(self.navbar.menu_button)
         self.navbar.menu_button.style().polish(self.navbar.menu_button)
-        self.statusBar().showMessage(
+        _show_status_message(self, 
             "Gaming mode on · browser shortcuts paused" if enabled else "Gaming mode off",
             2500,
         )
@@ -1055,10 +1959,10 @@ class BrowserWindow(QMainWindow):
             self.new_tab(view.url().toString())
         elif selected is copy_action:
             QApplication.clipboard().setText(view.url().toString())
-            self.statusBar().showMessage("Page address copied.", 2000)
+            _show_status_message(self, "Page address copied.", 2000)
         elif selected is mute_action:
             page.setAudioMuted(not page.isAudioMuted())
-            self.statusBar().showMessage(
+            _show_status_message(self, 
                 "Tab audio unmuted." if not page.isAudioMuted() else "Tab audio muted.",
                 2000,
             )
@@ -1107,10 +2011,7 @@ class BrowserWindow(QMainWindow):
                 self.tabbar.set_active(index)
 
     def show_history(self) -> None:
-        if self.history is None:
-            self.statusBar().showMessage("History is unavailable in this session.", 3000)
-            return
-        HistoryWindow(self.selected_profile, self.history, self).exec()
+        self.navigate("arma://history/")
 
     def _refresh_history(self):
         if self.settings.private_mode or not self.settings.save_history:
@@ -1228,21 +2129,17 @@ class BrowserWindow(QMainWindow):
             self.bookmarks_bar.set_bookmarks(self.bookmarks_manager.list_bookmarks())
         except Exception:
             logger.exception("Could not refresh bookmarks for profile %s", self.selected_profile)
-            self.statusBar().showMessage("Could not refresh bookmarks.", 3000)
+            _show_status_message(self, "Could not refresh bookmarks.", 3000)
         self._sync_dashboard_tabs()
 
     def _update_bookmarks_bar_visibility(self, value=None) -> None:
-        """Show the compact bookmark strip only while the active tab is the dashboard."""
+        """Keep the bookmark menu available from the browser toolbar on every page."""
         bar = getattr(self, "bookmarks_bar", None)
-        if bar is None:
-            return
-        if value is None:
-            view = self.current_view() if hasattr(self, "current_view") else None
-            value = view.url() if view is not None else None
-        bar.setVisible(self._is_dashboard_address(value))
+        if bar is not None:
+            bar.setVisible(True)
 
     def _show_bookmark_context_menu(self, bookmark: dict, global_pos: QPoint) -> None:
-        """Show bookmark actions for both visible and overflow entries."""
+        """Show actions for a bookmark selected from the toolbar menu."""
         if self.bookmarks_manager is None:
             return
         menu = QMenu(self)
@@ -1259,7 +2156,7 @@ class BrowserWindow(QMainWindow):
             self.new_tab(bookmark["url"])
         elif selected is copy_url:
             QApplication.clipboard().setText(bookmark["url"])
-            self.statusBar().showMessage("Bookmark address copied.", 2000)
+            _show_status_message(self, "Bookmark address copied.", 2000)
         elif selected is edit_action:
             self._edit_bookmark(bookmark)
         elif selected is remove_action:
@@ -1285,12 +2182,12 @@ class BrowserWindow(QMainWindow):
                     self.bookmarks_manager.is_bookmarked(current.url().toString())
                 )
         except (OSError, ValueError, TypeError) as error:
-            self.statusBar().showMessage(f"Could not update bookmark: {error}", 5000)
+            _show_status_message(self, f"Could not update bookmark: {error}", 5000)
 
     def _remove_bookmark(self, bookmark: dict) -> None:
         try:
             if not self.bookmarks_manager.remove_bookmark(bookmark["id"]):
-                self.statusBar().showMessage("This bookmark no longer exists.", 3000)
+                _show_status_message(self, "This bookmark no longer exists.", 3000)
             self._refresh_bookmarks()
             current = self.current_view()
             if current is not None:
@@ -1298,11 +2195,11 @@ class BrowserWindow(QMainWindow):
                     self.bookmarks_manager.is_bookmarked(current.url().toString())
                 )
         except (OSError, ValueError, TypeError) as error:
-            self.statusBar().showMessage(f"Could not remove bookmark: {error}", 5000)
+            _show_status_message(self, f"Could not remove bookmark: {error}", 5000)
 
     def _add_current_bookmark(self, *args):
         if self.bookmarks_manager is None:
-            self.statusBar().showMessage("Bookmarks are unavailable.", 3000)
+            _show_status_message(self, "Bookmarks are unavailable.", 3000)
             return
         view = self.current_view()
         if view is None:
@@ -1319,24 +2216,14 @@ class BrowserWindow(QMainWindow):
             self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url))
         except Exception:
             logger.exception("Could not toggle bookmark for %s", url)
-            self.statusBar().showMessage("Could not update bookmark.", 3000)
+            _show_status_message(self, "Could not update bookmark.", 3000)
 
     def show_bookmarks(self, *args):
-        if BookmarksDialog is None or self.bookmarks_manager is None:
-            self.statusBar().showMessage("Bookmarks are unavailable.", 3000)
-            return
-        try:
-            dialog = BookmarksDialog(self.bookmarks_manager, self)
-            dialog.url_activated.connect(self.navigate)
-            dialog.exec()
-            self._refresh_bookmarks()
-        except Exception:
-            logger.exception("Could not open bookmarks")
-            self.statusBar().showMessage("Could not open bookmarks.", 3000)
+        """Open the integrated bookmarks manager in the active browser tab."""
+        self.navigate("arma://bookmarks/")
 
     def show_downloads(self, *args):
-        if hasattr(self, "downloads_panel"):
-            self._animate_downloads_panel(True)
+        self.navigate("arma://downloads/")
 
     def _bind_download_manager(self) -> None:
         panel = getattr(self, "downloads_panel", None)
@@ -1354,7 +2241,9 @@ class BrowserWindow(QMainWindow):
     def _on_download_started(self, download_id: str, source_page) -> None:
         if self._closing:
             return
-        self.show_downloads()
+        # Keep the lightweight progress drawer for new downloads. The header's
+        # Downloads button opens the full manager at arma://downloads/.
+        self._animate_downloads_panel(True)
         manager = self.download_manager
         record = next(
             (item for item in manager.get_downloads() if item.get("id") == download_id),
@@ -1569,7 +2458,7 @@ class BrowserWindow(QMainWindow):
         else:
             self._downloads_panel_mode = next_mode
             self.downloads_panel.set_docked(next_mode == "split")
-        self.statusBar().showMessage(
+        _show_status_message(self, 
             "Downloads will now stay beside the page." if next_mode == "split"
             else "Downloads will now overlay the page.", 2500
         )
@@ -1750,16 +2639,6 @@ class BrowserWindow(QMainWindow):
         if self.download_toast_effect.opacity() <= 0.01:
             self.download_toast.hide()
 
-    def _capture_snapshot(self, view: QWebEngineView):
-        if view not in self.views:
-            return
-        try:
-            pix = view.grab()
-            if pix and not pix.isNull():
-                self._snapshots[view] = pix
-        except RuntimeError:
-            logger.debug("Skipped snapshot for a view being destroyed", exc_info=True)
-
     def _make_placeholder(self, url_text: str = "") -> QWidget:
         """Build a full-size, theme-aware first-paint screen for a new tab."""
         dark = bool(getattr(self.settings, "dark_mode", True))
@@ -1851,11 +2730,22 @@ class BrowserWindow(QMainWindow):
         self.navigate(self.settings.homepage)
 
     @staticmethod
-    def _is_dashboard_address(value: str | QUrl | None) -> bool:
+    def _internal_host(value: str | QUrl | None) -> str | None:
         if value is None:
-            return False
+            return None
         url = value if isinstance(value, QUrl) else QUrl(str(value))
-        return url.scheme().lower() == "arma" and url.host().lower() == "dashboard"
+        if url.scheme().lower() != "arma":
+            return None
+        host = url.host().lower()
+        return host if host in INTERNAL_PAGE_HOSTS else None
+
+    @staticmethod
+    def _is_internal_address(value: str | QUrl | None) -> bool:
+        return BrowserWindow._internal_host(value) is not None
+
+    @staticmethod
+    def _is_dashboard_address(value: str | QUrl | None) -> bool:
+        return BrowserWindow._internal_host(value) == "dashboard"
 
     def _dashboard_state(self) -> dict:
         manager = getattr(self, "dashboard_manager", None)
@@ -1913,6 +2803,14 @@ class BrowserWindow(QMainWindow):
         page_html = page_html.replace(
             '<script src="dashboard.js"></script>', f"<script>{script}</script>"
         )
+        if sys.platform == "win32":
+            # Keep backdrop-filter off in the Windows Qt WebEngine compositor.
+            # The dashboard's translucent gradients still provide the glass look.
+            page_html = page_html.replace(
+                '<html lang="en">',
+                '<html lang="en" class="qt-windows-webengine">',
+                1,
+            )
         return page_html
 
     def _dashboard_document(self) -> bytes:
@@ -1922,16 +2820,39 @@ class BrowserWindow(QMainWindow):
         page_html = page_html.replace("{{DASHBOARD_STATE}}", state_json)
         return page_html.encode("utf-8")
 
-    def _load_dashboard(self, view: QWebEngineView) -> None:
-        if self.dashboard_manager is None:
-            self.statusBar().showMessage("Dashboard preferences are unavailable.", 4000)
+    def _load_internal_page(self, view: QWebEngineView, address: str | QUrl) -> None:
+        """Load only an app-owned ARMA page and attach its restricted local bridge."""
+        target = address if isinstance(address, QUrl) else QUrl(str(address))
+        host = self._internal_host(target)
+        if host is None:
+            raise ValueError("Only supported ARMA internal pages can be loaded here.")
+        if host == "dashboard" and self.dashboard_manager is None:
+            _show_status_message(self, "Dashboard preferences are unavailable.", 4000)
             return
-        view.page()._enable_dashboard_bridge()
-        view.page().settings().setAttribute(QWebEngineSettings.LocalContentCanAccessRemoteUrls, True)
-        view.setUrl(QUrl(DASHBOARD_URL))
+        page = view.page()
+        page._enable_dashboard_bridge()
+        page.settings().setAttribute(
+            QWebEngineSettings.LocalContentCanAccessRemoteUrls, host == "dashboard"
+        )
+        normalized_url = QUrl(f"arma://{host}/")
+        view.setUrl(normalized_url)
+
+    def _load_dashboard(self, view: QWebEngineView) -> None:
+        self._load_internal_page(view, DASHBOARD_URL)
+
+    def _internal_page_document(self, host: str) -> bytes:
+        if host not in INTERNAL_PAGE_HOSTS or host == "dashboard":
+            raise ValueError("Unsupported ARMA internal page.")
+        return render_internal_page(self, host).encode("utf-8")
 
     def _sync_dashboard_page(self, page: QWebEnginePage) -> None:
         if not getattr(page, "_dashboard_active", False):
+            return
+        try:
+            current_url = page.url()
+        except RuntimeError:
+            return
+        if self._internal_host(current_url) != "dashboard":
             return
         state_json = json.dumps(self._dashboard_state(), ensure_ascii=False, separators=(",", ":"))
         state_json = state_json.replace("</", "<\\/")
@@ -1941,13 +2862,518 @@ class BrowserWindow(QMainWindow):
         )
         page.runJavaScript(script)
 
-    def _handle_dashboard_action(self, page: BrowserPage, action_url: QUrl) -> None:
-        if self.dashboard_manager is None or not getattr(page, "_dashboard_active", False):
+
+    def _handle_profile_page_action(
+        self, page: BrowserPage, view: QWebEngineView, action: str, payload: dict
+    ) -> None:
+        """Handle validated profile manager actions from arma://profile/."""
+        profiles = list(getattr(self.navbar, "profiles", None) or self.settings.profiles_list or ["Guest"])
+        allowed_actions = {
+            "profile_create", "profile_switch", "profile_delete",
+            "profile_avatar_save", "profile_avatar_remove",
+        }
+        if action not in allowed_actions:
             return
+        raw_name = payload.get("name")
+        try:
+            name = Settings._validate_profile_key(raw_name)
+        except ValueError as error:
+            raise ValueError(str(error)) from None
+
+        if action == "profile_create":
+            if not isinstance(raw_name, str) or raw_name != raw_name.strip():
+                raise ValueError("Enter a profile name without leading or trailing spaces.")
+            if any(existing.casefold() == name.casefold() for existing in profiles):
+                raise ValueError(f"A profile named “{name}” already exists.")
+            new_profiles = [*profiles, name]
+            Settings.save_profiles(new_profiles, self.settings.file_path)
+            self.settings.profiles_list = new_profiles
+            self.navbar.set_profiles(new_profiles, self.selected_profile)
+            _show_status_message(self, f"Profile “{name}” created.", 2500)
+            self.on_profile_selected(name, open_new_tab=False)
+            return
+
+        if name not in profiles:
+            raise ValueError("That profile is no longer available.")
+
+        if action == "profile_switch":
+            if name == self.selected_profile:
+                _show_status_message(self, f"“{name}” is already the active profile.", 2000)
+                return
+            self.on_profile_selected(name, open_new_tab=False)
+            return
+
+        if action == "profile_avatar_save":
+            data_url = payload.get("data")
+            if not isinstance(data_url, str) or not data_url.startswith("data:image/png;base64,"):
+                raise ValueError("The profile picture data is invalid.")
+            encoded = data_url.partition(",")[2]
+            if len(encoded) > 1_900_000:
+                raise ValueError("The cropped image is too large. Choose a smaller image.")
+            try:
+                image_bytes = base64.b64decode(encoded, validate=True)
+            except (ValueError, TypeError):
+                raise ValueError("The profile picture data is invalid.") from None
+            if not image_bytes or len(image_bytes) > 1_400_000 or not image_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError("The profile picture must be a valid PNG image.")
+            image = QImage.fromData(image_bytes, "PNG")
+            if image.isNull() or image.width() > 1024 or image.height() > 1024 or image.width() * image.height() > 1_000_000:
+                raise ValueError("The profile picture dimensions are invalid.")
+            image_path = profile_data_path(
+                name, "profile", "image.png", base_dir=user_data_path("profile_data")
+            )
+            image_dir = os.path.dirname(image_path)
+            os.makedirs(image_dir, exist_ok=True)
+            descriptor, temporary_path = tempfile.mkstemp(
+                prefix=".profile-image-", suffix=".png", dir=image_dir
+            )
+            os.close(descriptor)
+            try:
+                if not image.save(temporary_path, "PNG"):
+                    raise OSError("The profile picture could not be encoded.")
+                os.replace(temporary_path, image_path)
+            finally:
+                try:
+                    if os.path.exists(temporary_path):
+                        os.unlink(temporary_path)
+                except OSError:
+                    logger.debug("Could not clean a temporary profile image", exc_info=True)
+            self.navbar._refresh_profile_icon()
+            _show_status_message(self, f"Profile picture saved for “{name}”.", 2500)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+        if action == "profile_avatar_remove":
+            image_path = profile_data_path(
+                name, "profile", "image.png", base_dir=user_data_path("profile_data")
+            )
+            try:
+                os.unlink(image_path)
+            except FileNotFoundError:
+                pass
+            self.navbar._refresh_profile_icon()
+            _show_status_message(self, f"Profile picture removed for “{name}”.", 2200)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+        if action == "profile_delete":
+            if name == self.selected_profile:
+                raise ValueError("Switch to another profile before removing the active one.")
+            if len(profiles) <= 1:
+                raise ValueError("At least one browser profile must remain.")
+
+            # Never remove a profile while it still owns active download requests.
+            for (manager_profile, _private_mode), manager in list(self._download_managers.items()):
+                if manager_profile != name:
+                    continue
+                try:
+                    active_downloads = [
+                        item for item in manager.get_downloads()
+                        if item.get("state") in {"requested", "downloading"}
+                    ]
+                except (AttributeError, RuntimeError, TypeError):
+                    active_downloads = []
+                if active_downloads:
+                    raise ValueError("This profile still has active downloads. Finish or cancel them before removing it.")
+
+            new_profiles = [profile_name for profile_name in profiles if profile_name != name]
+            Settings.remove_profile(name, new_profiles, self.settings.file_path)
+            self.settings.profiles_list = new_profiles
+            self.navbar.set_profiles(new_profiles, self.selected_profile)
+            self._closed_tab_urls = {
+                key: value for key, value in self._closed_tab_urls.items()
+                if key[0] != name
+            }
+            self._private_dashboard_notes.pop(name, None)
+            self._private_dashboard_quick_notes.pop(name, None)
+
+            for manager_key, manager in list(self._download_managers.items()):
+                if manager_key[0] == name:
+                    try:
+                        manager.shutdown()
+                    except (AttributeError, OSError, RuntimeError):
+                        logger.warning("Could not fully stop resources for removed profile %s", name, exc_info=True)
+                    self._download_managers.pop(manager_key, None)
+                    self._connected_download_managers.discard(id(manager))
+
+            for profile_key, web_profile in list(self._profiles.items()):
+                if profile_key[0] != name:
+                    continue
+                profile_id = id(web_profile)
+                handler = self._dashboard_handlers.pop(profile_id, None)
+                try:
+                    web_profile.removeUrlSchemeHandler(DASHBOARD_SCHEME)
+                    web_profile.clearHttpCache()
+                    web_profile.cookieStore().deleteAllCookies()
+                except RuntimeError:
+                    logger.debug("Profile web storage was already being destroyed", exc_info=True)
+                if handler is not None:
+                    handler.deleteLater()
+                self._profile_default_user_agents.pop(profile_id, None)
+                self._profiles.pop(profile_key, None)
+                web_profile.deleteLater()
+
+            storage_roots = {
+                os.path.abspath(getattr(self, "storage_path", user_data_path("profile_data"))),
+                os.path.abspath(user_data_path("profile_data")),
+            }
+
+            def remove_profile_storage(profile_name=name, roots=tuple(storage_roots)):
+                for root in roots:
+                    try:
+                        target = profile_data_path(profile_name, base_dir=root)
+                        if os.path.islink(target):
+                            os.unlink(target)
+                        elif os.path.isdir(target):
+                            shutil.rmtree(target)
+                    except (OSError, ValueError):
+                        logger.warning("Could not fully remove local data for profile %s", profile_name, exc_info=True)
+
+            # Wait until WebEngine releases the profile's cache/storage handles.
+            QTimer.singleShot(1200, remove_profile_storage)
+            _show_status_message(self, f"Profile “{name}” removed. Downloaded files were kept.", 3000)
+            self._load_internal_page(view, "arma://profile/")
+            return
+
+    def _handle_internal_page_action(
+        self, page: BrowserPage, view: QWebEngineView, host: str, action: str, payload: dict
+    ) -> None:
+        """Handle an allowlisted internal-page intent after validating its payload."""
+        incremental_setting = action == "set_browser_setting"
+        setting_name = ""
+        try:
+            if action == "navigate_internal":
+                target_host = payload.get("host")
+                if not isinstance(target_host, str) or target_host.lower() not in INTERNAL_PAGE_HOSTS:
+                    raise ValueError("That internal page is not available.")
+                self._load_internal_page(view, f"arma://{target_host.lower()}/")
+                return
+
+            if host == "profile":
+                self._handle_profile_page_action(page, view, action, payload)
+                return
+
+            if action == "browse_download_folder":
+                current = str(self.settings.download_folder or os.path.expanduser("~"))
+                directory = QFileDialog.getExistingDirectory(
+                    self, "Choose download folder", os.path.abspath(os.path.expanduser(current))
+                )
+                if directory:
+                    page.runJavaScript("window.setDownloadFolder && window.setDownloadFolder(" + json.dumps(directory) + ");")
+                return
+
+            if incremental_setting:
+                setting_name = payload.get("name")
+                setting_value = payload.get("value")
+                allowed_setting_names = {
+                    "homepage", "startup_page", "new_tab_page", "default_search_engine",
+                    "download_folder", "dark_mode", "private_mode", "save_history",
+                    "save_cookies", "hardware_acceleration", "webgpu_enabled",
+                    "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
+                    "restore_session", "ad_blocking_enabled",
+                }
+                if not isinstance(setting_name, str) or setting_name not in allowed_setting_names:
+                    raise ValueError("That browser setting is not supported.")
+                payload = {
+                    "homepage": self.settings.homepage,
+                    "startup_page": self.settings.startup_page,
+                    "new_tab_page": self.settings.new_tab_page,
+                    "default_search_engine": self.settings.default_search_engine,
+                    "download_folder": self.settings.download_folder,
+                    "dark_mode": bool(self.settings.dark_mode),
+                    "private_mode": bool(self.settings.private_mode),
+                    "save_history": bool(self.settings.save_history),
+                    "save_cookies": bool(self.settings.save_cookies),
+                    "hardware_acceleration": bool(self.settings.hardware_acceleration),
+                    "webgpu_enabled": bool(self.settings.webgpu_enabled),
+                    "site_compatibility_mode": bool(self.settings.site_compatibility_mode),
+                    "proxy_panel_visible": bool(self.settings.proxy_panel_visible),
+                    "tabs_in_title_bar": bool(self.settings.tabs_in_title_bar),
+                    "restore_session": bool(getattr(self.settings, "restore_session", True)),
+                    "ad_blocking_enabled": bool(getattr(self.settings, "ad_blocking_enabled", True)),
+                }
+                payload[setting_name] = setting_value
+                action = "save_browser_settings"
+
+            if action == "save_browser_settings":
+                homepage = payload.get("homepage")
+                if not isinstance(homepage, str) or not homepage.strip() or len(homepage) > 8192:
+                    raise ValueError("Enter a valid homepage address.")
+                homepage = homepage.strip()
+                homepage_url = QUrl(homepage)
+                if homepage_url.scheme().lower() == "arma":
+                    if self._internal_host(homepage_url) is None:
+                        raise ValueError("Only supported ARMA internal pages can be used as the homepage.")
+                    homepage = f"arma://{homepage_url.host().lower()}/"
+                elif not (
+                    homepage_url.isValid()
+                    and homepage_url.scheme().lower() in {"http", "https"}
+                    and bool(homepage_url.host())
+                    and not homepage_url.userInfo()
+                ):
+                    raise ValueError("The homepage must be a website URL or ARMA internal page.")
+
+                startup_page = payload.get("startup_page")
+                new_tab_page = payload.get("new_tab_page")
+                if startup_page not in {"dashboard", "homepage"} or new_tab_page not in {"dashboard", "homepage"}:
+                    raise ValueError("Startup and new-tab pages must be selected from the available options.")
+                engine = payload.get("default_search_engine")
+                allowed_engines = {
+                    "https://www.google.com/search?q=",
+                    "https://duckduckgo.com/?q=",
+                    "https://www.bing.com/search?q=",
+                }
+                current_engine = str(self.settings.default_search_engine or "")
+                if not isinstance(engine, str) or len(engine) > 2048:
+                    raise ValueError("Choose a valid search engine.")
+                if engine not in allowed_engines and engine != current_engine:
+                    raise ValueError("That search engine is not supported in this settings view.")
+                folder = payload.get("download_folder")
+                if not isinstance(folder, str) or not folder.strip() or len(folder) > 4096:
+                    raise ValueError("Choose a valid download folder.")
+                folder = os.path.abspath(os.path.expanduser(folder.strip()))
+                boolean_fields = (
+                    "dark_mode", "private_mode", "save_history", "save_cookies",
+                    "hardware_acceleration", "webgpu_enabled",
+                    "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
+                    "restore_session", "ad_blocking_enabled",
+                )
+                for name in boolean_fields:
+                    if type(payload.get(name)) is not bool:
+                        raise ValueError(f"Invalid value for {name.replace('_', ' ')}.")
+
+                old_private = bool(self.settings.private_mode)
+                old_hardware = bool(self.settings.hardware_acceleration)
+                settings_field_names = (
+                    "homepage", "startup_page", "new_tab_page", "default_search_engine",
+                    "download_folder", *boolean_fields,
+                )
+                old_values = {name: getattr(self.settings, name) for name in settings_field_names}
+                candidate = copy.copy(self.settings)
+                candidate.homepage = homepage
+                candidate.startup_page = startup_page
+                candidate.new_tab_page = new_tab_page
+                candidate.default_search_engine = engine
+                candidate.download_folder = folder
+                for name in boolean_fields:
+                    setattr(candidate, name, payload[name])
+                candidate.save(self.selected_profile)
+                for name in settings_field_names:
+                    setattr(self.settings, name, getattr(candidate, name))
+                changed_fields = {
+                    name for name in settings_field_names
+                    if old_values[name] != getattr(candidate, name)
+                }
+
+                if "hardware_acceleration" in changed_fields:
+                    Settings.configure_hardware_acceleration(bool(self.settings.hardware_acceleration))
+                if "webgpu_enabled" in changed_fields:
+                    Settings.configure_webgpu(bool(self.settings.webgpu_enabled))
+                if old_private != bool(self.settings.private_mode):
+                    # Private mode changes the QWebEngine profile and its owned managers.
+                    # A profile switch is the only preference edit that requires rebuilding them.
+                    self.change_profile(self.selected_profile)
+                else:
+                    if changed_fields & {"save_cookies", "site_compatibility_mode"}:
+                        self._apply_profile_settings(self.profile)
+                    if "save_history" in changed_fields:
+                        self._refresh_history()
+                    if "download_folder" in changed_fields and self.download_manager is not None:
+                        try:
+                            self.download_manager.set_download_directory(folder)
+                        except (AttributeError, OSError, TypeError, ValueError):
+                            logger.exception("Could not update the active download directory")
+
+                if "proxy_panel_visible" in changed_fields:
+                    self.dock.setVisible(bool(self.settings.proxy_panel_visible))
+                if "tabs_in_title_bar" in changed_fields:
+                    self._apply_tabbar_placement()
+                if "dark_mode" in changed_fields:
+                    self.apply_theme()
+                elif changed_fields & {"save_history", "private_mode"}:
+                    self._sync_dashboard_tabs()
+                if changed_fields & {"hardware_acceleration", "webgpu_enabled"}:
+                    changed_graphics = changed_fields & {"hardware_acceleration", "webgpu_enabled"}
+                    if changed_graphics == {"hardware_acceleration", "webgpu_enabled"}:
+                        message = "Saved. Restart ARMA Browser to apply graphics settings."
+                    elif "webgpu_enabled" in changed_graphics:
+                        message = (
+                            "Saved. Restart ARMA Browser to disable WebGPU context creation."
+                            if not self.settings.webgpu_enabled else
+                            "Saved. Restart ARMA Browser to enable WebGPU."
+                        )
+                    else:
+                        message = "Saved. Restart ARMA Browser to fully apply hardware acceleration."
+                    _show_status_message(self, message, 6500)
+                else:
+                    message = "Setting saved." if incremental_setting else "Browser settings saved."
+                    _show_status_message(self, message, 2200)
+                if incremental_setting:
+                    page.runJavaScript(
+                        "window.armaSettingSaved && window.armaSettingSaved("
+                        + json.dumps(setting_name) + ", "
+                        + json.dumps(message) + ", false);"
+                    )
+                    if view in self.views and (setting_name == "private_mode" and old_private != bool(self.settings.private_mode)):
+                        self._load_internal_page(view, "arma://settings/")
+                elif view in self.views:
+                    self._load_internal_page(view, "arma://settings/")
+                return
+
+            if host == "history":
+                history = self.history
+                if history is None or self.settings.private_mode or not self.settings.save_history:
+                    raise ValueError("History is disabled for this profile.")
+                if action == "history_open":
+                    target = payload.get("url")
+                    if not isinstance(target, str) or len(target) > 8192:
+                        raise ValueError("That history address is invalid.")
+                    target_url = QUrl(target)
+                    if target_url.scheme().lower() not in {"http", "https"} or not target_url.host():
+                        raise ValueError("Only recorded website addresses can be opened from history.")
+                    if view is self.current_view():
+                        self.navigate(target)
+                    else:
+                        view.setUrl(target_url)
+                    return
+                elif action == "history_delete_url":
+                    target = payload.get("url")
+                    if not isinstance(target, str) or len(target) > 8192:
+                        raise ValueError("That history address is invalid.")
+                    history.delete(link=target)
+                elif action == "history_delete_visit":
+                    target = payload.get("url")
+                    date = payload.get("date")
+                    visit_time = payload.get("time")
+                    index = payload.get("index")
+                    if (
+                        not isinstance(target, str) or len(target) > 8192
+                        or not isinstance(date, str) or len(date) > 32
+                        or not isinstance(visit_time, str) or len(visit_time) > 32
+                        or type(index) is not int or index < 0
+                    ):
+                        raise ValueError("That history entry is invalid.")
+                    history.delete_visit(target, date, visit_time, index)
+                elif action == "history_clear":
+                    history.clear()
+                else:
+                    return
+                self.navbar.history = history.history
+                _show_status_message(self, "History updated.", 2000)
+                self._load_internal_page(view, "arma://history/")
+                return
+
+            if host == "bookmarks":
+                manager = self.bookmarks_manager
+                if manager is None:
+                    raise ValueError("The bookmark manager is unavailable.")
+                if action == "bookmarks_refresh":
+                    self._load_internal_page(view, "arma://bookmarks/")
+                    return
+
+                bookmark_id = payload.get("id")
+                if not isinstance(bookmark_id, str) or not bookmark_id or len(bookmark_id) > 256:
+                    raise ValueError("That bookmark entry is invalid.")
+                bookmark = next(
+                    (item for item in manager.list_bookmarks() if item.get("id") == bookmark_id),
+                    None,
+                )
+                if bookmark is None:
+                    raise ValueError("That bookmark no longer exists.")
+                target = manager._validate_url(bookmark.get("url"))
+                if action in {"bookmark_open", "bookmark_open_new"}:
+                    internal_host = self._internal_host(target)
+                    if target.lower().startswith("arma://") and internal_host is None:
+                        raise ValueError("That internal bookmark is not supported.")
+                    if action == "bookmark_open_new":
+                        self.new_tab(target)
+                    elif view is self.current_view():
+                        self.navigate(target)
+                    elif internal_host is not None:
+                        self._load_internal_page(view, target)
+                    else:
+                        view.setUrl(QUrl(target))
+                    return
+                if action == "bookmark_remove":
+                    if not manager.remove_bookmark(bookmark_id):
+                        raise ValueError("That bookmark no longer exists.")
+                    self._refresh_bookmarks()
+                    _show_status_message(self, "Bookmark removed.", 2000)
+                    self._load_internal_page(view, "arma://bookmarks/")
+                    return
+                return
+
+            if host == "downloads":
+                manager = self.download_manager
+                if manager is None:
+                    raise ValueError("The download manager is unavailable.")
+                if action == "downloads_refresh":
+                    self._load_internal_page(view, "arma://downloads/")
+                    return
+                records = manager.get_downloads()
+                download_id = payload.get("id")
+                if action == "downloads_clear_finished":
+                    manager.clear_finished()
+                else:
+                    if not isinstance(download_id, str) or len(download_id) > 256:
+                        raise ValueError("That download entry is invalid.")
+                    record = next((item for item in records if str(item.get("id")) == download_id), None)
+                    if record is None:
+                        raise ValueError("That download entry no longer exists.")
+                    state = str(record.get("state", "")).lower()
+                    if action == "downloads_cancel":
+                        if state not in {"requested", "downloading"} or not manager.cancel(download_id):
+                            raise ValueError("This download can no longer be cancelled.")
+                    elif action == "downloads_pause":
+                        if state not in {"requested", "downloading"} or not manager.pause(download_id):
+                            raise ValueError("This download cannot be paused.")
+                    elif action == "downloads_resume":
+                        if state not in {"requested", "downloading"} or not manager.resume(download_id):
+                            raise ValueError("This download cannot be resumed.")
+                    elif action == "downloads_open":
+                        if state != "completed" or not manager.open_file(download_id):
+                            raise ValueError("The completed file could not be opened.")
+                    elif action == "downloads_folder":
+                        if state != "completed" or not manager.open_folder(download_id):
+                            raise ValueError("The download folder could not be opened.")
+                    elif action == "downloads_remove":
+                        if state not in {"completed", "cancelled", "failed"} or not manager.remove_download(download_id):
+                            raise ValueError("This download entry cannot be removed yet.")
+                    elif action == "downloads_delete_file":
+                        if state != "completed" or not manager.delete_download_file(download_id):
+                            raise ValueError("The file could not be deleted. Only files inside the configured download folder can be deleted.")
+                    else:
+                        return
+                _show_status_message(self, "Download list updated.", 2000)
+                self._load_internal_page(view, "arma://downloads/")
+                return
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            logger.info("Internal page action %s was rejected: %s", action, error)
+            _show_status_message(self, str(error), 5500)
+            if incremental_setting and setting_name:
+                page.runJavaScript(
+                    "window.armaSettingSaved && window.armaSettingSaved("
+                    + json.dumps(setting_name) + ", "
+                    + json.dumps(str(error)) + ", true);"
+                )
+            else:
+                page.runJavaScript("window.armaToast && window.armaToast(" + json.dumps(str(error)) + ");")
+
+    def _handle_dashboard_action(self, page: BrowserPage, action_url: QUrl) -> None:
+        if not getattr(page, "_dashboard_active", False):
+            return
+        try:
+            page_url = page.url()
+        except RuntimeError:
+            return
+        if page_url.scheme().lower() != "arma" or page_url.host().lower() not in INTERNAL_PAGE_HOSTS:
+            return
+        host = page_url.host().lower()
         query = QUrlQuery(action_url)
         action = query.queryItemValue("action")
         raw_payload = query.queryItemValue("payload")
-        if len(raw_payload) > 80_000:
+        payload_limit = 900_000 if host == "profile" else 80_000
+        if len(raw_payload) > payload_limit:
             return
         try:
             payload = json.loads(raw_payload) if raw_payload else {}
@@ -1957,6 +3383,11 @@ class BrowserWindow(QMainWindow):
             return
         view = next((candidate for candidate in self.views if candidate.page() is page), None)
         if view is None:
+            return
+        if host != "dashboard":
+            self._handle_internal_page_action(page, view, host, action, payload)
+            return
+        if self.dashboard_manager is None:
             return
         try:
             if action in {"open", "open_new", "search", "reopen"}:
@@ -1985,7 +3416,12 @@ class BrowserWindow(QMainWindow):
                     target = payload.get("url")
                     if not isinstance(target, str):
                         return
-                    address = resolve_address_input(target, self.settings.default_search_engine)
+                    internal_host = self._internal_host(target)
+                    address = (
+                        f"arma://{internal_host}/"
+                        if internal_host is not None
+                        else resolve_address_input(target, self.settings.default_search_engine)
+                    )
                 if action == "open_new":
                     self.new_tab(address)
                 else:
@@ -2019,7 +3455,7 @@ class BrowserWindow(QMainWindow):
                 allowed = {
                     "overlay", "blur", "glass", "accent", "clock_24h",
                     "show_seconds", "animations", "density", "widgets", "widget_order",
-                    "focus_minutes", "break_minutes",
+                    "widget_sizes", "focus_minutes", "break_minutes",
                 }
                 manager.update({key: value for key, value in payload.items() if key in allowed})
             elif action == "set_wallpaper":
@@ -2038,6 +3474,8 @@ class BrowserWindow(QMainWindow):
             else:
                 return
             self._sync_dashboard_page(page)
+            if action in {"set_wallpaper", "cycle_wallpaper", "import_wallpaper", "reset_preferences"}:
+                self._refresh_chrome_wallpaper()
         except (OSError, ValueError, TypeError) as error:
             logger.info("Dashboard action %s was rejected: %s", action, error)
             page.runJavaScript(
@@ -2053,42 +3491,47 @@ class BrowserWindow(QMainWindow):
     def new_tab(self, url: Optional[str] = None, make_active: bool = True) -> int:
         """Create one aligned tab, placeholder, view, and page before loading."""
         raw_url = url.toString() if isinstance(url, QUrl) else (url if url is not None else self._new_tab_address())
-        is_dashboard = self._is_dashboard_address(raw_url)
-        if is_dashboard:
-            resolved_url = DASHBOARD_URL
+        internal_host = self._internal_host(raw_url)
+        is_dashboard = internal_host == "dashboard"
+        if internal_host is not None:
+            resolved_url = f"arma://{internal_host}/"
         else:
             try:
                 resolved_url = resolve_address_input(raw_url, self.settings.default_search_engine)
             except URLInputError as exc:
                 logger.warning("Rejected tab URL %r: %s", raw_url, exc)
-                self.statusBar().showMessage(str(exc), 5000)
+                _show_status_message(self, str(exc), 5000)
                 resolved_url = "about:blank"
         url_q = QUrl(resolved_url)
 
-        view = QWebEngineView(self.view_container)
+        view = _RoundedWebView(self.view_container)
         view.setVisible(False)
         # WebEngine owns a separate compositor surface; transparency and animated
         # graphics effects can make that surface blink during its first paint.
         page = BrowserPage(self, self.profile, view)
         view.setPage(page)
         self._connect_page(view, page)
+        # Keep navigation gestures isolated to this tab's WebEngine history.
+        view._history_swipe_controller = HistorySwipeController(view)
 
         placeholder = self._make_placeholder(url_q.toString())
-        placeholder.retry_button.clicked.connect(view.reload)
+        placeholder.retry_button.clicked.connect(
+            lambda _checked=False, target=view: self._retry_page(target)
+        )
         self.views.append(view)
         self._placeholders[view] = placeholder
         self.view_layout.addWidget(placeholder)
         self.view_layout.addWidget(view)
 
         index = len(self.views) - 1
-        self.tabbar.add_tab("New Tab", make_active=False)
+        self.tabbar.add_tab("New Tab", make_active=False, is_dashboard=is_dashboard)
         if make_active or self.current_index < 0:
             self.tabbar.set_active(index)
         else:
             self._set_tab_visibility()
 
-        if is_dashboard:
-            self._load_dashboard(view)
+        if internal_host is not None:
+            self._load_internal_page(view, url_q)
         else:
             view.setUrl(url_q)
         return index
@@ -2096,6 +3539,10 @@ class BrowserWindow(QMainWindow):
     def _connect_page(self, view: QWebEngineView, page: QWebEnginePage) -> None:
         page.titleChanged.connect(
             lambda title, v=view, p=page: self._on_title_changed(title, v)
+            if self._page_is_current(v, p) else None
+        )
+        page.iconChanged.connect(
+            lambda icon, v=view, p=page: self._on_icon_changed(icon, v)
             if self._page_is_current(v, p) else None
         )
         page.urlChanged.connect(
@@ -2118,6 +3565,10 @@ class BrowserWindow(QMainWindow):
             lambda ok, v=view, p=page: self._on_load_finished_with_swap(ok, v, p)
             if self._page_is_current(v, p) else None
         )
+        page.renderProcessTerminated.connect(
+            lambda status, code, v=view, p=page: self._on_render_process_terminated(v, p, status, code)
+            if self._page_is_current(v, p) else None
+        )
         page.fullScreenRequested.connect(
             lambda request, v=view, p=page: self._handle_page_fullscreen(request, v, p)
         )
@@ -2130,8 +3581,23 @@ class BrowserWindow(QMainWindow):
         return view in self.views and view.page() is page
 
     def request_close_tab(self, index: int):
-        """Remove a tab and all of its widgets as one GUI-thread transition."""
+        """Close a tab, returning the last non-dashboard tab to the dashboard."""
         if index < 0 or index >= len(self.views):
+            return
+
+        # A browser with one page should never force the user to create a throwaway
+        # tab just to dismiss the current site. Reuse that tab for the dashboard;
+        # a sole dashboard tab itself remains open and is not needlessly reloaded.
+        if len(self.views) == 1:
+            sole_view = self.views[index]
+            if BrowserWindow._is_dashboard_address(sole_view.url()):
+                return
+            closed_url = sole_view.url().toString().strip()
+            if closed_url and closed_url != "about:blank":
+                closed_tabs = self._closed_tabs_for_current_session()
+                closed_tabs.append(closed_url)
+                del closed_tabs[:-10]
+            self.navigate(DASHBOARD_URL)
             return
 
         closing_view = self.views.pop(index)
@@ -2149,10 +3615,12 @@ class BrowserWindow(QMainWindow):
             placeholder.deleteLater()
 
         self.view_layout.removeWidget(closing_view)
+        getattr(self, "_load_progress_by_view", {}).pop(closing_view, None)
         closing_view.stop()
         closing_view.hide()
         closing_view.deleteLater()
-        self._snapshots.pop(closing_view, None)
+        self._renderer_recovery_attempts.pop(closing_view, None)
+        self._renderer_recovery_pending.discard(closing_view)
         self._recorded_history_urls.pop(closing_view, None)
 
         if not self.views:
@@ -2180,13 +3648,21 @@ class BrowserWindow(QMainWindow):
     def _activate(self, index: int):
         if index < 0 or index >= len(self.views):
             return
-        prev_index = self.current_index
-        if prev_index is not None and prev_index != -1 and prev_index != index:
-            self._capture_snapshot(self.views[prev_index])
 
+        hide_preview = getattr(self, "_hide_tab_preview", None)
+        if callable(hide_preview):
+            hide_preview()
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
+        try:
+            is_loading = bool(view.page().isLoading())
+        except (AttributeError, RuntimeError):
+            is_loading = False
+        self._set_address_load_progress(
+            view,
+            self._load_progress_by_view.get(view, 0) if is_loading else None,
+        )
         self._update_bookmarks_bar_visibility(view.url())
         self.navbar.url_bar.setText(view.url().toString())
         self._sync_site_connection_action(view.url().toString())
@@ -2209,16 +3685,39 @@ class BrowserWindow(QMainWindow):
         if index >= 0 and index != self.current_index:
             self._activate(index)
 
+    def _move_tab(self, from_index: int, to_index: int) -> None:
+        """Keep the view order aligned with the visual tab order during drag."""
+        if (
+            from_index < 0 or to_index < 0
+            or from_index >= len(self.views) or to_index >= len(self.views)
+            or from_index == to_index
+        ):
+            return
+        active_view = self.current_view()
+        moved_view = self.views.pop(from_index)
+        self.views.insert(to_index, moved_view)
+        if active_view in self.views:
+            self.current_index = self.views.index(active_view)
+
+    def _on_icon_changed(self, icon: QIcon, view: QWebEngineView) -> None:
+        if view in self.views:
+            self.tabbar.set_icon(self.views.index(view), icon)
+
     def _on_title_changed(self, title: str, view: QWebEngineView):
         if view not in self.views:
             return
         self.tabbar.set_title(self.views.index(view), title)
-        if view is self.current_view():
-            window_title = f"{title} — ARMA Browser" if title else "ARMA Browser"
-            self.setWindowTitle(window_title)
-            self.title_bar.title.setText(window_title)
+        # Keep the native caption fixed to the app name. The active website title
+        # belongs to its tab label, not to the browser title bar.
 
     def _on_view_url_changed(self, url: QUrl, view: QWebEngineView):
+        if view not in self.views:
+            return
+        tab_index = self.views.index(view)
+        tabbar = getattr(self, "tabbar", None)
+        set_tab_dashboard = getattr(tabbar, "set_tab_dashboard", None)
+        if callable(set_tab_dashboard):
+            set_tab_dashboard(tab_index, BrowserWindow._is_dashboard_address(url))
         if view is self.current_view():
             self._update_bookmarks_bar_visibility(url)
             self.navbar.url_bar.setText(url.toString())
@@ -2227,9 +3726,26 @@ class BrowserWindow(QMainWindow):
                 self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url.toString()))
             self._update_navigation_actions(view)
 
+    def _set_address_load_progress(self, view: QWebEngineView, progress: int | None) -> None:
+        """Update per-tab progress and tint the address field for the active page."""
+        progress_by_view = getattr(self, "_load_progress_by_view", None)
+        if isinstance(progress_by_view, dict):
+            if progress is None:
+                progress_by_view.pop(view, None)
+            else:
+                progress_by_view[view] = max(0, min(100, int(progress)))
+        if view is not self.current_view():
+            return
+        navbar = getattr(self, "navbar", None)
+        set_progress = getattr(navbar, "set_load_progress", None)
+        if callable(set_progress):
+            set_progress(None if progress is None else max(0, min(100, int(progress))))
+
     def _on_load_started(self, view: QWebEngineView):
         if view not in self.views:
             return
+        self.tabbar.set_loading(self.views.index(view), True)
+        self._set_address_load_progress(view, 0)
         placeholder = self._placeholders.get(view)
         if placeholder is not None:
             placeholder._load_error = False
@@ -2241,114 +3757,328 @@ class BrowserWindow(QMainWindow):
             )
             placeholder.loading_progress.show()
             placeholder.retry_button.hide()
-        if view is self.current_view():
-            self.progress_bar.setRange(0, 0)
-            self.progress_bar.show()
-            self.statusBar().showMessage("Loading…", 0)
+
+    def _ensure_load_placeholder(self, view: QWebEngineView) -> QWidget | None:
+        """Return a retry-capable loading surface positioned before a WebEngine view."""
+        views = getattr(self, "views", ())
+        if view not in views:
+            return None
+        placeholders = getattr(self, "_placeholders", None)
+        if not isinstance(placeholders, dict):
+            return None
+        placeholder = placeholders.get(view)
+        if placeholder is not None:
+            return placeholder
+
+        address = ""
+        try:
+            address = view.url().toString()
+        except (AttributeError, RuntimeError):
+            pass
+        maker = getattr(self, "_make_placeholder", None)
+        if callable(maker):
+            placeholder = maker(address)
+        else:
+            placeholder = BrowserWindow._make_placeholder(self, address)
+        placeholder.retry_button.clicked.connect(
+            lambda _checked=False, target=view: BrowserWindow._retry_page(self, target)
+        )
+        placeholders[view] = placeholder
+        layout = getattr(self, "view_layout", None)
+        if layout is not None:
+            layout.insertWidget(max(0, layout.indexOf(view)), placeholder)
+        return placeholder
+
+    def _retry_page(self, view: QWebEngineView) -> None:
+        """Reset bounded renderer recovery state before an explicit user retry."""
+        if view not in getattr(self, "views", ()):
+            return
+        attempts = getattr(self, "_renderer_recovery_attempts", None)
+        if isinstance(attempts, dict):
+            attempts.pop(view, None)
+        pending = getattr(self, "_renderer_recovery_pending", None)
+        if isinstance(pending, set):
+            pending.discard(view)
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if placeholder is not None:
+            placeholder._load_error = False
+            placeholder.loading_title_label.setText("Getting things ready")
+            placeholder.loading_detail_label.setText(
+                "Preparing your start page"
+                if BrowserWindow._is_dashboard_address(view.url())
+                else "Connecting to the website…"
+            )
+            placeholder.loading_progress.show()
+            placeholder.retry_button.hide()
+            placeholder.setVisible(view is self.current_view())
+            view.hide()
+        view.reload()
+
+    def _mark_page_load_failed(
+        self,
+        view: QWebEngineView,
+        failed_url: str,
+        message: str,
+        *,
+        show_status: bool = True,
+    ) -> None:
+        """Keep a visible retry surface instead of exposing a failed black compositor."""
+        if view not in getattr(self, "views", ()):
+            return
+        current = view is self.current_view()
+        placeholder = BrowserWindow._ensure_load_placeholder(self, view)
+        if placeholder is None:
+            return
+
+        placeholder._load_error = True
+        placeholder.loading_title_label.setText("This page didn’t load")
+        placeholder.loading_detail_label.setText(
+            (message or "The page could not be displayed. Try again.").strip()
+        )
+        placeholder.loading_progress.hide()
+        placeholder.retry_button.show()
+        placeholder.setVisible(current)
+        view.hide()
+
+        tabbar = getattr(self, "tabbar", None)
+        if tabbar is not None:
+            try:
+                tab_index = self.views.index(view)
+                tabbar.set_loading(tab_index, False)
+            except (ValueError, AttributeError, RuntimeError):
+                pass
+        BrowserWindow._set_address_load_progress(self, view, None)
+        if current and show_status:
+            _show_status_message(self, f"Could not display page: {message}", 6000)
 
     def _on_loading_changed(self, info, view: QWebEngineView, page: QWebEnginePage):
-        """Report real main-frame network failures without treating cancelled loads as errors."""
+        """Handle main-frame failures in both active and background tabs."""
         try:
             if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
                 return
-            if view is not self.current_view():
+            if view not in getattr(self, "views", ()):
                 return
-            failed_url = info.url().toString()
-            current_url = view.url().toString()
             # Chromium reports ERR_ABORTED for ordinary back/forward/reload supersession.
             if info.errorCode() == -3:
                 return
+            if view in getattr(self, "_renderer_recovery_pending", set()):
+                return
+
+            failed_url = info.url().toString()
+            current_url = view.url().toString()
             message = (info.errorString() or "").strip()
             if not message:
                 message = "The website could not be reached. Check the connection and try again."
-            placeholder = self._placeholders.get(view)
-            if placeholder is None and view in self.views:
-                # A page can fail after an earlier successful load removed its placeholder.
-                # Put the same retryable surface in front of that view for subsequent failures.
-                placeholder = self._make_placeholder(failed_url or current_url)
-                placeholder.retry_button.clicked.connect(view.reload)
-                self._placeholders[view] = placeholder
-                self.view_layout.insertWidget(max(0, self.view_layout.indexOf(view)), placeholder)
-                view.hide()
-            if placeholder is not None:
-                placeholder._load_error = True
-                placeholder.loading_title_label.setText("This page didn’t load")
-                placeholder.loading_detail_label.setText(message)
-                placeholder.loading_progress.hide()
-                placeholder.retry_button.show()
-            self.statusBar().showMessage(f"Could not load page: {message}", 6000)
+            BrowserWindow._mark_page_load_failed(
+                self, view, failed_url or current_url, message,
+                show_status=view is self.current_view(),
+            )
         except (AttributeError, RuntimeError):
             logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
 
-    def _on_load_progress(self, progress: int, view):
+    def _on_render_process_terminated(
+        self,
+        view: QWebEngineView,
+        page: QWebEnginePage,
+        status,
+        exit_code: int,
+    ) -> None:
+        """Retry one renderer crash automatically, then leave a useful manual retry."""
+        if not BrowserWindow._page_is_current(self, view, page):
+            return
+        url_text = ""
+        try:
+            url_text = view.url().toString()
+        except RuntimeError:
+            pass
+        status_name = getattr(status, "name", str(status))
+        logger.warning(
+            "WebEngine renderer terminated for %s (status=%s, exit_code=%s)",
+            url_text or "<unknown>", status_name, exit_code,
+        )
+
+        attempts = getattr(self, "_renderer_recovery_attempts", None)
+        if not isinstance(attempts, dict):
+            attempts = {}
+            self._renderer_recovery_attempts = attempts
+        pending = getattr(self, "_renderer_recovery_pending", None)
+        if not isinstance(pending, set):
+            pending = set()
+            self._renderer_recovery_pending = pending
+
+        if attempts.get(view, 0) >= 1:
+            pending.discard(view)
+            BrowserWindow._mark_page_load_failed(
+                self, view, url_text,
+                f"The page renderer stopped unexpectedly (exit code {exit_code}). Try again.",
+                show_status=view is self.current_view(),
+            )
+            return
+
+        attempts[view] = attempts.get(view, 0) + 1
+        pending.add(view)
+        placeholder = BrowserWindow._ensure_load_placeholder(self, view)
+        if placeholder is not None:
+            placeholder._load_error = False
+            placeholder.loading_title_label.setText("Recovering this page")
+            placeholder.loading_detail_label.setText(
+                "The rendering process stopped unexpectedly. Retrying once…"
+            )
+            placeholder.loading_progress.show()
+            placeholder.retry_button.hide()
+            placeholder.setVisible(view is self.current_view())
+        view.hide()
+        QTimer.singleShot(
+            250,
+            lambda target=view, target_page=page:
+                BrowserWindow._retry_after_renderer_exit(self, target, target_page),
+        )
+
+    def _retry_after_renderer_exit(
+        self, view: QWebEngineView, page: QWebEnginePage
+    ) -> None:
+        if (
+            view in getattr(self, "views", ())
+            and BrowserWindow._page_is_current(self, view, page)
+            and view in getattr(self, "_renderer_recovery_pending", set())
+        ):
+            # Clear the recovery gate immediately before the retry starts. If
+            # this load fails, normal load failure handling must be allowed to
+            # expose the retry screen instead of leaving the spinner indefinitely.
+            getattr(self, "_renderer_recovery_pending", set()).discard(view)
+            try:
+                view.reload()
+            except RuntimeError:
+                logger.debug("Could not retry a terminated WebEngine renderer", exc_info=True)
+
+    def _on_load_progress(self, progress: int, view: QWebEngineView) -> None:
+        if view not in getattr(self, "views", ()):
+            return
+        value = max(0, min(100, int(progress)))
+        progress_by_view = getattr(self, "_load_progress_by_view", None)
+        if isinstance(progress_by_view, dict):
+            progress_by_view[view] = value
         if view is not self.current_view():
             return
-
         now = time.monotonic()
-        if now - self._last_progress_ts < 0.05:  # 50ms
+        if now - getattr(self, "_last_progress_ts", 0.0) < 0.05:  # limit style churn
             return
         self._last_progress_ts = now
-
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(progress)
+        self._set_address_load_progress(view, value)
 
 
-    def _on_load_finished_with_swap(self, ok: bool, view: QWebEngineView, page: QWebEnginePage):
-        if not self._page_is_current(view, page):
+    def _reveal_loaded_view(
+        self, view: QWebEngineView, page: QWebEnginePage
+    ) -> None:
+        """Reveal a successful page after script execution and a compositor grace period."""
+        if not BrowserWindow._page_is_current(self, view, page):
+            return
+        try:
+            if page.isLoading():
+                return
+        except (AttributeError, RuntimeError):
+            pass
+
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if placeholder is not None:
+            if getattr(placeholder, "_load_error", False):
+                return
+            self._placeholders.pop(view, None)
+            self.view_layout.removeWidget(placeholder)
+            placeholder.hide()
+            placeholder.deleteLater()
+        view.setVisible(view is self.current_view())
+        BrowserWindow._set_tab_visibility(self)
+
+    def _on_load_finished_with_swap(
+        self, ok: bool, view: QWebEngineView, page: QWebEnginePage
+    ):
+        if not BrowserWindow._page_is_current(self, view, page):
             return
 
-        if ok and self._is_dashboard_address(view.url()):
-            page.runJavaScript(
-                "document.documentElement.classList.add('dashboard-ready');"
-            )
-        if view is self.current_view():
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(100)
-            QTimer.singleShot(300, lambda v=view: self._hide_progress_if_current(v))
-            # loadFinished(False) also occurs for cancelled or superseded navigations.
-            # A real main-frame network failure is reported by _on_loading_changed.
-            if ok:
-                self.statusBar().showMessage("Page loaded", 1200)
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if (
+            not ok
+            and page.isLoading()
+            and not getattr(placeholder, "_load_error", False)
+            and view not in getattr(self, "_renderer_recovery_pending", set())
+        ):
+            # A superseded navigation can finish false while its replacement is
+            # already active. Do not clear that navigation's progress indicator.
+            return
 
-        if ok and self.history is not None:
+        if not ok:
+            if view in getattr(self, "_renderer_recovery_pending", set()):
+                return
+            if getattr(placeholder, "_load_error", False):
+                placeholder.setVisible(view is self.current_view())
+                view.hide()
+                return
+            url_text = ""
+            try:
+                url_text = view.url().toString()
+            except RuntimeError:
+                pass
+            BrowserWindow._mark_page_load_failed(
+                self, view, url_text,
+                "The page stopped loading before it could be displayed. Try again.",
+                show_status=view is self.current_view(),
+            )
+            return
+
+        # A successful navigation clears a prior renderer recovery state.
+        getattr(self, "_renderer_recovery_pending", set()).discard(view)
+        getattr(self, "_renderer_recovery_attempts", {}).pop(view, None)
+        tabbar = getattr(self, "tabbar", None)
+        if tabbar is not None and view in getattr(self, "views", ()):
+            tabbar.set_loading(self.views.index(view), False)
+        BrowserWindow._set_address_load_progress(self, view, None)
+
+        if getattr(self, "history", None) is not None:
             url_text = view.url().toString()
-            if url_text.startswith(("http://", "https://")) and self._recorded_history_urls.get(view) != url_text:
+            if url_text.startswith(("http://", "https://")) and getattr(self, "_recorded_history_urls", {}).get(view) != url_text:
                 try:
                     self.history.add(url_text)
                     self._recorded_history_urls[view] = url_text
                 except OSError:
                     logger.exception("Could not save browsing history for %s", url_text)
-        self._sync_dashboard_tabs()
 
-        self._update_navigation_actions(view)
-        QTimer.singleShot(100, lambda v=view: self._capture_snapshot(v))
-        placeholder = self._placeholders.get(view)
+        sync_tabs = getattr(self, "_sync_dashboard_tabs", None)
+        if callable(sync_tabs):
+            sync_tabs()
+        else:
+            BrowserWindow._sync_dashboard_tabs(self)
+        BrowserWindow._update_navigation_actions(self, view)
+
+        placeholder = getattr(self, "_placeholders", {}).get(view)
         if placeholder is None:
             view.setVisible(view is self.current_view())
             return
-        if not ok and page.isLoading() and not getattr(placeholder, "_load_error", False):
-            # A superseded navigation can finish with ok=False while its replacement
-            # is already loading. Keep the placeholder until the active request settles.
-            return
-        if not ok and getattr(placeholder, "_load_error", False):
-            # Keep the useful, retryable loading surface instead of fading to a blank page.
-            placeholder.setVisible(view is self.current_view())
-            view.hide()
-            return
 
-        # Switch immediately once the page has a first usable frame. Applying
-        # QGraphicsOpacityEffect to QWebEngineView forces the Chromium compositor
-        # through an extra surface transition and can blank the whole page briefly.
-        view.setGraphicsEffect(None)
-        view.setVisible(view is self.current_view())
-        self._placeholders.pop(view, None)
-        self.view_layout.removeWidget(placeholder)
-        placeholder.deleteLater()
-        self._set_tab_visibility()
+        ready_script = (
+            "(() => { const root = document.documentElement; "
+            "if (root && location.protocol === 'arma:' && location.host === 'dashboard') "
+            "root.classList.add('dashboard-ready'); "
+            "return !!root && document.readyState === 'complete'; })()"
+        )
+        def schedule_reveal(_result=None, target=view, target_page=page):
+            QTimer.singleShot(
+                90,
+                lambda: BrowserWindow._reveal_loaded_view(self, target, target_page),
+            )
 
-    def _hide_progress_if_current(self, view: QWebEngineView) -> None:
-        if view in self.views and view is self.current_view() and not view.page().isLoading():
-            self.progress_bar.hide()
+        try:
+            page.runJavaScript(ready_script, schedule_reveal)
+        except (AttributeError, RuntimeError, TypeError):
+            logger.debug("Could not query page readiness before reveal; using timer fallback.", exc_info=True)
+        # runJavaScript is asynchronous. The fallback handles restricted pages or
+        # a renderer which does not invoke a callback, without exposing the surface
+        # immediately on loadFinished (which Qt documents is independent of rendering).
+        QTimer.singleShot(
+            450,
+            lambda target=view, target_page=page:
+                BrowserWindow._reveal_loaded_view(self, target, target_page),
+        )
 
     def _update_navigation_actions(self, view: QWebEngineView) -> None:
         if view is not self.current_view():
@@ -2363,62 +4093,50 @@ class BrowserWindow(QMainWindow):
             return
         self.handle_fullscreen(request)
 
-    def _show_tab_preview(self, index: int):
-        if index < 0 or index >= len(self.views) or index == self.current_index:
+    def _show_tab_preview(self, index: int) -> None:
+        """Show tab metadata in a mouse-transparent child card; never switch pages."""
+        if (
+            index < 0
+            or index >= len(self.views)
+            or index >= len(self.tabbar.tabs)
+            or index == self.current_index
+        ):
+            self._hide_tab_preview()
             return
 
+        tab = self.tabbar.tabs[index]
         view = self.views[index]
-        pix = self._snapshots.get(view)
-        if pix is None:
-            try:
-                pix = view.grab()
-            except RuntimeError:
-                logger.debug("Skipped preview for a view being destroyed", exc_info=True)
-                pix = None
+        self._tab_preview_popup.set_page_details(
+            tab._title,
+            view.url().toString(),
+            tab._loading,
+            bool(getattr(self.settings, "dark_mode", True)),
+        )
+        self._tab_preview_popup.adjustSize()
 
-        if pix is None or pix.isNull():
-            pix = QPixmap(TAB_WIDTH * 2, 120)
-            pix.fill(Qt.gray)
+        # Convert screen coordinates to the browser's client coordinates. The
+        # popup remains a child widget even when the tab strip is hosted in the
+        # native title bar, unlike Qt.ToolTip windows which can steal hit tests.
+        tab_bottom = tab.mapToGlobal(tab.rect().bottomLeft())
+        local = self.mapFromGlobal(tab_bottom)
+        popup = self._tab_preview_popup
+        margin = 8
+        x = local.x()
+        y = local.y() + margin
+        if x + popup.width() > self.width() - margin:
+            x = self.width() - popup.width() - margin
+        if y + popup.height() > self.height() - margin:
+            y = local.y() - popup.height() - margin
+        x = max(margin, min(x, max(margin, self.width() - popup.width() - margin)))
+        y = max(margin, min(y, max(margin, self.height() - popup.height() - margin)))
+        popup.move(x, y)
+        popup.show()
+        popup.raise_()
 
-        scaled = pix.scaled(320, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._preview_label.setPixmap(scaled)
-        self._preview_label.adjustSize()
-
-        try:
-            tab_widget = self.tabbar.tabs[index]
-            global_pos = tab_widget.mapToGlobal(tab_widget.rect().bottomLeft())
-            x = global_pos.x()
-            y = global_pos.y() + 8
-
-            screen_rect = self.screen().availableGeometry()
-            if x + self._preview_label.width() > screen_rect.right():
-                x = screen_rect.right() - self._preview_label.width() - 8
-            if y + self._preview_label.height() > screen_rect.bottom():
-                y = global_pos.y() - self._preview_label.height() - 8
-            if x < screen_rect.left():
-                x = screen_rect.left() + 8
-            if y < screen_rect.top():
-                y = screen_rect.top() + 8
-
-            self._preview_label.move(x, y)
-        except RuntimeError:
-            center = self.mapToGlobal(self.rect().center())
-            self._preview_label.move(center + QPoint(-160, 40))
-
-        self._preview_label.setWindowOpacity(0.0)
-        self._preview_label.show()
-        self._preview_animation.stop()
-        self._preview_animation.setStartValue(0.0)
-        self._preview_animation.setEndValue(1.0)
-        self._preview_animation.start()
-        QTimer.singleShot(1500, lambda: self._fade_out_preview())
-
-    def _fade_out_preview(self):
-        self._preview_animation.stop()
-        self._preview_animation.setStartValue(1.0)
-        self._preview_animation.setEndValue(0.0)
-        self._preview_animation.start()
-        QTimer.singleShot(200, self._preview_label.hide)
+    def _hide_tab_preview(self) -> None:
+        popup = getattr(self, "_tab_preview_popup", None)
+        if popup is not None:
+            popup.hide()
 
     def _do_on_current(self, func):
         v = self.current_view()
@@ -2445,7 +4163,7 @@ class BrowserWindow(QMainWindow):
         for view in list(self.views):
             old_page = view.page()
             current_url = view.url()
-            was_dashboard = bool(getattr(old_page, "_dashboard_active", False))
+            internal_address = self._internal_host(current_url)
             new_page = BrowserPage(self, self.profile, view)
             view.setPage(new_page)
             self._connect_page(view, new_page)
@@ -2454,8 +4172,8 @@ class BrowserWindow(QMainWindow):
                     old_page.deleteLater()
                 except RuntimeError:
                     logger.debug("Old profile page was already destroyed", exc_info=True)
-            if was_dashboard:
-                self._load_dashboard(view)
+            if internal_address is not None:
+                self._load_internal_page(view, current_url)
             else:
                 view.setUrl(current_url if current_url.isValid() else QUrl("about:blank"))
             self._recorded_history_urls.pop(view, None)
@@ -2467,7 +4185,7 @@ class BrowserWindow(QMainWindow):
             self.navbar.url_bar.setText(self.current_view().url().toString())
             self._update_navigation_actions(self.current_view())
 
-    def on_profile_selected(self, profile_name: str):
+    def on_profile_selected(self, profile_name: str, open_new_tab: bool = True):
         try:
             self.settings.save(self.selected_profile)
         except (OSError, ValueError):
@@ -2478,10 +4196,30 @@ class BrowserWindow(QMainWindow):
         self.settings = new_settings
         self.navbar.settings = new_settings
         self.change_profile(profile_name)
+        self._apply_tabbar_placement()
         self.dock.setVisible(bool(self.settings.proxy_panel_visible))
         self.apply_theme()
-        self.new_tab()
+        if open_new_tab:
+            self.new_tab()
 
+
+    def _show_status_overlay(self, message: str, timeout: int = 0) -> None:
+        view = self.current_view()
+        parent = view if view is not None else getattr(self, "view_container", None)
+        if parent is None:
+            return
+        overlays = getattr(self, "_status_overlays", None)
+        if overlays is None:
+            overlays = {}
+            self._status_overlays = overlays
+        overlay = overlays.get(parent)
+        if overlay is None:
+            overlay = _StatusMessageOverlay(
+                parent, dark=bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+            )
+            overlays[parent] = overlay
+        overlay.set_theme(bool(getattr(getattr(self, "settings", None), "dark_mode", False)))
+        overlay.showMessage(message, timeout)
 
     def open_current_page_externally(self) -> None:
         """Open the current web address in the operating system's default browser."""
@@ -2490,12 +4228,12 @@ class BrowserWindow(QMainWindow):
             return
         url = view.url()
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
-            self.statusBar().showMessage("Only web pages can be opened externally.", 3000)
+            _show_status_message(self, "Only web pages can be opened externally.", 3000)
             return
         if QDesktopServices.openUrl(url):
-            self.statusBar().showMessage("Opened in the default browser.", 2500)
+            _show_status_message(self, "Opened in the default browser.", 2500)
         else:
-            self.statusBar().showMessage("Could not open the default browser.", 4000)
+            _show_status_message(self, "Could not open the default browser.", 4000)
 
     def reload_current_page_bypassing_cache(self) -> None:
         """Retry the active page without reusing resources from the HTTP cache."""
@@ -2504,29 +4242,30 @@ class BrowserWindow(QMainWindow):
             return
         url = view.url()
         if not url.isValid() or url.scheme().lower() not in {"http", "https"}:
-            self.statusBar().showMessage(
+            _show_status_message(self, 
                 "Only web pages can be reloaded without cache.", 3000
             )
             return
         view.page().triggerAction(QWebEnginePage.WebAction.ReloadAndBypassCache)
-        self.statusBar().showMessage("Reloading without the local cache…", 2500)
+        _show_status_message(self, "Reloading without the local cache…", 2500)
 
     def navigate(self, url: str):
         if isinstance(url, QUrl):
             url = url.toString()
         if not isinstance(url, str):
-            self.statusBar().showMessage("The selected address is invalid.", 5000)
+            _show_status_message(self, "The selected address is invalid.", 5000)
             return
-        if BrowserWindow._is_dashboard_address(url):
+        internal_host = BrowserWindow._internal_host(url)
+        if internal_host is not None:
             view = self.current_view()
             if view is not None:
-                self._load_dashboard(view)
-                self.navbar.url_bar.setText(DASHBOARD_URL)
+                self._load_internal_page(view, f"arma://{internal_host}/")
+                self.navbar.url_bar.setText(f"arma://{internal_host}/")
             return
         try:
             resolved_url = resolve_address_input(url, self.settings.default_search_engine)
         except URLInputError as exc:
-            self.statusBar().showMessage(str(exc), 5000)
+            _show_status_message(self, str(exc), 5000)
             logger.info("Rejected address bar input %r: %s", url, exc)
             return
         view = self.current_view()
@@ -2538,25 +4277,132 @@ class BrowserWindow(QMainWindow):
         self.navbar.url_bar.setText(qurl.toString())
 
     def open_settings(self):
-        dialog = SettingsWindow(
-            self.settings, self.selected_profile, self.history, self,
-            dashboard=self.dashboard_manager,
-        )
-        if self.settings.private_mode:
-            dialog.history_btn.setEnabled(False)
-            dialog.history_btn.setToolTip("History is unavailable in a private session.")
-        if dialog.exec():
-            previous_private_mode = bool(self.settings.private_mode)
-            self.settings.load(self.selected_profile)
-            self._refresh_history()
-            self.dock.setVisible(bool(self.settings.proxy_panel_visible))
-            if previous_private_mode != bool(self.settings.private_mode):
-                self.change_profile(self.selected_profile)
-            else:
-                self._apply_profile_settings(self.profile)
-                self._setup_feature_managers()
-            self.apply_theme()
-            self._sync_dashboard_tabs()
+        self.navigate("arma://settings/")
+
+    def open_profiles(self) -> None:
+        """Open the in-browser profile manager in the current tab."""
+        self._profile_modal_on_load = False
+        self.navigate("arma://profile/")
+
+    def open_profiles_for_creation(self) -> None:
+        """Open the in-page create-profile dialog from the browser header menu."""
+        self._profile_modal_on_load = True
+        view = self.current_view()
+        if view is None:
+            self.new_tab("arma://profile/")
+            return
+        self._load_internal_page(view, "arma://profile/")
+
+    def _apply_tabbar_placement(self) -> None:
+        """Move the tab strip between the workspace row and the title-bar left slot."""
+        title_bar = getattr(self, "title_bar", None)
+        tabbar = getattr(self, "tabbar", None)
+        workspace_layout = getattr(self, "browser_workspace_layout", None)
+        if title_bar is None or tabbar is None or workspace_layout is None:
+            return
+
+        enabled = bool(getattr(self.settings, "tabs_in_title_bar", False))
+        currently_in_title_bar = getattr(title_bar, "tabs_widget", None) is tabbar
+        if enabled and not currently_in_title_bar:
+            workspace_layout.removeWidget(tabbar)
+            title_bar.set_tabs_widget(tabbar)
+        elif not enabled and currently_in_title_bar:
+            title_bar.set_tabs_widget(None)
+            workspace_layout.insertWidget(0, tabbar)
+            tabbar.show()
+
+        tabbar.setProperty("inTitleBar", enabled)
+        tabbar.style().unpolish(tabbar)
+        tabbar.style().polish(tabbar)
+        tabbar.update()
+
+    def _refresh_chrome_wallpaper(self, theme: str | None = None) -> None:
+        """Reflect an imported dashboard wallpaper in the browser's title and navigation bars."""
+        shell = getattr(self, "_shell", None)
+        if not isinstance(shell, _BrowserShell):
+            return
+
+        manager = getattr(self, "dashboard_manager", None)
+        manager_data = getattr(manager, "data", {})
+        wallpaper_key = manager_data.get("wallpaper", "") if isinstance(manager_data, dict) else ""
+        image_data = None
+        if isinstance(wallpaper_key, str) and wallpaper_key.startswith("file:"):
+            reader = getattr(manager, "read_wallpaper", None)
+            if callable(reader):
+                try:
+                    image_data = reader(wallpaper_key[5:])
+                except (OSError, TypeError, ValueError):
+                    logger.debug("Could not read the selected dashboard wallpaper for browser chrome.", exc_info=True)
+
+        dark = bool(getattr(getattr(self, "settings", None), "dark_mode", False))
+        title_bar = getattr(self, "title_bar", None)
+        navbar = getattr(self, "navbar", None)
+        has_wallpaper = shell.set_header_wallpaper(image_data, title_bar, navbar, dark)
+        theme = theme or (dark_theme if dark else light_theme)
+
+        if not has_wallpaper:
+            # Restore the original theme when the active dashboard uses one of
+            # the bundled gradient presets or its image could not be read.
+            self.setStyleSheet(theme)
+            if navbar is not None:
+                navbar.setStyleSheet(theme)
+            return
+
+        if dark:
+            title_glass = "rgba(16, 22, 31, 92)"
+            navigation_glass = "rgba(14, 20, 29, 116)"
+            chrome_border = "rgba(255, 255, 255, 42)"
+            tab_idle = "rgba(20, 27, 38, 86)"
+            tab_active = "rgba(37, 50, 70, 190)"
+            tab_edge = "rgba(130, 175, 244, 155)"
+        else:
+            title_glass = "rgba(250, 252, 255, 78)"
+            navigation_glass = "rgba(245, 249, 255, 106)"
+            chrome_border = "rgba(67, 88, 119, 76)"
+            tab_idle = "rgba(255, 255, 255, 92)"
+            tab_active = "rgba(255, 255, 255, 198)"
+            tab_edge = "rgba(57, 121, 214, 155)"
+
+        title_overlay = f"""
+            QWidget#customTitleBar {{
+                background: {title_glass};
+                border-bottom-color: {chrome_border};
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] {{
+                background: transparent;
+                border-color: transparent;
+                border-radius: 0;
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] QFrame#browserTab {{
+                background: {tab_idle};
+                border-color: {chrome_border};
+            }}
+            QFrame#browserTabBar[inTitleBar="true"] QFrame#browserTab[active="true"] {{
+                background: {tab_active};
+                border-color: {tab_edge};
+                border-bottom-color: {tab_edge};
+            }}
+        """
+        navigation_overlay = f"""
+            QToolBar#NavigationBar {{
+                background: {navigation_glass};
+                border-top: none;
+                border-left: none;
+                border-right: none;
+                border-bottom: 1px solid {chrome_border};
+                border-radius: 0;
+            }}
+            QWidget#BookmarksBar {{
+                background: {navigation_glass};
+                border-bottom-color: {chrome_border};
+            }}
+        """
+        self.setStyleSheet(theme + title_overlay)
+        if navbar is not None:
+            # NavigationBar owns a theme stylesheet, so append the glass rules
+            # directly after it rather than relying on an ancestor stylesheet
+            # to beat its local background declarations.
+            navbar.setStyleSheet(theme + navigation_overlay)
 
     def apply_theme(self):
         try:
@@ -2564,10 +4410,302 @@ class BrowserWindow(QMainWindow):
             self.setStyleSheet(theme)
             if hasattr(self.navbar, "apply_theme"):
                 self.navbar.apply_theme()
+            dark = bool(getattr(self.settings, "dark_mode", False))
+            if hasattr(self, "tabbar"):
+                self.tabbar.apply_icon_theme(dark)
+            if hasattr(self, "title_bar"):
+                self.title_bar.apply_icon_theme(dark)
+            if getattr(self, "bookmarks_bar", None) is not None:
+                self.bookmarks_bar.apply_icon_theme(dark)
+            if getattr(self, "proxy_panel", None) is not None:
+                self.proxy_panel.apply_theme("dark" if dark else "light")
             self._sync_dashboard_tabs()
+            theme_name = "dark" if dark else "light"
+            theme_script = (
+                "window.armaSetTheme && window.armaSetTheme("
+                + json.dumps(theme_name) + ");"
+            )
+            for internal_view in tuple(getattr(self, "views", ())):
+                if self._internal_host(internal_view.url()) in {"settings", "history", "downloads"}:
+                    internal_view.page().runJavaScript(theme_script)
+            self._refresh_chrome_wallpaper(theme)
         except RuntimeError:
             logger.exception("Could not apply the current browser theme")
     
+    def _apply_native_window_corner_preference(self, edge_to_edge: bool) -> None:
+        """Ask DWM for genuinely rounded outer corners in windowed mode."""
+        if sys.platform != "win32":
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+            set_attribute = dwmapi.DwmSetWindowAttribute
+            set_attribute.argtypes = (
+                wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD
+            )
+            set_attribute.restype = ctypes.c_long
+            preference = ctypes.c_int(
+                _WIN_DWMWCP_DONOTROUND if edge_to_edge else _WIN_DWMWCP_ROUND
+            )
+            result = int(set_attribute(
+                wintypes.HWND(hwnd),
+                _WIN_DWMWA_WINDOW_CORNER_PREFERENCE,
+                ctypes.byref(preference),
+                ctypes.sizeof(preference),
+            ))
+            if result < 0:
+                logger.debug("DWM did not accept the requested corner preference (HRESULT 0x%08X).", result & 0xFFFFFFFF)
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.debug("Could not request native rounded window corners.", exc_info=True)
+
+    def _apply_native_window_styles(self) -> None:
+        """Restore Windows resize/maximize styles without adding a visible title bar."""
+        # Do not add a resize frame while genuinely fullscreen. The state-change
+        # refresh reapplies resize styles after returning to a windowed state.
+        if sys.platform != "win32" or self.isFullScreen():
+            return
+        try:
+            hwnd = int(self.winId())
+            if not hwnd:
+                return
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            get_style = getattr(user32, "GetWindowLongPtrW", user32.GetWindowLongW)
+            set_style = getattr(user32, "SetWindowLongPtrW", user32.SetWindowLongW)
+            get_style.argtypes = (wintypes.HWND, ctypes.c_int)
+            get_style.restype = ctypes.c_ssize_t
+            set_style.argtypes = (wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t)
+            set_style.restype = ctypes.c_ssize_t
+            current = int(get_style(wintypes.HWND(hwnd), _WIN_GWL_STYLE))
+            desired = _with_resizable_frameless_windows_style(current)
+            if current != desired:
+                set_style(wintypes.HWND(hwnd), _WIN_GWL_STYLE, desired)
+                set_window_pos = user32.SetWindowPos
+                set_window_pos.argtypes = (
+                    wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, wintypes.UINT,
+                )
+                set_window_pos.restype = wintypes.BOOL
+                flags = (
+                    _WIN_SWP_NOMOVE | _WIN_SWP_NOSIZE | _WIN_SWP_NOZORDER
+                    | _WIN_SWP_NOACTIVATE | _WIN_SWP_FRAMECHANGED
+                )
+                if not set_window_pos(wintypes.HWND(hwnd), wintypes.HWND(0), 0, 0, 0, 0, flags):
+                    raise ctypes.WinError(ctypes.get_last_error())
+            self._native_style_hwnd = hwnd
+            self._apply_native_window_corner_preference(self._is_edge_to_edge_geometry())
+        except (AttributeError, OSError, TypeError, ValueError):
+            logger.debug("Could not restore native frameless-window styles.", exc_info=True)
+
+    def _connect_window_handle_signals(self) -> None:
+        handle = self.windowHandle()
+        if handle is None or handle is self._window_handle_connected:
+            return
+        self._window_handle_connected = handle
+        try:
+            handle.screenChanged.connect(self._on_window_screen_changed)
+        except (AttributeError, RuntimeError):
+            logger.debug("Could not connect the active-screen signal.", exc_info=True)
+
+    def _queue_window_frame_refresh(self) -> None:
+        if getattr(self, "_native_refresh_pending", False):
+            return
+        self._native_refresh_pending = True
+        QTimer.singleShot(0, self._refresh_window_platform_state)
+
+    def _refresh_window_platform_state(self) -> None:
+        self._native_refresh_pending = False
+        if getattr(self, "_closing", False):
+            return
+        self._connect_window_handle_signals()
+        self._apply_native_window_styles()
+        self._sync_window_frame()
+        self._update_resize_handles()
+        if hasattr(self, "title_bar"):
+            self.title_bar.sync_maximize_button()
+
+    def _on_window_screen_changed(self, screen) -> None:
+        """Recalculate custom frame geometry when the window moves across monitors."""
+        self._sync_window_frame()
+        self._update_resize_handles()
+        self._queue_window_frame_refresh()
+        QTimer.singleShot(0, lambda target=screen: self._recover_offscreen_geometry(target))
+
+    def _recover_offscreen_geometry(self, screen=None) -> None:
+        """Recover a normal window when its last monitor is disconnected."""
+        if self.isMaximized() or self.isFullScreen() or getattr(self, "_closing", False):
+            return
+        app = QApplication.instance()
+        screens = app.screens() if app is not None else []
+        current = self.frameGeometry()
+        if any(current.intersects(candidate.availableGeometry()) for candidate in screens):
+            return
+        target = screen or (self.windowHandle().screen() if self.windowHandle() else None)
+        target = target or (app.primaryScreen() if app is not None else None)
+        if target is None:
+            return
+        available = target.availableGeometry()
+        width = min(max(self.minimumWidth(), self.width()), available.width())
+        height = min(max(self.minimumHeight(), self.height()), available.height())
+        x = available.x() + max(0, (available.width() - width) // 2)
+        y = available.y() + max(0, (available.height() - height) // 2)
+        self.setGeometry(x, y, width, height)
+        self._sync_window_frame()
+        self._update_resize_handles()
+
+    def event(self, event):
+        result = super().event(event)
+        refresh_types = {QEvent.Type.WinIdChange}
+        for name in ("ScreenChangeInternal", "DevicePixelRatioChange"):
+            value = getattr(QEvent.Type, name, None)
+            if value is not None:
+                refresh_types.add(value)
+        if event.type() in refresh_types:
+            self._queue_window_frame_refresh()
+        return result
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._queue_window_frame_refresh()
+
+    def nativeEvent(self, eventType, message):
+        """Hit-test native resize edges while keeping custom buttons as Qt client controls."""
+        if sys.platform == "win32":
+            try:
+                native = ctypes.cast(int(message), ctypes.POINTER(wintypes.MSG)).contents
+                if native.message == _WIN_WM_NCHITTEST:
+                    packed = int(native.lParam)
+                    screen_point = wintypes.POINT(
+                        ctypes.c_short(packed & 0xFFFF).value,
+                        ctypes.c_short((packed >> 16) & 0xFFFF).value,
+                    )
+                    hwnd = wintypes.HWND(int(self.winId()))
+                    user32 = ctypes.WinDLL("user32", use_last_error=True)
+                    client_point = wintypes.POINT(screen_point.x, screen_point.y)
+                    user32.ScreenToClient.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.POINT))
+                    user32.ScreenToClient.restype = wintypes.BOOL
+                    user32.ScreenToClient(hwnd, ctypes.byref(client_point))
+                    ratio = max(1.0, float(self.devicePixelRatioF()))
+                    local_point = QPoint(
+                        int(round(client_point.x / ratio)),
+                        int(round(client_point.y / ratio)),
+                    )
+
+                    title_bar = getattr(self, "title_bar", None)
+                    if title_bar is not None:
+                        maximize = getattr(title_bar, "maximize_button", None)
+                        if maximize is not None:
+                            rect = QRect(maximize.mapTo(self, QPoint(0, 0)), maximize.size())
+                            if rect.contains(local_point):
+                                # HTMAXBUTTON hands the click to Windows' native non-client
+                                # button handling, bypassing the QToolButton signal. Keep this
+                                # rectangle in the client area so Qt can maximize/restore it.
+                                return True, _WIN_HTCLIENT
+                        buttons = tuple(
+                            getattr(title_bar, name, None)
+                            for name in ("minimize_button", "maximize_button", "close_button")
+                        )
+                        if any(
+                            button is not None and QRect(
+                                button.mapTo(self, QPoint(0, 0)), button.size()
+                            ).contains(local_point)
+                            for button in buttons
+                        ):
+                            return False, 0
+
+                    # Keep real child controls in the client area. Otherwise the
+                    # catch-all HTCAPTION response below makes native Windows
+                    # caption handling swallow clicks on tabs and the New Tab button.
+                    if title_bar is not None:
+                        title_rect = QRect(
+                            title_bar.mapTo(self, QPoint(0, 0)), title_bar.size()
+                        )
+                        if title_rect.contains(local_point):
+                            title_local_point = title_bar.mapFrom(self, local_point)
+                            if _title_bar_point_is_interactive(title_bar, title_local_point):
+                                return True, _WIN_HTCLIENT
+
+                    rect = wintypes.RECT()
+                    user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
+                    user32.GetWindowRect.restype = wintypes.BOOL
+                    if (
+                        not self.isMaximized()
+                        and not self.isFullScreen()
+                        and user32.GetWindowRect(hwnd, ctypes.byref(rect))
+                    ):
+                        dpi = 96
+                        get_dpi = getattr(user32, "GetDpiForWindow", None)
+                        if get_dpi is not None:
+                            get_dpi.argtypes = (wintypes.HWND,)
+                            get_dpi.restype = wintypes.UINT
+                            dpi = max(96, int(get_dpi(hwnd)))
+                        metrics = getattr(user32, "GetSystemMetricsForDpi", None)
+                        if metrics is not None:
+                            metrics.argtypes = (ctypes.c_int, wintypes.UINT)
+                            metrics.restype = ctypes.c_int
+                            edge = max(6, min(16, metrics(32, dpi) + metrics(92, dpi)))
+                        else:
+                            get_metric = user32.GetSystemMetrics
+                            get_metric.argtypes = (ctypes.c_int,)
+                            get_metric.restype = ctypes.c_int
+                            edge = max(6, min(16, get_metric(32) + get_metric(92)))
+                        left = screen_point.x - rect.left < edge
+                        right = rect.right - screen_point.x <= edge
+                        top = screen_point.y - rect.top < edge
+                        bottom = rect.bottom - screen_point.y <= edge
+                        if top and left:
+                            return True, _WIN_HTTOPLEFT
+                        if top and right:
+                            return True, _WIN_HTTOPRIGHT
+                        if bottom and left:
+                            return True, _WIN_HTBOTTOMLEFT
+                        if bottom and right:
+                            return True, _WIN_HTBOTTOMRIGHT
+                        if left:
+                            return True, _WIN_HTLEFT
+                        if right:
+                            return True, _WIN_HTRIGHT
+                        if top:
+                            return True, _WIN_HTTOP
+                        if bottom:
+                            return True, _WIN_HTBOTTOM
+
+                    if title_bar is not None:
+                        title_rect = QRect(title_bar.mapTo(self, QPoint(0, 0)), title_bar.size())
+                        if title_rect.contains(local_point):
+                            return True, _WIN_HTCAPTION
+            except (AttributeError, TypeError, ValueError, OSError):
+                logger.debug("Native hit testing failed; using Qt fallback.", exc_info=True)
+        return super().nativeEvent(eventType, message)
+
+    def prepare_shutdown(self):
+        """Idempotently stop browser pages, downloads and embedded Tor resources."""
+        if getattr(self, "_shutdown_resources_prepared", False):
+            return
+        self._shutdown_resources_prepared = True
+        self._closing = True
+        for download_manager in self._download_managers.values():
+            try:
+                download_manager.shutdown()
+            except Exception:
+                logger.exception("Could not stop a browser download manager")
+        views = list(self.views)
+        self.views.clear()
+        self._load_progress_by_view.clear()
+        self._placeholders.clear()
+        for view in views:
+            try:
+                view.stop()
+                self.view_layout.removeWidget(view)
+                view.deleteLater()
+            except (RuntimeError, AttributeError):
+                logger.debug("A browser page was already destroyed during shutdown.", exc_info=True)
+        try:
+            if self.proxy_panel is not None:
+                self.proxy_panel.prepare_shutdown()
+        except (AttributeError, OSError, RuntimeError):
+            logger.exception("Error while shutting down embedded Tor/Proxy services")
     def closeEvent(self, event):
         active_downloads = []
         for manager in self._download_managers.values():
@@ -2605,30 +4743,8 @@ class BrowserWindow(QMainWindow):
             event.ignore()
             return
         self._pending_network_restart = None
-        self._closing = True
-        for download_manager in self._download_managers.values():
-            download_manager.shutdown()
-        views = list(self.views)
-        self.views.clear()
-        self._placeholders.clear()
-        for view in views:
-            view.stop()
-            self.view_layout.removeWidget(view)
-            view.deleteLater()
-        try:
-            if self.proxy_panel is not None:
-                self.proxy_panel.close()
-                self.proxy_panel.proxyWidget._stop_services(reload_pages=False)
-                self.proxy_panel.proxyWidget.stop_timer.emit()
-                proxy_runner = self.proxy_panel.proxyWidget.proxy
-                if proxy_runner.started and proxy_runner.server is not None:
-                    proxy_runner.stop()
-            for tab in self.tabbar.tabs:
-                tab._hover_timer.stop()
-        except (AttributeError, OSError, RuntimeError):
-            logger.exception("Error while shutting down browser services")
-        finally:
-            event.accept()
+        self.prepare_shutdown()
+        event.accept()
 
     def reload_engine(self):
         for view in tuple(self.views):
@@ -2656,7 +4772,7 @@ class BrowserWindow(QMainWindow):
             widget: widget.isVisible()
             for widget in (
                 self.title_bar, self.navbar, self.bookmarks_bar, self.tabbar,
-                self.progress_bar, self.dock,
+                self.dock,
             )
             if widget is not None
         }

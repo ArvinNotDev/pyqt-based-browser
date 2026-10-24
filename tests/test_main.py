@@ -27,10 +27,13 @@ class StartupConfigurationTests(unittest.TestCase):
                         {"QTWEBENGINE_CHROMIUM_FLAGS": "--enable-features=TestFeature"},
                     ):
                         _load_startup_settings()
-                        self.assertEqual(
-                            os.environ["QTWEBENGINE_CHROMIUM_FLAGS"],
-                            "--enable-features=TestFeature",
-                        )
+                        flags = os.environ["QTWEBENGINE_CHROMIUM_FLAGS"].split()
+                        # Startup also appends Chromium's focused WebGPU opt-out
+                        # because the persisted profile default is conservative;
+                        # caller-provided switches must remain untouched.
+                        self.assertIn("--enable-features=TestFeature", flags)
+                        self.assertIn("--disable-features=WebGPU", flags)
+                        self.assertEqual(flags.count("--enable-features=TestFeature"), 1)
             finally:
                 os.chdir(original_cwd)
 
@@ -132,6 +135,26 @@ class StartupConfigurationTests(unittest.TestCase):
         self.assertTrue(dialogs[0].executed)
         self.assertEqual(navigation, ["https://saved.example/"])
         self.assertEqual(refreshes, [True])
+
+
+    def test_application_font_normalizer_preserves_valid_point_size(self):
+        from PySide6.QtGui import QFont
+
+        class FakeApplication:
+            def __init__(self):
+                self.current_font = QFont("Segoe UI", 11)
+
+            def font(self):
+                return self.current_font
+
+            def setFont(self, font):
+                self.current_font = font
+
+        app = FakeApplication()
+        normalized = _normalize_application_font(app)
+
+        self.assertEqual(normalized.pointSize(), 11)
+        self.assertEqual(app.font().pointSize(), 11)
 
 
     def test_application_font_normalizer_repairs_unspecified_point_size(self):

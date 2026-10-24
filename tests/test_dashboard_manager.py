@@ -113,3 +113,42 @@ def test_imported_wallpaper_is_managed_and_survives_reload(tmp_path):
     reloaded = DashboardManager("Guest", base_dir=base)
     assert reloaded.data["wallpaper"] == wallpaper_key
     assert reloaded.wallpaper_data_url()
+
+
+
+def test_dashboard_widget_sizes_are_profile_scoped_normalized_and_validated(tmp_path):
+    base = tmp_path / "profiles"
+    manager = DashboardManager("Guest", base_dir=base)
+    manager.update({"widget_sizes": {"notes": "wide", "bookmarks": "compact"}})
+
+    loaded = DashboardManager("Guest", base_dir=base)
+    work = DashboardManager("Work", base_dir=base)
+    assert loaded.data["widget_sizes"]["notes"] == "wide"
+    assert loaded.data["widget_sizes"]["bookmarks"] == "compact"
+    assert loaded.data["widget_sizes"]["recent"] == "standard"
+    assert work.data["widget_sizes"]["notes"] == "standard"
+
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": {"notes": "gigantic"}})
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": {"unknown": "wide"}})
+    with pytest.raises(ValueError):
+        loaded.update({"widget_sizes": []})
+
+
+
+def test_malformed_saved_widget_sizes_fall_back_without_discarding_other_preferences(tmp_path):
+    import json
+
+    base = tmp_path / "profiles"
+    manager = DashboardManager("Guest", base_dir=base)
+    manager.update({"notes": "keep this", "widget_sizes": {"notes": "wide"}})
+    with open(manager.file_path, "r", encoding="utf-8") as stream:
+        payload = json.load(stream)
+    payload["widget_sizes"]["notes"] = ["invalid"]
+    with open(manager.file_path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream)
+
+    loaded = DashboardManager("Guest", base_dir=base)
+    assert loaded.data["notes"] == "keep this"
+    assert loaded.data["widget_sizes"]["notes"] == "standard"
