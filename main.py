@@ -131,6 +131,12 @@ if __name__ == "__main__":
     if parent_pid is not None and not _wait_for_parent_exit(parent_pid):
         raise SystemExit("ARMA Browser could not safely reopen its profile after switching network mode.")
     restored_session = _consume_session(resume_path)
+    if restored_session is None:
+        # Read the last normal session before QApplication / Qt WebEngine start,
+        # so settings for the restored profile are applied at process startup.
+        from ui.session_store import load_last_session
+
+        restored_session = load_last_session()
     selected_profile = restored_session.get("profile") if restored_session else None
     _load_startup_settings(selected_profile)
 
@@ -149,6 +155,9 @@ if __name__ == "__main__":
     # Import QWebEngine widgets and icon engines only after the application font
     # has a valid point size. The custom scheme was registered before QApplication.
     from ui.browser_window import BrowserWindow
+    from ui.essential_features import install_essential_features
+
+    install_essential_features(BrowserWindow)
     try:
         window = BrowserWindow(tor_mode=tor_mode, restored_session=restored_session)
     except Exception as exc:
