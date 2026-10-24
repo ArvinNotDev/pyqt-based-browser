@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 
-from PySide6.QtCore import Qt, QUrl, Signal, QPointF
+from PySide6.QtCore import Qt, QUrl, Signal, QPointF, QSize
 from PySide6.QtGui import QDesktopServices, QColor, QFontMetrics, QPainter, QPainterPath, QPen
 import qtawesome as qta
 
@@ -157,9 +157,10 @@ class DownloadsPanel(QFrame):
         self.close_button.setAccessibleName("Close downloads panel")
         self.mode_button = QToolButton(self)
         self.mode_button.setObjectName("downloadsModeButton")
-        self.mode_button.setText("Dock")
-        self.mode_button.setToolTip("Keep downloads pinned beside the page")
-        self.mode_button.setAccessibleName("Change downloads panel layout")
+        self.mode_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.mode_button.setIconSize(QSize(15, 15))
+        self.mode_button.setFixedSize(30, 30)
+        self.mode_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.mode_button.clicked.connect(self.mode_toggle_requested.emit)
         header.addWidget(self.mode_button)
         self.close_button.clicked.connect(self.close_requested.emit)
@@ -228,6 +229,7 @@ class DownloadsPanel(QFrame):
         details_layout.addWidget(self.details_times)
         root.addWidget(self.details_frame)
 
+        self.set_docked(False)
         self.set_manager(manager)
 
     def resizeEvent(self, event) -> None:
@@ -269,12 +271,29 @@ class DownloadsPanel(QFrame):
             self.state_changed.emit(False)
 
     def set_docked(self, docked: bool) -> None:
-        """Label the one-click action that switches between overlay and split layouts."""
-        self.mode_button.setText("Overlay" if docked else "Dock")
-        self.mode_button.setToolTip(
-            "Show downloads over the page without resizing it"
-            if docked else "Keep downloads pinned beside the page and reserve its width"
+        """Show a pin-state icon and label the action available from this layout."""
+        pinned = bool(docked)
+        browser_settings = getattr(self.window(), "settings", None)
+        dark = bool(getattr(browser_settings, "dark_mode", False))
+        icon_color = (
+            ("#82aff4" if dark else "#3979d6")
+            if pinned else ("#c7ced8" if dark else "#64748b")
         )
+        self.mode_button.setProperty("downloadsPinned", pinned)
+        self.mode_button.setIcon(qta.icon(
+            "fa5s.thumbtack", color=icon_color, rotate=45 if pinned else 0
+        ))
+        tooltip = (
+            "Unpin downloads panel and return to overlay"
+            if pinned else "Pin downloads panel beside the page"
+        )
+        self.mode_button.setToolTip(tooltip)
+        self.mode_button.setAccessibleName(
+            "Unpin downloads panel" if pinned else "Pin downloads panel beside the page"
+        )
+        self.mode_button.style().unpolish(self.mode_button)
+        self.mode_button.style().polish(self.mode_button)
+        self.mode_button.update()
 
     def refresh(self, *_args) -> None:
         while self.list_layout.count() > 0:
