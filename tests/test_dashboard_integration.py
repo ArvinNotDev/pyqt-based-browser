@@ -437,6 +437,21 @@ def test_dashboard_template_uses_a_windows_qtwebengine_flicker_fallback(monkeypa
     assert "-webkit-backdrop-filter: none !important" in html
 
 
+def test_renderer_retry_clears_recovery_gate_before_reloading():
+    page = object()
+    view = Mock()
+    view.page.return_value = page
+    browser = SimpleNamespace(
+        views=[view],
+        _renderer_recovery_pending={view},
+    )
+
+    BrowserWindow._retry_after_renderer_exit(browser, view, page)
+
+    view.reload.assert_called_once_with()
+    assert view not in browser._renderer_recovery_pending
+
+
 def test_browser_does_not_capture_live_webengine_surfaces_for_tab_previews():
     from pathlib import Path
 

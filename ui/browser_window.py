@@ -3585,6 +3585,10 @@ class BrowserWindow(QMainWindow):
             and BrowserWindow._page_is_current(self, view, page)
             and view in getattr(self, "_renderer_recovery_pending", set())
         ):
+            # Clear the recovery gate immediately before the retry starts. If
+            # this load fails, normal load failure handling must be allowed to
+            # expose the retry screen instead of leaving the spinner indefinitely.
+            getattr(self, "_renderer_recovery_pending", set()).discard(view)
             try:
                 view.reload()
             except RuntimeError:
