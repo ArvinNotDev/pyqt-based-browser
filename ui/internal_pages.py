@@ -813,7 +813,6 @@ def _bookmarks_page(browser) -> str:
         if url.startswith("arma://"):
             internal_count += 1
         payload = {"id": bookmark_id}
-        address_label = url[7:].split("/", 1)[0] if url.startswith("arma://") else url.split("/", 3)[2]
         cards.append(
             f'<article class="history-item bookmark-item" data-filter-text="{_e((title + " " + url).casefold())}">'
             f'<div class="item-top"><div style="min-width:0">'
