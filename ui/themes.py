@@ -13,6 +13,8 @@ QWidget#browserWindowRoot { background: transparent; }
 QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid rgba(255,255,255,235); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(231,237,246,220); border: 1px solid rgba(255,255,255,175); border-radius: 12px; }
+QStackedWidget#titleBarLeftStack, QWidget#titleBarBrand { background: transparent; border: none; }
+QFrame#browserTabBar[inTitleBar="true"] { background: transparent; border: none; border-radius: 0; padding: 0; }
 QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
 QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #dce1e8; }
 
@@ -541,6 +543,8 @@ QWidget#browserWindowRoot { background: transparent; }
 QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rgba(255,255,255,35); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(34,40,49,230); border: 1px solid rgba(255,255,255,24); border-radius: 12px; }
+QStackedWidget#titleBarLeftStack, QWidget#titleBarBrand { background: transparent; border: none; }
+QFrame#browserTabBar[inTitleBar="true"] { background: transparent; border: none; border-radius: 0; padding: 0; }
 QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
 QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid #30353d; }
 
