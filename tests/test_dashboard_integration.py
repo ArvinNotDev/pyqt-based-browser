@@ -386,6 +386,67 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     assert view not in browser._load_progress_by_view
     browser.tabbar.set_loading.assert_called_once_with(0, False)
 
+def test_background_tab_load_failure_keeps_a_retryable_placeholder():
+    failed_view = Mock()
+    failed_view.url.return_value = QUrl("https://background-offline.example/")
+    active_view = Mock()
+    placeholder = Mock()
+    placeholder._load_error = False
+    placeholder.loading_title_label.setText = Mock()
+    placeholder.loading_detail_label.setText = Mock()
+    placeholder.loading_progress.hide = Mock()
+    placeholder.retry_button.show = Mock()
+    browser = SimpleNamespace(
+        views=[failed_view, active_view],
+        current_index=1,
+        current_view=lambda: active_view,
+        _placeholders={failed_view: placeholder},
+        _load_progress_by_view={failed_view: 72},
+        _renderer_recovery_pending=set(),
+        tabbar=SimpleNamespace(set_loading=Mock()),
+        navbar=SimpleNamespace(set_load_progress=Mock()),
+        statusBar=lambda: SimpleNamespace(showMessage=Mock()),
+    )
+    info = SimpleNamespace(
+        status=lambda: QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus,
+        errorCode=lambda: -105,
+        url=lambda: QUrl("https://background-offline.example/"),
+        errorString=lambda: "Name not resolved",
+    )
+
+    BrowserWindow._on_loading_changed(browser, info, failed_view, object())
+
+    assert placeholder._load_error is True
+    placeholder.loading_title_label.setText.assert_called_once_with("This page didn’t load")
+    placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
+    placeholder.setVisible.assert_called_once_with(False)
+    failed_view.hide.assert_called_once_with()
+    browser.tabbar.set_loading.assert_called_once_with(0, False)
+    assert failed_view not in browser._load_progress_by_view
+
+
+def test_dashboard_template_uses_a_windows_qtwebengine_flicker_fallback(monkeypatch):
+    from ui import browser_window as browser_window_module
+
+    monkeypatch.setattr(browser_window_module.sys, "platform", "win32")
+    html = BrowserWindow._dashboard_template()
+
+    assert '<html lang="en" class="qt-windows-webengine">' in html
+    assert "html.qt-windows-webengine *::before" in html
+    assert "backdrop-filter: none !important" in html
+    assert "-webkit-backdrop-filter: none !important" in html
+
+
+def test_browser_does_not_capture_live_webengine_surfaces_for_tab_previews():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ui" / "browser_window.py").read_text(
+        encoding="utf-8"
+    )
+    assert ".grab()" not in source
+    assert "def _capture_snapshot(" not in source
+
+
 def test_proxy_panel_is_created_only_when_requested():
     placeholder = Mock()
     browser = SimpleNamespace(

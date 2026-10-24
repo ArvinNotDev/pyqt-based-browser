@@ -920,3 +920,14 @@ body.light .toast { background: rgba(26, 42, 61, .88); color: #ffffff; }
   border: 0;
   box-shadow: none;
 }
+
+
+/* Windows Qt WebEngine can flicker when several backdrop-filter layers are
+   composited. Preserve the translucent gradient surfaces without GPU backdrop blur. */
+html.qt-windows-webengine *,
+html.qt-windows-webengine *::before,
+html.qt-windows-webengine *::after,
+html.qt-windows-webengine .modal::backdrop {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}

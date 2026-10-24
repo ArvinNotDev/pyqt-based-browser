@@ -1195,7 +1195,8 @@ class BrowserWindow(QMainWindow):
         self._load_progress_by_view: Dict[QWebEngineView, int] = {}
         self._status_overlays: Dict[object, _StatusMessageOverlay] = {}
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
-        self._snapshots: Dict[QWebEngineView, QPixmap] = {}
+        self._renderer_recovery_attempts: Dict[QWebEngineView, int] = {}
+        self._renderer_recovery_pending: set[QWebEngineView] = set()
         self._recorded_history_urls: Dict[QWebEngineView, str] = {}
         self.current_index: int = -1
         self.view_container = QWidget()
@@ -2490,16 +2491,6 @@ class BrowserWindow(QMainWindow):
         if self.download_toast_effect.opacity() <= 0.01:
             self.download_toast.hide()
 
-    def _capture_snapshot(self, view: QWebEngineView):
-        if view not in self.views:
-            return
-        try:
-            pix = view.grab()
-            if pix and not pix.isNull():
-                self._snapshots[view] = pix
-        except RuntimeError:
-            logger.debug("Skipped snapshot for a view being destroyed", exc_info=True)
-
     def _make_placeholder(self, url_text: str = "") -> QWidget:
         """Build a full-size, theme-aware first-paint screen for a new tab."""
         dark = bool(getattr(self.settings, "dark_mode", True))
@@ -2664,6 +2655,14 @@ class BrowserWindow(QMainWindow):
         page_html = page_html.replace(
             '<script src="dashboard.js"></script>', f"<script>{script}</script>"
         )
+        if sys.platform == "win32":
+            # Keep backdrop-filter off in the Windows Qt WebEngine compositor.
+            # The dashboard's translucent gradients still provide the glass look.
+            page_html = page_html.replace(
+                '<html lang="en">',
+                '<html lang="en" class="qt-windows-webengine">',
+                1,
+            )
         return page_html
 
     def _dashboard_document(self) -> bytes:
@@ -3184,7 +3183,9 @@ class BrowserWindow(QMainWindow):
         self._connect_page(view, page)
 
         placeholder = self._make_placeholder(url_q.toString())
-        placeholder.retry_button.clicked.connect(view.reload)
+        placeholder.retry_button.clicked.connect(
+            lambda _checked=False, target=view: self._retry_page(target)
+        )
         self.views.append(view)
         self._placeholders[view] = placeholder
         self.view_layout.addWidget(placeholder)
@@ -3232,6 +3233,10 @@ class BrowserWindow(QMainWindow):
             lambda ok, v=view, p=page: self._on_load_finished_with_swap(ok, v, p)
             if self._page_is_current(v, p) else None
         )
+        page.renderProcessTerminated.connect(
+            lambda status, code, v=view, p=page: self._on_render_process_terminated(v, p, status, code)
+            if self._page_is_current(v, p) else None
+        )
         page.fullScreenRequested.connect(
             lambda request, v=view, p=page: self._handle_page_fullscreen(request, v, p)
         )
@@ -3267,7 +3272,8 @@ class BrowserWindow(QMainWindow):
         closing_view.stop()
         closing_view.hide()
         closing_view.deleteLater()
-        self._snapshots.pop(closing_view, None)
+        self._renderer_recovery_attempts.pop(closing_view, None)
+        self._renderer_recovery_pending.discard(closing_view)
         self._recorded_history_urls.pop(closing_view, None)
 
         if not self.views:
@@ -3297,8 +3303,7 @@ class BrowserWindow(QMainWindow):
             return
         prev_index = self.current_index
         if prev_index is not None and prev_index != -1 and prev_index != index:
-            self._capture_snapshot(self.views[prev_index])
-
+    
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
@@ -3398,43 +3403,194 @@ class BrowserWindow(QMainWindow):
             placeholder.loading_progress.show()
             placeholder.retry_button.hide()
 
+    def _ensure_load_placeholder(self, view: QWebEngineView) -> QWidget | None:
+        """Return a retry-capable loading surface positioned before a WebEngine view."""
+        views = getattr(self, "views", ())
+        if view not in views:
+            return None
+        placeholders = getattr(self, "_placeholders", None)
+        if not isinstance(placeholders, dict):
+            return None
+        placeholder = placeholders.get(view)
+        if placeholder is not None:
+            return placeholder
+
+        address = ""
+        try:
+            address = view.url().toString()
+        except (AttributeError, RuntimeError):
+            pass
+        maker = getattr(self, "_make_placeholder", None)
+        if callable(maker):
+            placeholder = maker(address)
+        else:
+            placeholder = BrowserWindow._make_placeholder(self, address)
+        placeholder.retry_button.clicked.connect(
+            lambda _checked=False, target=view: BrowserWindow._retry_page(self, target)
+        )
+        placeholders[view] = placeholder
+        layout = getattr(self, "view_layout", None)
+        if layout is not None:
+            layout.insertWidget(max(0, layout.indexOf(view)), placeholder)
+        return placeholder
+
+    def _retry_page(self, view: QWebEngineView) -> None:
+        """Reset bounded renderer recovery state before an explicit user retry."""
+        if view not in getattr(self, "views", ()):
+            return
+        attempts = getattr(self, "_renderer_recovery_attempts", None)
+        if isinstance(attempts, dict):
+            attempts.pop(view, None)
+        pending = getattr(self, "_renderer_recovery_pending", None)
+        if isinstance(pending, set):
+            pending.discard(view)
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if placeholder is not None:
+            placeholder._load_error = False
+            placeholder.loading_title_label.setText("Getting things ready")
+            placeholder.loading_detail_label.setText(
+                "Preparing your start page"
+                if BrowserWindow._is_dashboard_address(view.url())
+                else "Connecting to the website…"
+            )
+            placeholder.loading_progress.show()
+            placeholder.retry_button.hide()
+            placeholder.setVisible(view is self.current_view())
+            view.hide()
+        view.reload()
+
+    def _mark_page_load_failed(
+        self,
+        view: QWebEngineView,
+        failed_url: str,
+        message: str,
+        *,
+        show_status: bool = True,
+    ) -> None:
+        """Keep a visible retry surface instead of exposing a failed black compositor."""
+        if view not in getattr(self, "views", ()):
+            return
+        current = view is self.current_view()
+        placeholder = BrowserWindow._ensure_load_placeholder(self, view)
+        if placeholder is None:
+            return
+
+        placeholder._load_error = True
+        placeholder.loading_title_label.setText("This page didn’t load")
+        placeholder.loading_detail_label.setText(
+            (message or "The page could not be displayed. Try again.").strip()
+        )
+        placeholder.loading_progress.hide()
+        placeholder.retry_button.show()
+        placeholder.setVisible(current)
+        view.hide()
+
+        tabbar = getattr(self, "tabbar", None)
+        if tabbar is not None:
+            try:
+                tab_index = self.views.index(view)
+                tabbar.set_loading(tab_index, False)
+            except (ValueError, AttributeError, RuntimeError):
+                pass
+        BrowserWindow._set_address_load_progress(self, view, None)
+        if current and show_status:
+            _show_status_message(self, f"Could not display page: {message}", 6000)
+
     def _on_loading_changed(self, info, view: QWebEngineView, page: QWebEnginePage):
-        """Report real main-frame network failures without treating cancelled loads as errors."""
+        """Handle main-frame failures in both active and background tabs."""
         try:
             if info.status() != QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus:
                 return
-            if view is not self.current_view():
+            if view not in getattr(self, "views", ()):
                 return
-            failed_url = info.url().toString()
-            current_url = view.url().toString()
             # Chromium reports ERR_ABORTED for ordinary back/forward/reload supersession.
             if info.errorCode() == -3:
                 return
+            if view in getattr(self, "_renderer_recovery_pending", set()):
+                return
+
+            failed_url = info.url().toString()
+            current_url = view.url().toString()
             message = (info.errorString() or "").strip()
             if not message:
                 message = "The website could not be reached. Check the connection and try again."
-            tabbar = getattr(self, "tabbar", None)
-            if view in self.views and tabbar is not None:
-                tabbar.set_loading(self.views.index(view), False)
-            self._set_address_load_progress(view, None)
-            placeholder = self._placeholders.get(view)
-            if placeholder is None and view in self.views:
-                # A page can fail after an earlier successful load removed its placeholder.
-                # Put the same retryable surface in front of that view for subsequent failures.
-                placeholder = self._make_placeholder(failed_url or current_url)
-                placeholder.retry_button.clicked.connect(view.reload)
-                self._placeholders[view] = placeholder
-                self.view_layout.insertWidget(max(0, self.view_layout.indexOf(view)), placeholder)
-                view.hide()
-            if placeholder is not None:
-                placeholder._load_error = True
-                placeholder.loading_title_label.setText("This page didn’t load")
-                placeholder.loading_detail_label.setText(message)
-                placeholder.loading_progress.hide()
-                placeholder.retry_button.show()
-            _show_status_message(self, f"Could not load page: {message}", 6000)
+            BrowserWindow._mark_page_load_failed(
+                self, view, failed_url or current_url, message,
+                show_status=view is self.current_view(),
+            )
         except (AttributeError, RuntimeError):
             logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
+
+    def _on_render_process_terminated(
+        self,
+        view: QWebEngineView,
+        page: QWebEnginePage,
+        status,
+        exit_code: int,
+    ) -> None:
+        """Retry one renderer crash automatically, then leave a useful manual retry."""
+        if not BrowserWindow._page_is_current(self, view, page):
+            return
+        url_text = ""
+        try:
+            url_text = view.url().toString()
+        except RuntimeError:
+            pass
+        status_name = getattr(status, "name", str(status))
+        logger.warning(
+            "WebEngine renderer terminated for %s (status=%s, exit_code=%s)",
+            url_text or "<unknown>", status_name, exit_code,
+        )
+
+        attempts = getattr(self, "_renderer_recovery_attempts", None)
+        if not isinstance(attempts, dict):
+            attempts = {}
+            self._renderer_recovery_attempts = attempts
+        pending = getattr(self, "_renderer_recovery_pending", None)
+        if not isinstance(pending, set):
+            pending = set()
+            self._renderer_recovery_pending = pending
+
+        if attempts.get(view, 0) >= 1:
+            pending.discard(view)
+            BrowserWindow._mark_page_load_failed(
+                self, view, url_text,
+                f"The page renderer stopped unexpectedly (exit code {exit_code}). Try again.",
+                show_status=view is self.current_view(),
+            )
+            return
+
+        attempts[view] = attempts.get(view, 0) + 1
+        pending.add(view)
+        placeholder = BrowserWindow._ensure_load_placeholder(self, view)
+        if placeholder is not None:
+            placeholder._load_error = False
+            placeholder.loading_title_label.setText("Recovering this page")
+            placeholder.loading_detail_label.setText(
+                "The rendering process stopped unexpectedly. Retrying once…"
+            )
+            placeholder.loading_progress.show()
+            placeholder.retry_button.hide()
+            placeholder.setVisible(view is self.current_view())
+        view.hide()
+        QTimer.singleShot(
+            250,
+            lambda target=view, target_page=page:
+                BrowserWindow._retry_after_renderer_exit(self, target, target_page),
+        )
+
+    def _retry_after_renderer_exit(
+        self, view: QWebEngineView, page: QWebEnginePage
+    ) -> None:
+        if (
+            view in getattr(self, "views", ())
+            and BrowserWindow._page_is_current(self, view, page)
+            and view in getattr(self, "_renderer_recovery_pending", set())
+        ):
+            try:
+                view.reload()
+            except RuntimeError:
+                logger.debug("Could not retry a terminated WebEngine renderer", exc_info=True)
 
     def _on_load_progress(self, progress: int, view: QWebEngineView) -> None:
         if view not in getattr(self, "views", ()):
@@ -3452,59 +3608,118 @@ class BrowserWindow(QMainWindow):
         self._set_address_load_progress(view, value)
 
 
-    def _on_load_finished_with_swap(self, ok: bool, view: QWebEngineView, page: QWebEnginePage):
-        if not self._page_is_current(view, page):
+    def _reveal_loaded_view(
+        self, view: QWebEngineView, page: QWebEnginePage
+    ) -> None:
+        """Reveal a successful page after script execution and a compositor grace period."""
+        if not BrowserWindow._page_is_current(self, view, page):
             return
-        if view in self.views:
-            self.tabbar.set_loading(self.views.index(view), False)
-        # Clear immediately on loadFinished. Chromium can keep isLoading() true
-        # briefly after the finish signal; tying UI cleanup to that flag left a
-        # permanent "100%" overlay on some dashboard-launched pages.
-        self._set_address_load_progress(view, None)
+        try:
+            if page.isLoading():
+                return
+        except (AttributeError, RuntimeError):
+            pass
 
-        if ok and self._is_dashboard_address(view.url()):
-            page.runJavaScript(
-                "document.documentElement.classList.add('dashboard-ready');"
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if placeholder is not None:
+            if getattr(placeholder, "_load_error", False):
+                return
+            self._placeholders.pop(view, None)
+            self.view_layout.removeWidget(placeholder)
+            placeholder.hide()
+            placeholder.deleteLater()
+        view.setVisible(view is self.current_view())
+        BrowserWindow._set_tab_visibility(self)
+
+    def _on_load_finished_with_swap(
+        self, ok: bool, view: QWebEngineView, page: QWebEnginePage
+    ):
+        if not BrowserWindow._page_is_current(self, view, page):
+            return
+
+        placeholder = getattr(self, "_placeholders", {}).get(view)
+        if (
+            not ok
+            and page.isLoading()
+            and not getattr(placeholder, "_load_error", False)
+            and view not in getattr(self, "_renderer_recovery_pending", set())
+        ):
+            # A superseded navigation can finish false while its replacement is
+            # already active. Do not clear that navigation's progress indicator.
+            return
+
+        if not ok:
+            if view in getattr(self, "_renderer_recovery_pending", set()):
+                return
+            if getattr(placeholder, "_load_error", False):
+                placeholder.setVisible(view is self.current_view())
+                view.hide()
+                return
+            url_text = ""
+            try:
+                url_text = view.url().toString()
+            except RuntimeError:
+                pass
+            BrowserWindow._mark_page_load_failed(
+                self, view, url_text,
+                "The page stopped loading before it could be displayed. Try again.",
+                show_status=view is self.current_view(),
             )
-        # loadFinished(False) also occurs for cancelled or superseded navigations.
-        # A real main-frame network failure is reported by _on_loading_changed.
+            return
 
-        if ok and self.history is not None:
+        # A successful navigation clears a prior renderer recovery state.
+        getattr(self, "_renderer_recovery_pending", set()).discard(view)
+        getattr(self, "_renderer_recovery_attempts", {}).pop(view, None)
+        tabbar = getattr(self, "tabbar", None)
+        if tabbar is not None and view in getattr(self, "views", ()):
+            tabbar.set_loading(self.views.index(view), False)
+        BrowserWindow._set_address_load_progress(self, view, None)
+
+        if getattr(self, "history", None) is not None:
             url_text = view.url().toString()
-            if url_text.startswith(("http://", "https://")) and self._recorded_history_urls.get(view) != url_text:
+            if url_text.startswith(("http://", "https://")) and getattr(self, "_recorded_history_urls", {}).get(view) != url_text:
                 try:
                     self.history.add(url_text)
                     self._recorded_history_urls[view] = url_text
                 except OSError:
                     logger.exception("Could not save browsing history for %s", url_text)
-        self._sync_dashboard_tabs()
 
-        self._update_navigation_actions(view)
-        QTimer.singleShot(100, lambda v=view: self._capture_snapshot(v))
-        placeholder = self._placeholders.get(view)
+        sync_tabs = getattr(self, "_sync_dashboard_tabs", None)
+        if callable(sync_tabs):
+            sync_tabs()
+        else:
+            BrowserWindow._sync_dashboard_tabs(self)
+        BrowserWindow._update_navigation_actions(self, view)
+
+        placeholder = getattr(self, "_placeholders", {}).get(view)
         if placeholder is None:
             view.setVisible(view is self.current_view())
             return
-        if not ok and page.isLoading() and not getattr(placeholder, "_load_error", False):
-            # A superseded navigation can finish with ok=False while its replacement
-            # is already loading. Keep the placeholder until the active request settles.
-            return
-        if not ok and getattr(placeholder, "_load_error", False):
-            # Keep the useful, retryable loading surface instead of fading to a blank page.
-            placeholder.setVisible(view is self.current_view())
-            view.hide()
-            return
 
-        # Switch immediately once the page has a first usable frame. Applying
-        # QGraphicsOpacityEffect to QWebEngineView forces the Chromium compositor
-        # through an extra surface transition and can blank the whole page briefly.
-        view.setGraphicsEffect(None)
-        view.setVisible(view is self.current_view())
-        self._placeholders.pop(view, None)
-        self.view_layout.removeWidget(placeholder)
-        placeholder.deleteLater()
-        self._set_tab_visibility()
+        ready_script = (
+            "(() => { const root = document.documentElement; "
+            "if (root && location.protocol === 'arma:' && location.host === 'dashboard') "
+            "root.classList.add('dashboard-ready'); "
+            "return !!root && document.readyState === 'complete'; })()"
+        )
+        def schedule_reveal(_result=None, target=view, target_page=page):
+            QTimer.singleShot(
+                90,
+                lambda: BrowserWindow._reveal_loaded_view(self, target, target_page),
+            )
 
+        try:
+            page.runJavaScript(ready_script, schedule_reveal)
+        except (AttributeError, RuntimeError, TypeError):
+            logger.debug("Could not query page readiness before reveal; using timer fallback.", exc_info=True)
+        # runJavaScript is asynchronous. The fallback handles restricted pages or
+        # a renderer which does not invoke a callback, without exposing the surface
+        # immediately on loadFinished (which Qt documents is independent of rendering).
+        QTimer.singleShot(
+            450,
+            lambda target=view, target_page=page:
+                BrowserWindow._reveal_loaded_view(self, target, target_page),
+        )
 
     def _update_navigation_actions(self, view: QWebEngineView) -> None:
         if view is not self.current_view():
@@ -3524,17 +3739,40 @@ class BrowserWindow(QMainWindow):
             return
 
         view = self.views[index]
-        pix = self._snapshots.get(view)
-        if pix is None:
-            try:
-                pix = view.grab()
-            except RuntimeError:
-                logger.debug("Skipped preview for a view being destroyed", exc_info=True)
-                pix = None
-
-        if pix is None or pix.isNull():
-            pix = QPixmap(TAB_WIDTH * 2, 120)
-            pix.fill(Qt.gray)
+        # Never call QWidget.grab() on QWebEngineView. Chromium's accelerated
+        # surface is compositor-owned; grabbing it can cause flashes/black frames.
+        # Use a stable, locally painted preview card instead of sampling live pixels.
+        pix = QPixmap(640, 360)
+        dark = bool(getattr(getattr(self, "settings", None), "dark_mode", True))
+        background = QColor("#17212b" if dark else "#eef3fa")
+        accent = QColor("#8db8ff" if dark else "#3979d6")
+        muted = QColor("#9aa9bc" if dark else "#66768d")
+        pix.fill(background)
+        preview_painter = QPainter(pix)
+        preview_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        preview_painter.setPen(accent)
+        preview_painter.drawText(
+            QRect(24, 112, 592, 40), Qt.AlignmentFlag.AlignCenter, "ARMA Browser"
+        )
+        tab_title = self.tabbar.tabs[index]._title if index < len(self.tabbar.tabs) else "Page preview"
+        title_font = preview_painter.font()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        preview_painter.setFont(title_font)
+        preview_painter.setPen(background.lighter(175) if dark else background.darker(170))
+        preview_painter.drawText(
+            QRect(24, 164, 592, 40), Qt.AlignmentFlag.AlignCenter, tab_title[:90]
+        )
+        url_font = preview_painter.font()
+        url_font.setPointSize(9)
+        url_font.setBold(False)
+        preview_painter.setFont(url_font)
+        preview_painter.setPen(muted)
+        preview_painter.drawText(
+            QRect(24, 210, 592, 54), Qt.AlignmentFlag.AlignCenter,
+            view.url().toString()[:150],
+        )
+        preview_painter.end()
 
         scaled = pix.scaled(320, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self._preview_label.setPixmap(scaled)
