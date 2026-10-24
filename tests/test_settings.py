@@ -30,6 +30,7 @@ def test_defaults_are_independent_and_stable():
     assert first.show_dev_tools is False
     assert first.hardware_acceleration is True
     assert first.webgpu_enabled is False
+    assert first.tabs_in_title_bar is False
     assert first.profile is not second.profile
     assert first.profiles_list is not second.profiles_list
 
@@ -106,6 +107,26 @@ def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
     loaded.load("Guest")
     assert loaded.startup_page == "dashboard"
     assert loaded.new_tab_page == "dashboard"
+
+
+def test_tabs_in_title_bar_preference_round_trips_and_rejects_invalid_values(tmp_path):
+    settings_file = tmp_path / "settings.json"
+    settings = Settings(file_path=str(settings_file))
+    assert settings.tabs_in_title_bar is False
+
+    settings.tabs_in_title_bar = True
+    settings.save("Guest")
+
+    loaded = Settings(file_path=str(settings_file))
+    loaded.load("Guest")
+    assert loaded.tabs_in_title_bar is True
+
+    settings_file.write_text(
+        json.dumps({"Guest": {"tabs_in_title_bar": "yes"}}),
+        encoding="utf-8",
+    )
+    loaded.load("Guest")
+    assert loaded.tabs_in_title_bar is False
 
 
 def test_old_project_relative_download_default_migrates_to_system_downloads(tmp_path):
