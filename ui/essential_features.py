@@ -524,6 +524,10 @@ def install_essential_features(browser_window_class):
         except (AttributeError, RuntimeError):
             logger.debug("Could not save session before shutdown", exc_info=True)
         original_close_event(self, event)
+        if not event.isAccepted():
+            # Closing may be cancelled by an active download or a failed network
+            # mode handoff. Allow DevTools to be attached again in that case.
+            self._essential_shutting_down = False
 
     def _wrapped_internal_page_action(self, page, view, host, action, payload):
         result = original_internal_page_action(self, page, view, host, action, payload)
