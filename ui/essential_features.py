@@ -502,6 +502,8 @@ def install_essential_features(browser_window_class):
         self._essential_permission_memory = {}
         self._essential_devtools_dock = None
         self._essential_devtools_view = None
+        self._essential_devtools_bound_page = None
+        self._essential_shutting_down = False
         self._essential_find_dialog = None
         self._essential_interceptors = getattr(self, "_essential_interceptors", {})
         self._ensure_session_timer()
@@ -511,8 +513,11 @@ def install_essential_features(browser_window_class):
         self._schedule_session_save()
 
     def _wrapped_close_event(self, event):
-        # The modern browser's closeEvent calls prepare_shutdown(), which clears
-        # self.views before returning. Persist the latest tabs before delegating.
+        # Release inspected pages before BrowserWindow destroys its profiles.
+        try:
+            self._essential_shutdown_devtools()
+        except (AttributeError, RuntimeError):
+            logger.debug("Could not release DevTools before shutdown", exc_info=True)
         try:
             self._essential_save_session_now()
         except (AttributeError, RuntimeError):
@@ -718,12 +723,15 @@ def install_essential_features(browser_window_class):
             dock = QDockWidget("Developer tools", self)
             dock.setObjectName("developerToolsDock")
             dock.setAllowedAreas(Qt.BottomDockWidgetArea | Qt.RightDockWidgetArea)
-            dock.setFeatures(QDockWidget.DockWidgetClosable | QDockWidget.DockWidgetMovable)
+            # Chromium DevTools has its own close control. Do not add a second
+            # close button in the dock title bar.
+            dock.setFeatures(QDockWidget.DockWidgetMovable)
             tools_view = QWebEngineView(dock)
             dock.setWidget(tools_view)
             self.addDockWidget(Qt.BottomDockWidgetArea, dock)
             self._essential_devtools_dock = dock
             self._essential_devtools_view = tools_view
+            self._essential_devtools_bound_page = None
             dock.visibilityChanged.connect(
                 lambda visible, ref=weakref.ref(self): (
                     ref()._essential_attach_devtools() if visible and ref() is not None else None
@@ -734,32 +742,97 @@ def install_essential_features(browser_window_class):
         dock.raise_()
 
     def _essential_attach_devtools(self):
+        if getattr(self, "_essential_shutting_down", False):
+            return
         dock = getattr(self, "_essential_devtools_dock", None)
         tools_view = getattr(self, "_essential_devtools_view", None)
         target = self.current_view()
         if dock is None or tools_view is None or target is None:
             return
         try:
-            profile = target.page().profile()
-            if tools_view.page().profile() is not profile:
-                old_page = tools_view.page()
+            target_page = target.page()
+            profile = target_page.profile()
+            tools_page = tools_view.page()
+            if tools_page.profile() is not profile:
+                # A DevTools page must use the inspected page's profile. Detach
+                # every old target before replacing it; Qt may destroy the old
+                # page as part of setPage(), so never assume its wrapper is valid.
+                self._essential_detach_devtools()
+                old_page = tools_page
                 tools_view.setPage(QWebEnginePage(profile, tools_view))
-                old_page.deleteLater()
-            target.page().setDevToolsPage(tools_view.page())
+                tools_page = tools_view.page()
+                try:
+                    import shiboken6
+                    if shiboken6.isValid(old_page):
+                        shiboken6.delete(old_page)
+                except (ImportError, RuntimeError, TypeError):
+                    pass
+
+            if getattr(self, "_essential_devtools_bound_page", None) is not tools_page:
+                tools_page.windowCloseRequested.connect(
+                    self._essential_close_devtools_from_frontend
+                )
+                self._essential_devtools_bound_page = tools_page
+            target_page.setDevToolsPage(tools_page)
         except (AttributeError, RuntimeError, TypeError):
-            logger.exception("Could not attach developer tools")
+            # Qt can invalidate WebEngine wrappers during tab/profile teardown.
+            # This is a recoverable state, not a reason to print a traceback.
+            logger.debug("Developer tools could not be attached to the current page", exc_info=True)
             self.statusBar().showMessage("Developer tools are unavailable for this page.", 3000)
+
+    def _essential_close_devtools_from_frontend(self):
+        """Honor the close control inside the Chromium DevTools frontend."""
+        self._essential_detach_devtools()
+        dock = getattr(self, "_essential_devtools_dock", None)
+        if dock is not None:
+            dock.hide()
+
+    def _essential_shutdown_devtools(self):
+        """Release DevTools' reference to a profile before browser shutdown."""
+        self._essential_shutting_down = True
+        self._essential_detach_devtools()
+        dock = getattr(self, "_essential_devtools_dock", None)
+        tools_view = getattr(self, "_essential_devtools_view", None)
+        if tools_view is not None:
+            try:
+                tools_view.stop()
+                old_page = tools_view.page()
+                # Move the view to the application default profile first, then
+                # synchronously destroy its old profile-bound page if still live.
+                tools_view.setPage(QWebEnginePage(tools_view))
+                try:
+                    import shiboken6
+                    if shiboken6.isValid(old_page):
+                        shiboken6.delete(old_page)
+                except (ImportError, RuntimeError, TypeError):
+                    pass
+            except (AttributeError, RuntimeError, TypeError):
+                logger.debug("DevTools page was already released during shutdown", exc_info=True)
+        if dock is not None:
+            try:
+                self.removeDockWidget(dock)
+                dock.hide()
+            except (AttributeError, RuntimeError):
+                pass
+        self._essential_devtools_bound_page = None
 
     def _essential_detach_devtools(self):
         tools_view = getattr(self, "_essential_devtools_view", None)
         if tools_view is None:
             return
-        devtools_page = tools_view.page()
+        try:
+            devtools_page = tools_view.page()
+            import shiboken6
+            if not shiboken6.isValid(devtools_page):
+                return
+        except (ImportError, AttributeError, RuntimeError, TypeError):
+            return
         for view in tuple(getattr(self, "views", [])):
             try:
-                if view.page().devToolsPage() is devtools_page:
-                    view.page().setDevToolsPage(None)
-            except (AttributeError, RuntimeError):
+                page = view.page()
+                if page.devToolsPage() is devtools_page:
+                    page.setDevToolsPage(None)
+            except (AttributeError, RuntimeError, TypeError):
                 pass
 
     def _essential_permission_document(self):
@@ -944,6 +1017,8 @@ def install_essential_features(browser_window_class):
     browser_window_class._essential_print_page = _essential_print_page
     browser_window_class._essential_toggle_devtools = _essential_toggle_devtools
     browser_window_class._essential_attach_devtools = _essential_attach_devtools
+    browser_window_class._essential_close_devtools_from_frontend = _essential_close_devtools_from_frontend
+    browser_window_class._essential_shutdown_devtools = _essential_shutdown_devtools
     browser_window_class._essential_detach_devtools = _essential_detach_devtools
     browser_window_class._essential_permission_document = _essential_permission_document
     browser_window_class._essential_save_permission_document = _essential_save_permission_document
