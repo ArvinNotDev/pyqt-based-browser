@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, QUrl, QUrlQuery
+from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEngineProfile, QWebEngineUrlScheme
@@ -92,6 +93,39 @@ def test_profile_page_is_an_internal_page_with_switch_create_delete_and_avatar_c
     assert 'data-edit-avatar="Work"' in html
     assert 'id="profile-create-open"' in html
     assert 'href="arma://profile/"' in html
+
+
+def test_profile_page_loads_large_existing_profile_picture_as_thumbnail(tmp_path, monkeypatch):
+    import ui.internal_pages as internal_pages
+
+    data_root = tmp_path / "profile_data"
+    image_path = data_root / "Guest" / "profile" / "image.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(512, 512, QImage.Format.Format_RGB32)
+    state = 0x12345678
+    for y in range(image.height()):
+        for x in range(image.width()):
+            state = (1664525 * state + 1013904223) & 0xFFFFFFFF
+            image.setPixel(x, y, 0xFF000000 | (state & 0x00FFFFFF))
+    assert image.save(str(image_path), "PNG")
+    assert image_path.stat().st_size > 420_000
+
+    monkeypatch.setattr(
+        internal_pages,
+        "user_data_path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(dark_mode=False, profiles_list=["Guest", "Work"]),
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest", "Work"]),
+    )
+
+    document = render_internal_page(browser, "profile")
+
+    assert 'src="data:image/png;base64,' in document
+    assert 'data-avatar-src="data:image/png;base64,' in document
+    assert "avatar-initials" in document  # Work has no picture and uses its fallback.
 
 
 def test_settings_page_links_to_in_browser_profile_manager(tmp_path):

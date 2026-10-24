@@ -8,6 +8,9 @@ import json
 import os
 from typing import Any
 
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, Qt
+from PySide6.QtGui import QImage, QImageReader
+
 from app_paths import user_data_path
 from managers.storage import profile_data_path, validate_profile_name
 
@@ -997,7 +1000,8 @@ def _profile_page(browser) -> str:
     if open_create_modal:
         browser._profile_modal_on_load = False
 
-    def avatar_data(name: str, max_bytes: int = 420_000) -> str:
+    def avatar_data(name: str, max_bytes: int = 12_000_000) -> str:
+        """Load saved profile pictures and embed a small, safe PNG thumbnail."""
         try:
             path = profile_data_path(
                 name, "profile", "image.png", base_dir=user_data_path("profile_data")
@@ -1005,11 +1009,52 @@ def _profile_page(browser) -> str:
             if not os.path.isfile(path) or os.path.getsize(path) > max_bytes:
                 return ""
             with open(path, "rb") as stream:
-                raw = stream.read(max_bytes + 1)
-            if len(raw) > max_bytes or not raw.startswith(b"\\x89PNG\\r\\n\\x1a\\n"):
+                signature = stream.read(8)
+            if signature != b"\x89PNG\r\n\x1a\n":
+                return ""
+
+            reader = QImageReader(path, b"png")
+            reader.setAutoTransform(True)
+            original_size = reader.size()
+            if (
+                not original_size.isValid()
+                or original_size.width() < 1
+                or original_size.height() < 1
+                or original_size.width() > 8192
+                or original_size.height() > 8192
+                or original_size.width() * original_size.height() > 32_000_000
+            ):
+                return ""
+            reader.setScaledSize(
+                original_size.scaled(
+                    128,
+                    128,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                )
+            )
+            image = reader.read()
+            if image.isNull():
+                return ""
+            thumbnail = image.scaled(
+                128,
+                128,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            encoded = QByteArray()
+            buffer = QBuffer(encoded)
+            if not buffer.open(QIODevice.OpenModeFlag.WriteOnly):
+                return ""
+            try:
+                if not thumbnail.save(buffer, "PNG"):
+                    return ""
+            finally:
+                buffer.close()
+            raw = bytes(encoded)
+            if not raw or len(raw) > 200_000:
                 return ""
             return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
-        except (OSError, TypeError, ValueError):
+        except (OSError, TypeError, ValueError, RuntimeError):
             return ""
 
     def avatar_markup(name: str, data_url: str) -> str:
