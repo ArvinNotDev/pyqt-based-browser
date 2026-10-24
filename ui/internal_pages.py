@@ -30,9 +30,10 @@ def _shell(browser, title: str, subtitle: str, body: str, active: str) -> str:
     mode_class = "dark" if dark else "light"
     nav = [
         ("Home", "dashboard"),
-        ("Settings", "settings"),
+        ("Bookmarks", "bookmarks"),
         ("History", "history"),
         ("Downloads", "downloads"),
+        ("Settings", "settings"),
     ]
     nav_html = "".join(
         f'<a class="nav-link{" active" if host == active else ""}" href="arma://{host}/">{label}</a>'
@@ -245,7 +246,7 @@ progress { width:100%; height:6px; border:0; border-radius:4px; overflow:hidden;
 @media (max-width:800px) {
  body { padding:14px 12px 28px; }
  header { align-items:flex-start; flex-direction:column; gap:14px; }
- .nav { width:100%; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); }
+ .nav { width:100%; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); }
  .nav-link { padding:8px 4px; font-size:12px; }
  .layout { grid-template-columns:minmax(0,1fr); }
  aside { order:2; }
@@ -779,6 +780,96 @@ document.getElementById('history-filter').addEventListener('input', event => {{
     return _shell(browser, "History", "Search and manage your browsing history.", body, "history")
 
 
+def _bookmarks_page(browser) -> str:
+    manager = getattr(browser, "bookmarks_manager", None)
+    if manager is None:
+        body = """
+<div class="layout"><main><section class="panel"><div class="empty">
+  <div class="glyph">✦</div><strong>Bookmarks are unavailable</strong>
+  <p>The current browser profile could not open its bookmark store.</p>
+  <a class="button" href="arma://dashboard/">Back to Home</a>
+</div></section></main>
+<aside><h2>Saved pages</h2><p>Your bookmarks are stored per browser profile.</p></aside></div>"""
+        return _shell(browser, "Bookmarks", "Keep your favorite pages close at hand.", body, "bookmarks")
+
+    try:
+        records = manager.list_bookmarks()
+    except (OSError, RuntimeError, TypeError, ValueError):
+        records = []
+        manager_unavailable = True
+    else:
+        manager_unavailable = False
+
+    cards = []
+    internal_count = 0
+    for raw in records:
+        if not isinstance(raw, dict):
+            continue
+        bookmark_id = raw.get("id")
+        title = raw.get("title")
+        url = raw.get("url")
+        if not all(isinstance(value, str) and value for value in (bookmark_id, title, url)):
+            continue
+        if url.startswith("arma://"):
+            internal_count += 1
+        payload = {"id": bookmark_id}
+        address_label = url[7:].split("/", 1)[0] if url.startswith("arma://") else url.split("/", 3)[2]
+        cards.append(
+            f'<article class="history-item bookmark-item" data-filter-text="{_e((title + " " + url).casefold())}">'
+            f'<div class="item-top"><div style="min-width:0">'
+            f'<div class="item-title">{_e(title)}</div>'
+            f'<div class="item-sub">{_e(url)}</div></div>'
+            f'<span class="status-pill">{_e("ARMA page" if url.startswith("arma://") else "Website")}</span></div>'
+            f'<div class="actions">'
+            + _action("Open", "bookmark_open", payload, "primary")
+            + _action("Open in new tab", "bookmark_open_new", payload)
+            + _action("Remove", "bookmark_remove", payload, "danger")
+            + '</div></article>'
+        )
+
+    if manager_unavailable:
+        listing = (
+            '<div class="empty"><div class="glyph">!</div><strong>Could not load bookmarks</strong>'
+            '<p>Try refreshing this page. Your saved data has not been changed.</p></div>'
+        )
+    else:
+        listing = "".join(cards) or (
+            '<div class="empty"><div class="glyph">✦</div><strong>No bookmarks yet</strong>'
+            '<p>Use the bookmark star in the browser toolbar to save a website or ARMA page.</p>'
+            '<a class="button primary" href="arma://dashboard/">Explore your Home page</a></div>'
+        )
+
+    website_count = max(0, len(cards) - internal_count)
+    body = f"""
+<div class="page-head">
+  <div><h2>Saved pages</h2><p class="subtitle">Find, open, or remove bookmarks from the current profile.</p></div>
+  <div class="page-tools" role="search">
+    <input id="bookmark-filter" type="search" placeholder="Search bookmarks…" aria-label="Search bookmarks">
+    <button type="button" data-action="bookmarks_refresh">Refresh</button>
+  </div>
+</div>
+<div class="stat-strip" aria-label="Bookmark summary">
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">✦</span><span class="stat-copy"><strong>{len(cards)}</strong><small>Saved items</small></span></div>
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">↗</span><span class="stat-copy"><strong>{website_count}</strong><small>Websites</small></span></div>
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">A</span><span class="stat-copy"><strong>{internal_count}</strong><small>ARMA pages</small></span></div>
+</div>
+<div id="bookmark-list" class="list">{listing}</div>
+<p class="footer-note">Bookmarks belong to this browser profile. “Open in new tab” keeps this page in place; removing a bookmark does not delete the website or its files.</p>
+<script>
+(() => {{
+  const filter = document.getElementById('bookmark-filter');
+  if (!filter) return;
+  filter.addEventListener('input', () => {{
+    const needle = filter.value.trim().toLocaleLowerCase();
+    document.querySelectorAll('.bookmark-item').forEach(item => {{
+      item.hidden = !item.dataset.filterText.includes(needle);
+    }});
+  }});
+}})();
+</script>"""
+    return _shell(browser, "Bookmarks", "Keep your favorite pages close at hand.", body, "bookmarks")
+
+
 def _format_bytes(value: int | None) -> str:
     if value is None:
         return "Size unknown"
@@ -867,6 +958,8 @@ def render_internal_page(browser, host: str) -> str:
         return _settings_page(browser)
     if host == "history":
         return _history_page(browser)
+    if host == "bookmarks":
+        return _bookmarks_page(browser)
     if host == "downloads":
         return _downloads_page(browser)
     raise ValueError(f"Unsupported ARMA internal page: {host}")
