@@ -224,7 +224,11 @@ def test_navigation_controls_share_a_fixed_size_and_menu_is_the_final_action(qap
         bar.menu_button,
     ]
     assert all(isinstance(button, QToolButton) for button in buttons)
-    assert all(button.size() == QSize(34, 30) for button in buttons)
+    assert all(
+        button.minimumSize() == QSize(34, 30)
+        and button.maximumSize() == QSize(34, 30)
+        for button in buttons
+    )
     assert all(button.focusPolicy() == Qt.FocusPolicy.TabFocus for button in buttons)
     assert bar.url_bar.height() == 30
     centre_y = bar.url_bar.geometry().center().y()
