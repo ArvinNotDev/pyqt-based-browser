@@ -248,6 +248,23 @@ class DataManagerTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 manager.add_bookmark("Bad", url)
 
+    def test_bookmarks_accept_only_supported_internal_arma_pages(self):
+        manager = BookmarksManager("Guest")
+        for host in ("dashboard", "bookmarks", "history", "downloads", "settings"):
+            with self.subTest(host=host):
+                record = manager.add_bookmark(host.title(), f"arma://{host}/")
+                self.assertEqual(record["url"], f"arma://{host}/")
+                self.assertTrue(manager.is_bookmarked(f"arma://{host}"))
+
+        for url in (
+            "arma://unknown/",
+            "arma://dashboard/private?secret=1",
+            "arma://dashboard:443/",
+            "arma://user@dashboard/",
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                manager.add_bookmark("Unsafe internal", url)
+
     def test_bookmarks_preserve_legacy_valid_records(self):
         profile_dir = Path(self.temp_dir.name) / "profile_data" / "Guest"
         profile_dir.mkdir(parents=True)
