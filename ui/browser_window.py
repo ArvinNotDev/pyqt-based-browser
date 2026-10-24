@@ -176,70 +176,7 @@ class _DownloadsOverlayDismissArea(QFrame):
         event.accept()
 
 
-class _PageLoadOverlay(QFrame):
-    """A small, non-blocking loading HUD attached to its own web page."""
-
-    def __init__(self, view: QWidget):
-        super().__init__(view)
-        self.view = view
-        self.setObjectName("pageLoadOverlay")
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.setFixedHeight(56)
-        self.setMinimumWidth(220)
-        self.setMaximumWidth(360)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 9)
-        layout.setSpacing(6)
-        heading = QHBoxLayout()
-        heading.setContentsMargins(0, 0, 0, 0)
-        heading.setSpacing(8)
-        self.title_label = QLabel("Loading page", self)
-        self.title_label.setObjectName("pageLoadOverlayTitle")
-        heading.addWidget(self.title_label, 1)
-        self.percent_label = QLabel("Connecting…", self)
-        self.percent_label.setObjectName("pageLoadOverlayPercent")
-        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        heading.addWidget(self.percent_label)
-        layout.addLayout(heading)
-
-        self.progress_bar = QProgressBar(self)
-        self.progress_bar.setObjectName("pageLoadOverlayProgress")
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setFixedHeight(4)
-        self.progress_bar.setRange(0, 0)
-        layout.addWidget(self.progress_bar)
-
-        view.installEventFilter(self)
-        self.hide()
-
-    def _position_over_page(self) -> None:
-        if self.view is None:
-            return
-        parent_width = max(1, self.view.width())
-        width = min(336, max(1, parent_width - 24))
-        x = max(8, (parent_width - width) // 2)
-        self.setGeometry(x, 14, width, self.height())
-        self.raise_()
-
-    def show_loading(self, progress: int | None = None) -> None:
-        if progress is None:
-            self.progress_bar.setRange(0, 0)
-            self.percent_label.setText("Connecting…")
-        else:
-            value = max(0, min(100, int(progress)))
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(value)
-            self.percent_label.setText(f"{value}%")
-        self._position_over_page()
-        self.show()
-        self.raise_()
-
-    def eventFilter(self, watched, event) -> bool:
-        if watched is self.view and event.type() == QEvent.Type.Resize:
-            self._position_over_page()
-        return super().eventFilter(watched, event)
+# Page-load progress is rendered in the address field, never over web content.
 
 
 class _RoundedWebView(QWebEngineView):
@@ -1129,7 +1066,7 @@ class BrowserWindow(QMainWindow):
         self.tabbar.tab_reordered.connect(self._move_tab)
 
         self.views: List[QWebEngineView] = []
-        self._page_load_overlays: Dict[QWebEngineView, _PageLoadOverlay] = {}
+        self._load_progress_by_view: Dict[QWebEngineView, int] = {}
         self._status_overlays: Dict[object, _StatusMessageOverlay] = {}
         self._placeholders: Dict[QWebEngineView, QWidget] = {}
         self._snapshots: Dict[QWebEngineView, QPixmap] = {}
@@ -3061,7 +2998,6 @@ class BrowserWindow(QMainWindow):
 
         view = _RoundedWebView(self.view_container)
         view.setVisible(False)
-        self._page_load_overlays[view] = _PageLoadOverlay(view)
         # WebEngine owns a separate compositor surface; transparency and animated
         # graphics effects can make that surface blink during its first paint.
         page = BrowserPage(self, self.profile, view)
@@ -3148,7 +3084,7 @@ class BrowserWindow(QMainWindow):
             placeholder.deleteLater()
 
         self.view_layout.removeWidget(closing_view)
-        getattr(self, "_page_load_overlays", {}).pop(closing_view, None)
+        getattr(self, "_load_progress_by_view", {}).pop(closing_view, None)
         closing_view.stop()
         closing_view.hide()
         closing_view.deleteLater()
@@ -3187,12 +3123,14 @@ class BrowserWindow(QMainWindow):
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
-        if view.page().isLoading() and self._placeholders.get(view) is None:
-            self._show_page_load_overlay(view)
-        else:
-            overlay = self._page_load_overlays.get(view)
-            if overlay is not None:
-                overlay.hide()
+        try:
+            is_loading = bool(view.page().isLoading())
+        except (AttributeError, RuntimeError):
+            is_loading = False
+        self._set_address_load_progress(
+            view,
+            self._load_progress_by_view.get(view, 0) if is_loading else None,
+        )
         self._update_bookmarks_bar_visibility(view.url())
         self.navbar.url_bar.setText(view.url().toString())
         self._sync_site_connection_action(view.url().toString())
@@ -3249,10 +3187,26 @@ class BrowserWindow(QMainWindow):
                 self.navbar.set_bookmark_state(self.bookmarks_manager.is_bookmarked(url.toString()))
             self._update_navigation_actions(view)
 
+    def _set_address_load_progress(self, view: QWebEngineView, progress: int | None) -> None:
+        """Update per-tab progress and tint the address field for the active page."""
+        progress_by_view = getattr(self, "_load_progress_by_view", None)
+        if isinstance(progress_by_view, dict):
+            if progress is None:
+                progress_by_view.pop(view, None)
+            else:
+                progress_by_view[view] = max(0, min(100, int(progress)))
+        if view is not self.current_view():
+            return
+        navbar = getattr(self, "navbar", None)
+        set_progress = getattr(navbar, "set_load_progress", None)
+        if callable(set_progress):
+            set_progress(None if progress is None else max(0, min(100, int(progress))))
+
     def _on_load_started(self, view: QWebEngineView):
         if view not in self.views:
             return
         self.tabbar.set_loading(self.views.index(view), True)
+        self._set_address_load_progress(view, 0)
         placeholder = self._placeholders.get(view)
         if placeholder is not None:
             placeholder._load_error = False
@@ -3264,13 +3218,6 @@ class BrowserWindow(QMainWindow):
             )
             placeholder.loading_progress.show()
             placeholder.retry_button.hide()
-        if view is self.current_view():
-            if self._placeholders.get(view) is None:
-                self._show_page_load_overlay(view)
-            else:
-                overlay = self._page_load_overlays.get(view)
-                if overlay is not None:
-                    overlay.hide()
 
     def _on_loading_changed(self, info, view: QWebEngineView, page: QWebEnginePage):
         """Report real main-frame network failures without treating cancelled loads as errors."""
@@ -3290,9 +3237,7 @@ class BrowserWindow(QMainWindow):
             tabbar = getattr(self, "tabbar", None)
             if view in self.views and tabbar is not None:
                 tabbar.set_loading(self.views.index(view), False)
-            overlay = getattr(self, "_page_load_overlays", {}).get(view)
-            if overlay is not None:
-                overlay.hide()
+            self._set_address_load_progress(view, None)
             placeholder = self._placeholders.get(view)
             if placeholder is None and view in self.views:
                 # A page can fail after an earlier successful load removed its placeholder.
@@ -3312,38 +3257,20 @@ class BrowserWindow(QMainWindow):
         except (AttributeError, RuntimeError):
             logger.debug("Could not inspect a WebEngine loading failure", exc_info=True)
 
-    def _page_load_overlay_for(self, view: QWebEngineView):
-        return getattr(self, "_page_load_overlays", {}).get(view)
-
-    def _show_page_load_overlay(self, view: QWebEngineView, progress: int | None = None) -> None:
-        if view not in getattr(self, "views", ()) or view is not self.current_view():
+    def _on_load_progress(self, progress: int, view: QWebEngineView) -> None:
+        if view not in getattr(self, "views", ()):
             return
-        # The full-page first-load placeholder already presents progress of its own.
-        if getattr(self, "_placeholders", {}).get(view) is not None:
-            return
-        overlay = self._page_load_overlay_for(view)
-        if overlay is not None:
-            overlay.show_loading(progress)
-
-    def _hide_page_load_overlay_if_current(self, view: QWebEngineView) -> None:
-        if (
-            view in getattr(self, "views", ())
-            and view is self.current_view()
-            and not view.page().isLoading()
-        ):
-            overlay = self._page_load_overlay_for(view)
-            if overlay is not None:
-                overlay.hide()
-
-    def _on_load_progress(self, progress: int, view):
+        value = max(0, min(100, int(progress)))
+        progress_by_view = getattr(self, "_load_progress_by_view", None)
+        if isinstance(progress_by_view, dict):
+            progress_by_view[view] = value
         if view is not self.current_view():
             return
-
         now = time.monotonic()
-        if now - getattr(self, "_last_progress_ts", 0.0) < 0.05:  # 50ms
+        if now - getattr(self, "_last_progress_ts", 0.0) < 0.05:  # limit style churn
             return
         self._last_progress_ts = now
-        self._show_page_load_overlay(view, progress)
+        self._set_address_load_progress(view, value)
 
 
     def _on_load_finished_with_swap(self, ok: bool, view: QWebEngineView, page: QWebEnginePage):
@@ -3351,18 +3278,17 @@ class BrowserWindow(QMainWindow):
             return
         if view in self.views:
             self.tabbar.set_loading(self.views.index(view), False)
+        # Clear immediately on loadFinished. Chromium can keep isLoading() true
+        # briefly after the finish signal; tying UI cleanup to that flag left a
+        # permanent "100%" overlay on some dashboard-launched pages.
+        self._set_address_load_progress(view, None)
 
         if ok and self._is_dashboard_address(view.url()):
             page.runJavaScript(
                 "document.documentElement.classList.add('dashboard-ready');"
             )
-        if view is self.current_view() and self._placeholders.get(view) is None:
-            self._show_page_load_overlay(view, 100)
-            # Keep the completed percentage briefly, then hide it without shifting
-            # the page viewport or reserving an empty progress row.
-            QTimer.singleShot(220, lambda v=view: self._hide_page_load_overlay_if_current(v))
-            # loadFinished(False) also occurs for cancelled or superseded navigations.
-            # A real main-frame network failure is reported by _on_loading_changed.
+        # loadFinished(False) also occurs for cancelled or superseded navigations.
+        # A real main-frame network failure is reported by _on_loading_changed.
 
         if ok and self.history is not None:
             url_text = view.url().toString()
@@ -3885,7 +3811,7 @@ class BrowserWindow(QMainWindow):
                 logger.exception("Could not stop a browser download manager")
         views = list(self.views)
         self.views.clear()
-        self._page_load_overlays.clear()
+        self._load_progress_by_view.clear()
         self._placeholders.clear()
         for view in views:
             try:
