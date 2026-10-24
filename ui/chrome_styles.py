@@ -992,3 +992,81 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton, QToolButton#men
     padding: 0; border-radius: 9px;
 }
 """
+
+
+# Final alignment and pin-state pass for the native browser chrome.
+LIGHT_CHROME_POLISH += """
+QToolBar#NavigationBar {
+    padding: 0px 8px;
+    spacing: 3px;
+}
+QToolBar#NavigationBar::separator {
+    width: 1px;
+    min-width: 1px;
+    max-width: 1px;
+    margin: 9px 4px;
+}
+QToolBar#NavigationBar QToolButton:focus {
+    border-color: transparent;
+}
+QToolButton#downloadsModeButton {
+    color: #64748b;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0;
+    min-width: 30px; max-width: 30px;
+    min-height: 30px; max-height: 30px;
+}
+QToolButton#downloadsModeButton:hover {
+    background: rgba(57,121,214,24);
+    border-color: rgba(57,121,214,90);
+}
+QToolButton#downloadsModeButton[downloadsPinned="true"] {
+    background: rgba(57,121,214,24);
+    border-color: rgba(57,121,214,90);
+}
+QToolButton#downloadsModeButton[downloadsPinned="true"]:hover {
+    background: rgba(57,121,214,38);
+    border-color: rgba(57,121,214,135);
+}
+QToolButton#downloadsModeButton:focus { border-color: transparent; }
+"""
+
+DARK_CHROME_POLISH += """
+QToolBar#NavigationBar {
+    padding: 0px 8px;
+    spacing: 3px;
+}
+QToolBar#NavigationBar::separator {
+    width: 1px;
+    min-width: 1px;
+    max-width: 1px;
+    margin: 9px 4px;
+}
+QToolBar#NavigationBar QToolButton:focus {
+    border-color: transparent;
+}
+QToolButton#downloadsModeButton {
+    color: #c7ced8;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 0;
+    min-width: 30px; max-width: 30px;
+    min-height: 30px; max-height: 30px;
+}
+QToolButton#downloadsModeButton:hover {
+    background: rgba(130,175,244,28);
+    border-color: rgba(130,175,244,95);
+}
+QToolButton#downloadsModeButton[downloadsPinned="true"] {
+    background: rgba(130,175,244,28);
+    border-color: rgba(130,175,244,95);
+}
+QToolButton#downloadsModeButton[downloadsPinned="true"]:hover {
+    background: rgba(130,175,244,42);
+    border-color: rgba(130,175,244,140);
+}
+QToolButton#downloadsModeButton:focus { border-color: transparent; }
+"""
