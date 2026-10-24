@@ -1282,7 +1282,69 @@ def _profile_page(browser) -> str:
   document.getElementById('profile-choose-image').addEventListener('click',()=>fileInput.click());
   fileInput.addEventListener('change',()=>{{
     const file=fileInput.files&&fileInput.files[0]; if(!file)return;
-    if(!/^image\/(png|jpeg|webp|bmp)$/.test(file.type)||file.size>12*1024*1024){{
+    if(!new RegExp('^image/(png|jpeg|webp|bmp)
+      window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.','warning'); fileInput.value=''; return;
+    }}
+    const reader=new FileReader();
+    reader.onload=()=>loadImage(String(reader.result||''),false);
+    reader.onerror=()=>window.armaToast('The selected image could not be read.','warning');
+    reader.readAsDataURL(file);
+  }});
+  zoomSlider.addEventListener('input',()=>{{zoom=Math.max(1,Math.min(4,Number(zoomSlider.value)/100));clampOffset();dirty=true;paintAvatar();}});
+  document.getElementById('profile-avatar-canvas').addEventListener('pointerdown',event=>{{
+    if(!sourceImage)return; dragging=true; lastPoint={{x:event.clientX,y:event.clientY}}; canvas.setPointerCapture(event.pointerId);
+  }});
+  canvas.addEventListener('pointermove',event=>{{
+    if(!dragging||!lastPoint)return;
+    offsetX+=(event.clientX-lastPoint.x)*canvas.width/Math.max(1,canvas.clientWidth);
+    offsetY+=(event.clientY-lastPoint.y)*canvas.height/Math.max(1,canvas.clientHeight);
+    lastPoint={{x:event.clientX,y:event.clientY}};clampOffset();dirty=true;paintAvatar();
+  }});
+  function stopDrag(){{dragging=false;lastPoint=null;}}
+  canvas.addEventListener('pointerup',stopDrag);canvas.addEventListener('pointercancel',stopDrag);
+  canvas.addEventListener('wheel',event=>{{
+    if(!sourceImage||modal.hidden)return;event.preventDefault();
+    zoom=Math.max(1,Math.min(4,zoom*(event.deltaY<0?1.08:.92)));zoomSlider.value=String(Math.round(zoom*100));
+    clampOffset();dirty=true;paintAvatar();
+  }},{{passive:false}});
+  document.getElementById('profile-avatar-reset').addEventListener('click',()=>{{
+    zoom=1;offsetX=0;offsetY=0;zoomSlider.value='100';clampOffset();dirty=true;paintAvatar();
+  }});
+  saveAvatar.addEventListener('click',()=>{{
+    if(!sourceImage||!dirty||!targetProfile)return;
+    const dataUrl=canvas.toDataURL('image/png');
+    if(dataUrl.length>800000){{window.armaToast('The cropped picture is too large. Choose a smaller image.','warning');return;}}
+    saveAvatar.disabled=true;
+    window.armaAction('profile_avatar_save',{{name:targetProfile,data:dataUrl}});
+    hideModal();
+  }});
+  removeAvatar.addEventListener('click',()=>{{
+    if(!targetProfile||!sourceUrl)return;
+    window.armaAction('profile_avatar_remove',{{name:targetProfile}});
+    hideModal();
+  }});
+  if ({str(open_create_modal).lower()}) showModal('create');
+}})();
+</script>
+<p class="profile-empty-note">Removing a profile deletes its settings, bookmarks, history, cookies and site storage. Downloaded files are kept.</p>
+"""
+    return _shell(browser, "Profiles", "Switch profiles and personalize your browser.", body, "profile")
+
+
+def render_internal_page(browser, host: str) -> str:
+    host = str(host or "").strip().lower()
+    if host == "settings":
+        return _settings_page(browser)
+    if host == "profile":
+        return _profile_page(browser)
+    if host == "history":
+        return _history_page(browser)
+    if host == "bookmarks":
+        return _bookmarks_page(browser)
+    if host == "downloads":
+        return _downloads_page(browser)
+    raise ValueError(f"Unsupported ARMA internal page: {host}")
+).test(file.type)||file.size>12*1024*1024){{
       window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.','warning'); fileInput.value=''; return;
     }}
     const reader=new FileReader();
