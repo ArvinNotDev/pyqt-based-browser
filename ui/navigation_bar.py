@@ -103,7 +103,7 @@ class NavigationBar(QToolBar):
         self.setFloatable(False)
         # Keep every navigation control on the same vertical centre-line and let
         # the menu button sit close to the far-right edge of the browser shell.
-        self.setContentsMargins(10, 3, 4, 3)
+        self.setContentsMargins(10, 0, 4, 0)
         self.setIconSize(QSize(18, 18))
         self.setToolButtonStyle(Qt.ToolButtonIconOnly)
 
@@ -158,8 +158,7 @@ class NavigationBar(QToolBar):
         self.url_bar.setFont(QFont("Segoe UI", 10))
         self.url_bar.setLayoutDirection(Qt.LeftToRight)
         self.url_bar.setMinimumWidth(0)
-        self.url_bar.setMinimumHeight(28)
-        self.url_bar.setMaximumHeight(32)
+        self.url_bar.setFixedHeight(30)
         self.url_bar.setClearButtonEnabled(True)
         self.url_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.url_bar.setAccessibleName("Address and search bar")
@@ -280,6 +279,7 @@ class NavigationBar(QToolBar):
         self.menu_button.setToolButtonStyle(Qt.ToolButtonIconOnly)
         self.menu_button.setIconSize(QSize(17, 17))
         self.menu_button.setFixedSize(QSize(34, 30))
+        self.menu_button.setFocusPolicy(Qt.NoFocus)
         self.menu_button.setToolTip("Browser menu")
         self.menu_button.setAccessibleName("Browser menu")
         self.menu_button.setProperty("menuOpen", False)
@@ -329,7 +329,7 @@ class NavigationBar(QToolBar):
         if isinstance(button, QToolButton):
             button.setObjectName("navigationToolButton")
             button.setAccessibleName(action.text())
-            button.setFocusPolicy(Qt.StrongFocus)
+            button.setFocusPolicy(Qt.NoFocus)
             button.setToolButtonStyle(Qt.ToolButtonIconOnly)
             button.setIconSize(QSize(17, 17))
             button.setFixedSize(34, 30)
@@ -342,7 +342,7 @@ class NavigationBar(QToolBar):
         button.setToolButtonStyle(Qt.ToolButtonTextOnly)
         button.setToolTip(tooltip)
         button.setAccessibleName(tooltip)
-        button.setFocusPolicy(Qt.StrongFocus)
+        button.setFocusPolicy(Qt.NoFocus)
         button.setIconSize(QSize(17, 17))
         button.setFixedSize(34, 30)
         button.setAutoRaise(True)
@@ -617,7 +617,7 @@ class NavigationBar(QToolBar):
             QLineEdit#urlBar {{
                 color: {text}; background: {background};
                 border: 1px solid {border}; border-radius: 15px;
-                padding: 5px 12px; min-height: 25px;
+                padding: 3px 12px; min-height: 24px;
                 selection-background-color: {selection};
             }}
             QLineEdit#urlBar:hover {{ border-color: {hover}; }}
