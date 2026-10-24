@@ -11,7 +11,8 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
-    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView, _BrowserShell,
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView,
+    _BrowserShell, _title_bar_point_is_interactive,
 )
 from ui.title_bar import CustomTitleBar
 
@@ -329,6 +330,17 @@ def test_title_bar_hosted_tab_strip_new_and_close_controls_emit_actions(qapp):
     title_bar.set_tabs_widget(tab_bar)
     host.show()
     qapp.processEvents()
+
+    # A native Windows hit-test must leave child controls clickable even while
+    # treating the rest of the custom title bar as a draggable caption.
+    plus_point = tab_bar.plus_tab.mapTo(
+        title_bar, tab_bar.plus_tab.rect().center()
+    )
+    assert _title_bar_point_is_interactive(title_bar, plus_point)
+    blank_point = title_bar.left_stack.mapTo(
+        title_bar, QPoint(title_bar.left_stack.width() - 12, title_bar.left_stack.height() // 2)
+    )
+    assert not _title_bar_point_is_interactive(title_bar, blank_point)
 
     new_tab_spy = QSignalSpy(tab_bar.new_tab_requested)
     close_tab_spy = QSignalSpy(tab_bar.tab_closed)

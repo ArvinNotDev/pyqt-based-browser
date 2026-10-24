@@ -19,7 +19,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QToolButton, QLabel, QProgressBar, QFrame, QSizePolicy,
+    QAbstractButton, QPushButton, QToolButton, QLabel, QProgressBar, QFrame, QSizePolicy,
     QScrollArea, QGraphicsOpacityEffect, QInputDialog,
     QLineEdit, QMenu, QMessageBox, QSplitter, QFileDialog, QToolButton
 )
@@ -158,6 +158,42 @@ def _is_snap_aligned_geometry(frame: QRect, available: QRect) -> bool:
         and frame.height() >= available.height() * 0.18
     )
     return bool(x_aligned and y_aligned and large_enough)
+
+
+def _title_bar_point_is_interactive(title_bar: QWidget, point: QPoint) -> bool:
+    """Return True for real title-bar controls/tabs, not empty drag space.
+
+    On Windows the native WM_NCHITTEST result can classify the entire custom
+    title bar as HTCAPTION. That causes Windows to consume clicks on child
+    widgets before Qt can deliver them. Preserve client hit-testing for actual
+    buttons and tab widgets while allowing blank header space to drag the window.
+    """
+    try:
+        target = title_bar.childAt(point)
+        while target is not None and target is not title_bar:
+            if (
+                isinstance(target, QAbstractButton)
+                or target.objectName() == "browserTab"
+            ):
+                return True
+            child = target.childAt(target.mapFrom(title_bar, point))
+            if child is None:
+                break
+            target = child
+
+        # Some controls contain an internal child at the exact hit point. Walk
+        # back through its ancestors so the enclosing button/tab stays clickable.
+        while target is not None and target is not title_bar:
+            if (
+                isinstance(target, QAbstractButton)
+                or target.objectName() == "browserTab"
+            ):
+                return True
+            target = target.parentWidget()
+    except RuntimeError:
+        # Widgets can be deleted while Qt is processing a close/reparent event.
+        return False
+    return False
 
 
 class _DownloadsOverlayDismissArea(QFrame):
@@ -4000,6 +4036,18 @@ class BrowserWindow(QMainWindow):
                             for button in buttons
                         ):
                             return False, 0
+
+                    # Keep real child controls in the client area. Otherwise the
+                    # catch-all HTCAPTION response below makes native Windows
+                    # caption handling swallow clicks on tabs and the New Tab button.
+                    if title_bar is not None:
+                        title_rect = QRect(
+                            title_bar.mapTo(self, QPoint(0, 0)), title_bar.size()
+                        )
+                        if title_rect.contains(local_point):
+                            title_local_point = title_bar.mapFrom(self, local_point)
+                            if _title_bar_point_is_interactive(title_bar, title_local_point):
+                                return True, _WIN_HTCLIENT
 
                     rect = wintypes.RECT()
                     user32.GetWindowRect.argtypes = (wintypes.HWND, ctypes.POINTER(wintypes.RECT))
