@@ -46,6 +46,7 @@ class Settings:
     webgpu_enabled: bool = False
     proxy_panel_visible: bool = True
     site_compatibility_mode: bool = True
+    tabs_in_title_bar: bool = False
 
     # Retained for callers that used these public attributes. Neither is
     # serialized as a per-profile setting.
@@ -193,7 +194,7 @@ class Settings:
         boolean_fields = {
             "dark_mode", "save_history", "save_cookies", "private_mode",
             "show_dev_tools", "hardware_acceleration", "webgpu_enabled",
-            "proxy_panel_visible", "site_compatibility_mode",
+            "proxy_panel_visible", "site_compatibility_mode", "tabs_in_title_bar",
         }
         for name in string_fields:
             value = values.get(name)
@@ -249,6 +250,7 @@ class Settings:
             "webgpu_enabled": False,
             "proxy_panel_visible": True,
             "site_compatibility_mode": True,
+            "tabs_in_title_bar": False,
         }
         # Settings instances are reused while switching profiles. Reset every
         # profile field first so an absent/partial profile cannot inherit the
