@@ -225,7 +225,7 @@ def test_navigation_controls_share_a_fixed_size_and_menu_is_the_final_action(qap
     ]
     assert all(isinstance(button, QToolButton) for button in buttons)
     assert all(button.size() == QSize(34, 30) for button in buttons)
-    assert all(button.focusPolicy() == Qt.FocusPolicy.NoFocus for button in buttons)
+    assert all(button.focusPolicy() == Qt.FocusPolicy.TabFocus for button in buttons)
     assert bar.url_bar.height() == 30
     centre_y = bar.url_bar.geometry().center().y()
     assert all(abs(button.geometry().center().y() - centre_y) <= 1 for button in buttons)
@@ -245,7 +245,7 @@ def test_downloads_layout_toggle_uses_pin_and_unpin_icon_actions(qapp):
     button = panel.mode_button
     assert button.text() == ""
     assert button.iconSize().width() == 15
-    assert button.focusPolicy() == Qt.FocusPolicy.NoFocus
+    assert button.focusPolicy() == Qt.FocusPolicy.TabFocus
     assert button.property("downloadsPinned") is False
     assert button.toolTip() == "Pin downloads panel beside the page"
     assert not button.icon().isNull()
