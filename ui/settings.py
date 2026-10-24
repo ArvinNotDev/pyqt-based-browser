@@ -47,6 +47,8 @@ class Settings:
     proxy_panel_visible: bool = True
     site_compatibility_mode: bool = True
     tabs_in_title_bar: bool = False
+    restore_session: bool = True
+    ad_blocking_enabled: bool = True
 
     # Retained for callers that used these public attributes. Neither is
     # serialized as a per-profile setting.
@@ -195,6 +197,7 @@ class Settings:
             "dark_mode", "save_history", "save_cookies", "private_mode",
             "show_dev_tools", "hardware_acceleration", "webgpu_enabled",
             "proxy_panel_visible", "site_compatibility_mode", "tabs_in_title_bar",
+            "restore_session", "ad_blocking_enabled",
         }
         for name in string_fields:
             value = values.get(name)
@@ -251,6 +254,8 @@ class Settings:
             "proxy_panel_visible": True,
             "site_compatibility_mode": True,
             "tabs_in_title_bar": False,
+            "restore_session": True,
+            "ad_blocking_enabled": True,
         }
         # Settings instances are reused while switching profiles. Reset every
         # profile field first so an absent/partial profile cannot inherit the
