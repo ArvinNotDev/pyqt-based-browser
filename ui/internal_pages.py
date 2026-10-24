@@ -436,7 +436,7 @@ def _settings_page(browser) -> str:
     sections = (
         ("general", "General", "home homepage startup new tab search engine", "⌂"),
         ("appearance", "Appearance", "theme light dark colors appearance mode tabs title bar layout", "◐"),
-        ("privacy", "Privacy & security", "private history cookies compatibility profile", "◇"),
+        ("privacy", "Privacy & security", "private history cookies compatibility profile session restore ads blockers trackers site permissions", "◇"),
         ("performance", "Performance", "hardware gpu acceleration rendering restart", "↯"),
         ("downloads", "Downloads", "download directory folder proxy panel startup", "↓"),
     )
@@ -499,6 +499,7 @@ def _settings_page(browser) -> str:
             <div class="setting-copy"><label for="default_search_engine">Search engine</label><small>Used when you type a search instead of an address.</small></div>
             <select class="setting-control" id="default_search_engine" name="default_search_engine">{engine_options}</select>
           </div>
+          {checkbox("restore_session", "Restore previous session", "Remember open tabs and the active profile across browser restarts. Private sessions are never saved.", bool(getattr(settings, "restore_session", True)))}
         </div>
       </section>
     </section>
@@ -541,6 +542,7 @@ def _settings_page(browser) -> str:
           {checkbox("private_mode", "Private browsing", "Use an off-the-record profile for this browser profile.", settings.private_mode)}
           {checkbox("save_history", "Save browsing history", "Keep visited pages for this profile.", settings.save_history)}
           {checkbox("save_cookies", "Keep cookies between sessions", "Save website cookies between browser runs.", settings.save_cookies)}
+          {checkbox("ad_blocking_enabled", "Block ads and trackers", "Block requests to a built-in list of common advertising and tracking domains. Some embedded content may be affected.", bool(getattr(settings, "ad_blocking_enabled", True)))}
         </div>
       </section>
     </section>
