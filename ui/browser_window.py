@@ -32,6 +32,7 @@ from PySide6.QtWebChannel import QWebChannel
 import qtawesome as qta
 
 from .settings import Settings
+from .history_swipe import HistorySwipeController
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
 from .title_bar import CustomTitleBar, ResizeHandle
@@ -3212,6 +3213,8 @@ class BrowserWindow(QMainWindow):
         page = BrowserPage(self, self.profile, view)
         view.setPage(page)
         self._connect_page(view, page)
+        # Keep navigation gestures isolated to this tab's WebEngine history.
+        view._history_swipe_controller = HistorySwipeController(view)
 
         placeholder = self._make_placeholder(url_q.toString())
         placeholder.retry_button.clicked.connect(
