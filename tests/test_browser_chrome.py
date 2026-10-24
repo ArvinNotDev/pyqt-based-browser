@@ -142,3 +142,90 @@ def test_status_message_is_a_bottom_left_overlay_not_a_status_bar(qapp):
     page.close()
     page.deleteLater()
     qapp.processEvents()
+
+
+def _make_navigation_bar(qapp):
+    from ui.navigation_bar import NavigationBar
+    from ui.settings import Settings
+
+    bar = NavigationBar(["Guest"], settings=Settings())
+    bar.resize(960, 50)
+    bar.show()
+    qapp.processEvents()
+    return bar
+
+
+def test_page_load_progress_tints_the_address_field_without_percentage_text(qapp):
+    bar = _make_navigation_bar(qapp)
+    bar.set_load_progress(45)
+    qapp.processEvents()
+
+    progress_style = bar.url_bar.styleSheet()
+    assert "qlineargradient" in progress_style
+    assert "stop:0.4500" in progress_style
+    assert "%" not in progress_style
+
+    bar.set_load_progress(100)
+    assert "rgba(57,121,214,54)" in bar.url_bar.styleSheet()
+
+    bar.set_load_progress(None)
+    assert "qlineargradient" not in bar.url_bar.styleSheet()
+    assert bar._url_load_progress is None
+    bar.close()
+    bar.deleteLater()
+    qapp.processEvents()
+
+
+def test_address_suggestions_update_in_place_without_moving_the_popup(qapp):
+    bar = _make_navigation_bar(qapp)
+    bar.history = {
+        "https://alpha.example/": {},
+        "https://another.example/": {},
+        "https://bravo.example/": {},
+    }
+
+    bar._on_url_typed("a")
+    popup = bar.suggestion_popup
+    assert popup is not None and popup.isVisible()
+    initial_geometry = popup.geometry()
+    assert bar.suggestion_list.count() == 3
+
+    bar._on_url_typed("al")
+    qapp.processEvents()
+
+    assert bar.suggestion_popup is popup
+    assert popup.isVisible()
+    assert popup.geometry() == initial_geometry
+    assert bar.suggestion_list.count() == 1
+    assert bar.suggestion_list.item(0).text() == "https://alpha.example/"
+
+    bar._close_suggestion_popup()
+    bar.close()
+    bar.deleteLater()
+    qapp.processEvents()
+
+
+def test_navigation_controls_share_a_fixed_size_and_menu_is_the_final_action(qapp):
+    from PySide6.QtCore import QSize
+    from PySide6.QtWidgets import QToolButton
+
+    bar = _make_navigation_bar(qapp)
+    buttons = [
+        bar.widgetForAction(bar.back_btn),
+        bar.widgetForAction(bar.forward_btn),
+        bar.widgetForAction(bar.reload_btn),
+        bar.widgetForAction(bar.home_btn),
+        bar.widgetForAction(bar.profile_btn),
+        bar.bookmark_btn,
+        bar.downloads_btn,
+        bar.proxy_panel_btn,
+        bar.menu_button,
+    ]
+    assert all(isinstance(button, QToolButton) for button in buttons)
+    assert all(button.size() == QSize(34, 30) for button in buttons)
+    assert bar.widgetForAction(bar.actions()[-1]) is bar.menu_button
+    assert bar.contentsMargins().right() == 4
+
+    bar.close()
+    bar.deleteLater()
+    qapp.processEvents()
