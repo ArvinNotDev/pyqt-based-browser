@@ -1252,7 +1252,7 @@ class BrowserWindow(QMainWindow):
         self.navbar.proxy_panel_requested.connect(self.show_proxy)
         self.navbar.gaming_mode_toggled.connect(self._set_gaming_mode)
         self.navbar.site_connection_toggled.connect(self._set_current_site_direct)
-        self.navbar.set_proxy_panel_state(self.dock.isVisible())
+        self.navbar.set_proxy_panel_state(not self.dock.isHidden())
         self.navbar.set_downloads_panel_state(self.downloads_panel.is_open)
         self._update_proxy_menu_action(bool(self.settings.proxy_panel_visible))
         self._install_browser_shortcuts()
@@ -1372,7 +1372,7 @@ class BrowserWindow(QMainWindow):
         else:
             self.dock.setVisible(False)
         if hasattr(self, "navbar"):
-            self.navbar.set_proxy_panel_state(self.dock.isVisible())
+            self.navbar.set_proxy_panel_state(not self.dock.isHidden())
             self.dock.raise_()
         else:
             self.dock.setVisible(False)
