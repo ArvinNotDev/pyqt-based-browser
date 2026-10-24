@@ -284,25 +284,35 @@ class _BrowserShell(QFrame):
             (header_bottom - scaled.height()) // 2,
         )
 
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        # Build one combined clip path instead of relying on a version-sensitive
+        # enum lookup after a QPainter has started painting.
+        header_clip = QPainterPath()
+        header_clip.addRect(QRectF(header_rect))
         radius = 0 if self.property("edgeToEdge") is True else 12
         if radius:
             rounded_shell = QPainterPath()
             rounded_shell.addRoundedRect(QRectF(self.rect()), radius, radius)
-            painter.setClipPath(rounded_shell)
-        painter.setClipRect(header_rect, QPainter.ClipOperation.IntersectClip)
-        painter.drawPixmap(origin, scaled)
+            header_clip = rounded_shell.intersected(header_clip)
 
-        # Subtle theme-aware glass lets the image remain visible while keeping
-        # icons, tabs and address controls readable above it.
-        tint = (
-            QColor(13, 19, 29, 118)
-            if self._header_dark_mode
-            else QColor(242, 247, 254, 112)
-        )
-        painter.fillRect(header_rect, tint)
-        painter.end()
+        painter = QPainter(self)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            painter.setClipPath(header_clip)
+            painter.drawPixmap(origin, scaled)
+
+            # Subtle theme-aware glass lets the image remain visible while
+            # keeping icons, tabs and address controls readable above it.
+            tint = (
+                QColor(13, 19, 29, 118)
+                if self._header_dark_mode
+                else QColor(242, 247, 254, 112)
+            )
+            painter.fillRect(header_rect, tint)
+        finally:
+            # An exception in a paint event must never leave the paint device
+            # active; Qt otherwise reports QBackingStore/endPaint warnings and
+            # subsequent widgets may not repaint correctly.
+            painter.end()
 
 
 class TabButton(QFrame):

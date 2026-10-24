@@ -433,15 +433,18 @@ def test_browser_shell_paints_imported_wallpaper_behind_transparent_header(qapp)
     assert shell.set_header_wallpaper(bytes(payload), title_bar, navbar, dark_mode=False)
     shell.show()
     qapp.processEvents()
-    rendered = QPixmap(shell.size())
-    rendered.fill(Qt.GlobalColor.transparent)
-    shell.render(rendered)
-    pixel = rendered.toImage().pixelColor(210, 20)
+    # Repeated paints catch failures that leave the QPainter active and break
+    # later repaints of the header or the rest of the window.
+    for _ in range(2):
+        rendered = QPixmap(shell.size())
+        rendered.fill(Qt.GlobalColor.transparent)
+        shell.render(rendered)
+        pixel = rendered.toImage().pixelColor(210, 20)
 
-    # The light glass tint alters red, but the selected image remains visible
-    # through the title bar instead of being covered by an opaque theme fill.
-    assert pixel.red() > pixel.green() + 35
-    assert pixel.red() > pixel.blue() + 25
+        # The light glass tint alters red, but the selected image remains visible
+        # through the title bar instead of being covered by an opaque theme fill.
+        assert pixel.red() > pixel.green() + 35
+        assert pixel.red() > pixel.blue() + 25
 
     shell.close()
     shell.deleteLater()
