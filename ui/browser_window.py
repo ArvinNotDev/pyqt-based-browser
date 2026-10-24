@@ -31,8 +31,6 @@ from PySide6.QtWebChannel import QWebChannel
 
 import qtawesome as qta
 
-logger = logging.getLogger(__name__)
-
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
@@ -79,12 +77,7 @@ except ModuleNotFoundError as exc:
         raise
     BookmarksBar = None
 
-try:
-    from .bookmarks_dialog import BookmarksDialog
-except ModuleNotFoundError as exc:
-    if exc.name != "ui.bookmarks_dialog":
-        raise
-    BookmarksDialog = None
+logger = logging.getLogger(__name__)
 
 TAB_WIDTH = 150
 MIN_TAB_WIDTH = 92
