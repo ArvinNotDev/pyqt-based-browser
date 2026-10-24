@@ -11,7 +11,7 @@ from PySide6.QtTest import QSignalSpy, QTest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from ui.browser_window import (
-    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView,
+    TAB_HEIGHT, CustomTabBar, TabButton, _StatusMessageOverlay, _RoundedWebView, _BrowserShell,
 )
 from ui.title_bar import CustomTitleBar
 
@@ -365,4 +365,84 @@ def test_title_bar_hosted_tab_strip_new_and_close_controls_emit_actions(qapp):
     host.close()
     tab_bar.close()
     title_bar.close()
+    qapp.processEvents()
+
+
+
+def test_resize_overlays_stop_before_the_interactive_title_bar(qapp):
+    from ui.browser_window import BrowserWindow
+    from PySide6.QtWidgets import QWidget
+
+    host = _StateTrackingWindow()
+    host.resize(900, 320)
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(4, 4, 4, 4)
+    title_bar = CustomTitleBar(host)
+    layout.addWidget(title_bar)
+    host.title_bar = title_bar
+    host._resize_handles = {
+        name: QWidget(host)
+        for name in (
+            "top", "bottom", "left", "right",
+            "top_left", "top_right", "bottom_left", "bottom_right",
+        )
+    }
+    host.show()
+    qapp.processEvents()
+
+    title_top = title_bar.mapTo(host, QPoint(0, 0)).y()
+    BrowserWindow._update_resize_handles(host)
+
+    assert host._resize_handles["top"].height() <= title_top
+    assert host._resize_handles["top_left"].height() <= title_top
+    assert host._resize_handles["top_right"].height() <= title_top
+    assert host._resize_handles["top"].geometry().bottom() < title_top
+
+    host.close()
+    title_bar.close()
+    qapp.processEvents()
+
+
+def test_browser_shell_paints_imported_wallpaper_behind_transparent_header(qapp):
+    from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+    from PySide6.QtGui import QColor, QImage, QPixmap
+    from PySide6.QtWidgets import QWidget
+
+    shell = _BrowserShell()
+    shell.setObjectName("browserShell")
+    shell.resize(420, 130)
+    shell.setStyleSheet("QFrame#browserShell { background: #ffffff; border: none; }")
+
+    title_bar = QWidget(shell)
+    title_bar.setObjectName("customTitleBar")
+    title_bar.setGeometry(0, 0, 420, 36)
+    title_bar.setStyleSheet("QWidget#customTitleBar { background: transparent; border: none; }")
+    navbar = QWidget(shell)
+    navbar.setObjectName("NavigationBar")
+    navbar.setGeometry(0, 36, 420, 50)
+    navbar.setStyleSheet("QWidget#NavigationBar { background: transparent; border: none; }")
+
+    image = QImage(64, 32, QImage.Format.Format_RGB32)
+    image.fill(QColor("#e54545"))
+    payload = QByteArray()
+    buffer = QBuffer(payload)
+    assert buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    assert image.save(buffer, "PNG")
+    buffer.close()
+
+    assert shell.set_header_wallpaper(bytes(payload), title_bar, navbar, dark_mode=False)
+    shell.show()
+    qapp.processEvents()
+    rendered = QPixmap(shell.size())
+    rendered.fill(Qt.GlobalColor.transparent)
+    shell.render(rendered)
+    pixel = rendered.toImage().pixelColor(210, 20)
+
+    # The light glass tint alters red, but the selected image remains visible
+    # through the title bar instead of being covered by an opaque theme fill.
+    assert pixel.red() > pixel.green() + 35
+    assert pixel.red() > pixel.blue() + 25
+
+    shell.close()
+    shell.deleteLater()
     qapp.processEvents()
