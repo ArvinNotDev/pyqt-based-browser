@@ -1934,17 +1934,8 @@ class BrowserWindow(QMainWindow):
             _show_status_message(self, "Could not update bookmark.", 3000)
 
     def show_bookmarks(self, *args):
-        if BookmarksDialog is None or self.bookmarks_manager is None:
-            _show_status_message(self, "Bookmarks are unavailable.", 3000)
-            return
-        try:
-            dialog = BookmarksDialog(self.bookmarks_manager, self)
-            dialog.url_activated.connect(self.navigate)
-            dialog.exec()
-            self._refresh_bookmarks()
-        except Exception:
-            logger.exception("Could not open bookmarks")
-            _show_status_message(self, "Could not open bookmarks.", 3000)
+        """Open the integrated bookmarks manager in the active browser tab."""
+        self.navigate("arma://bookmarks/")
 
     def show_downloads(self, *args):
         self.navigate("arma://downloads/")
@@ -2805,6 +2796,46 @@ class BrowserWindow(QMainWindow):
                 self._load_internal_page(view, "arma://history/")
                 return
 
+            if host == "bookmarks":
+                manager = self.bookmarks_manager
+                if manager is None:
+                    raise ValueError("The bookmark manager is unavailable.")
+                if action == "bookmarks_refresh":
+                    self._load_internal_page(view, "arma://bookmarks/")
+                    return
+
+                bookmark_id = payload.get("id")
+                if not isinstance(bookmark_id, str) or not bookmark_id or len(bookmark_id) > 256:
+                    raise ValueError("That bookmark entry is invalid.")
+                bookmark = next(
+                    (item for item in manager.list_bookmarks() if item.get("id") == bookmark_id),
+                    None,
+                )
+                if bookmark is None:
+                    raise ValueError("That bookmark no longer exists.")
+                target = manager._validate_url(bookmark.get("url"))
+                if action in {"bookmark_open", "bookmark_open_new"}:
+                    internal_host = self._internal_host(target)
+                    if target.lower().startswith("arma://") and internal_host is None:
+                        raise ValueError("That internal bookmark is not supported.")
+                    if action == "bookmark_open_new":
+                        self.new_tab(target)
+                    elif view is self.current_view():
+                        self.navigate(target)
+                    elif internal_host is not None:
+                        self._load_internal_page(view, target)
+                    else:
+                        view.setUrl(QUrl(target))
+                    return
+                if action == "bookmark_remove":
+                    if not manager.remove_bookmark(bookmark_id):
+                        raise ValueError("That bookmark no longer exists.")
+                    self._refresh_bookmarks()
+                    _show_status_message(self, "Bookmark removed.", 2000)
+                    self._load_internal_page(view, "arma://bookmarks/")
+                    return
+                return
+
             if host == "downloads":
                 manager = self.download_manager
                 if manager is None:
@@ -2917,7 +2948,12 @@ class BrowserWindow(QMainWindow):
                     target = payload.get("url")
                     if not isinstance(target, str):
                         return
-                    address = resolve_address_input(target, self.settings.default_search_engine)
+                    internal_host = self._internal_host(target)
+                    address = (
+                        f"arma://{internal_host}/"
+                        if internal_host is not None
+                        else resolve_address_input(target, self.settings.default_search_engine)
+                    )
                 if action == "open_new":
                     self.new_tab(address)
                 else:
