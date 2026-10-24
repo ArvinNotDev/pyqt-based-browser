@@ -1,5 +1,6 @@
 """Regression tests for the custom browser frame and compact tab strip."""
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_DISABLE_SANDBOX", "1")
@@ -34,6 +35,49 @@ def test_custom_title_bar_does_not_show_active_page_title(qapp):
     assert not hasattr(title_bar, "page_context")
     assert not hasattr(title_bar, "set_page_title")
     host.close()
+
+
+def test_tab_strip_can_move_into_title_bar_and_return_to_workspace(qapp):
+    from ui.browser_window import BrowserWindow
+
+    host = _StateTrackingWindow()
+    title_bar = CustomTitleBar(host)
+    workspace = QWidget()
+    workspace_layout = QVBoxLayout(workspace)
+    tab_bar = CustomTabBar()
+    workspace_layout.addWidget(tab_bar)
+
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(tabs_in_title_bar=True),
+        title_bar=title_bar,
+        tabbar=tab_bar,
+        browser_workspace_layout=workspace_layout,
+    )
+
+    BrowserWindow._apply_tabbar_placement(browser)
+    qapp.processEvents()
+
+    assert title_bar.tabs_widget is tab_bar
+    assert title_bar.left_stack.currentWidget() is tab_bar
+    assert title_bar.brand_widget.isHidden()
+    assert workspace_layout.indexOf(tab_bar) == -1
+    assert tab_bar.property("inTitleBar") is True
+    assert title_bar.layout().indexOf(title_bar.close_button) == title_bar.layout().count() - 1
+
+    browser.settings.tabs_in_title_bar = False
+    BrowserWindow._apply_tabbar_placement(browser)
+    qapp.processEvents()
+
+    assert title_bar.tabs_widget is None
+    assert title_bar.left_stack.currentWidget() is title_bar.brand_widget
+    assert workspace_layout.indexOf(tab_bar) == 0
+    assert tab_bar.property("inTitleBar") is False
+
+    tab_bar.close()
+    title_bar.close()
+    workspace.close()
+    host.close()
+    qapp.processEvents()
 
 
 def test_tab_widgets_fit_inside_their_strip(qapp):
