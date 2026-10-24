@@ -148,7 +148,9 @@ def _make_navigation_bar(qapp):
     from ui.navigation_bar import NavigationBar
     from ui.settings import Settings
 
-    bar = NavigationBar(["Guest"], settings=Settings())
+    settings = Settings()
+    settings.dark_mode = False
+    bar = NavigationBar(["Guest"], settings=settings)
     bar.resize(960, 50)
     bar.show()
     qapp.processEvents()
