@@ -3070,6 +3070,7 @@ class BrowserWindow(QMainWindow):
                     "download_folder", "dark_mode", "private_mode", "save_history",
                     "save_cookies", "hardware_acceleration", "webgpu_enabled",
                     "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
+                    "restore_session", "ad_blocking_enabled",
                 }
                 if not isinstance(setting_name, str) or setting_name not in allowed_setting_names:
                     raise ValueError("That browser setting is not supported.")
@@ -3088,6 +3089,8 @@ class BrowserWindow(QMainWindow):
                     "site_compatibility_mode": bool(self.settings.site_compatibility_mode),
                     "proxy_panel_visible": bool(self.settings.proxy_panel_visible),
                     "tabs_in_title_bar": bool(self.settings.tabs_in_title_bar),
+                    "restore_session": bool(getattr(self.settings, "restore_session", True)),
+                    "ad_blocking_enabled": bool(getattr(self.settings, "ad_blocking_enabled", True)),
                 }
                 payload[setting_name] = setting_value
                 action = "save_browser_settings"
@@ -3133,6 +3136,7 @@ class BrowserWindow(QMainWindow):
                     "dark_mode", "private_mode", "save_history", "save_cookies",
                     "hardware_acceleration", "webgpu_enabled",
                     "site_compatibility_mode", "proxy_panel_visible", "tabs_in_title_bar",
+                    "restore_session", "ad_blocking_enabled",
                 )
                 for name in boolean_fields:
                     if type(payload.get(name)) is not bool:
