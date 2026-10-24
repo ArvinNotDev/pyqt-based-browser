@@ -54,6 +54,7 @@ def test_clicking_an_existing_titlebar_tab_switches_back_to_it(qapp):
     qapp.processEvents()
 
     previous_tab = tab_bar.tabs[0]
+    assert not hasattr(previous_tab, "_hover_timer")
     previous_center = previous_tab.mapTo(
         title_bar, previous_tab.rect().center()
     )
@@ -67,12 +68,18 @@ def test_clicking_an_existing_titlebar_tab_switches_back_to_it(qapp):
     assert _title_bar_point_is_interactive(title_bar, strip_padding)
 
     changed = QSignalSpy(tab_bar.tab_changed)
-    QTest.mouseClick(previous_tab, Qt.MouseButton.LeftButton)
+    QTest.mousePress(previous_tab, Qt.MouseButton.LeftButton)
     qapp.processEvents()
 
+    # The previous tab becomes active on mouse-down, without needing repeated
+    # clicks or waiting for the mouse-up event.
     assert tab_bar.active_index == 0
     assert changed.count() == 1
     assert changed.at(0)[0] == 0
+
+    QTest.mouseRelease(previous_tab, Qt.MouseButton.LeftButton)
+    qapp.processEvents()
+    assert changed.count() == 1
 
     host.close()
     qapp.processEvents()

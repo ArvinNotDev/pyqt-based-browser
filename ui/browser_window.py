@@ -369,7 +369,6 @@ class TabButton(QFrame):
 
     clicked = Signal()
     closed = Signal()
-    requested_preview = Signal()
     context_requested = Signal(QPoint)
     drag_moved = Signal(QPoint)
 
@@ -425,10 +424,6 @@ class TabButton(QFrame):
         layout.addWidget(self.label, 1)
         layout.addWidget(self.close_btn)
 
-        self._hover_timer = QTimer(self)
-        self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(520)
-        self._hover_timer.timeout.connect(self._emit_preview)
         self.installEventFilter(self)
         self.close_btn.installEventFilter(self)
         self.set_title(title)
@@ -462,15 +457,10 @@ class TabButton(QFrame):
         self.favicon.setPixmap(icon.pixmap(QSize(16, 16)))
         self.favicon.setToolTip("Loading page…" if self._loading else "Site icon")
 
-    def _emit_preview(self) -> None:
-        if not self._dragging:
-            self.requested_preview.emit()
-
     def set_close_button_allowed(self, allowed: bool) -> None:
         """Show a close control only when the tab strip permits closing this tab."""
         self._close_button_allowed = bool(allowed)
         if not self._close_button_allowed:
-            self._hover_timer.stop()
             self.close_btn.hide()
         elif self.underMouse() and not self._dragging:
             self._show_close_button_if_allowed()
@@ -491,11 +481,9 @@ class TabButton(QFrame):
     def enterEvent(self, event) -> None:
         if not self._dragging:
             self._show_close_button_if_allowed()
-            self._hover_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
-        self._hover_timer.stop()
         # Qt may report Leave as the pointer crosses the child close button.
         # Recheck the cursor after event dispatch before deciding to hide it.
         QTimer.singleShot(0, self._sync_close_button_visibility)
@@ -505,7 +493,6 @@ class TabButton(QFrame):
         if event.type() == QEvent.Type.HoverEnter and not self._dragging:
             self._show_close_button_if_allowed()
         elif event.type() == QEvent.Type.HoverLeave:
-            self._hover_timer.stop()
             QTimer.singleShot(0, self._sync_close_button_visibility)
         return super().event(event)
 
@@ -513,6 +500,13 @@ class TabButton(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self._press_pos = event.position().toPoint()
             self._dragging = False
+            # Switch on press, as desktop browsers do, rather than waiting for
+            # release. This keeps tab selection immediate and avoids losing a
+            # switch when hover UI changes underneath the pointer.
+            if not self.close_btn.underMouse():
+                self.clicked.emit()
+                event.accept()
+                return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
@@ -523,7 +517,6 @@ class TabButton(QFrame):
             current = event.position().toPoint()
             if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
                 self._dragging = True
-                self._hover_timer.stop()
                 self.close_btn.hide()
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             if self._dragging:
@@ -542,8 +535,8 @@ class TabButton(QFrame):
                 self.close_btn.hide()
             event.accept()
             return
-        if event.button() == Qt.MouseButton.LeftButton and not self.close_btn.underMouse():
-            self.clicked.emit()
+        # Selection is emitted on mouse-down; do not emit a second activation
+        # here. The close button has its own independent click handler.
         super().mouseReleaseEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
@@ -591,7 +584,6 @@ class CustomTabBar(QFrame):
     tab_closed = Signal(int)
     tab_reordered = Signal(int, int)
     new_tab_requested = Signal()
-    tab_preview_requested = Signal(int)
     tab_context_requested = Signal(int, QPoint)
 
     def __init__(self):
@@ -707,7 +699,6 @@ class CustomTabBar(QFrame):
         tab.apply_icon_theme(self._dark_mode)
         tab.clicked.connect(lambda target=tab: self._on_tab_clicked(target))
         tab.closed.connect(lambda target=tab: self._on_tab_closed(target))
-        tab.requested_preview.connect(lambda target=tab: self._on_tab_preview_requested(target))
         tab.drag_moved.connect(lambda pos, target=tab: self._on_tab_drag_moved(target, pos))
         tab.context_requested.connect(
             lambda pos, target=tab: self.tab_context_requested.emit(self.tabs.index(target), pos)
@@ -949,15 +940,6 @@ class CustomTabBar(QFrame):
     def _on_tab_closed(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.tab_closed.emit(self.tabs.index(tab))
-
-    def _on_tab_preview_requested(self, tab: TabButton) -> None:
-        try:
-            index = self.tabs.index(tab)
-        except ValueError:
-            return
-        if index != self.active_index:
-            self.tab_preview_requested.emit(index)
-
 
 class BrowserPage(QWebEnginePage):
     """Page that routes web requests for a new window into a browser tab."""
@@ -1239,7 +1221,6 @@ class BrowserWindow(QMainWindow):
         self.tabbar.tab_changed.connect(self._on_tab_changed)
         # connect to our custom close flow
         self.tabbar.tab_closed.connect(self.request_close_tab)
-        self.tabbar.tab_preview_requested.connect(self._show_tab_preview)
         self.tabbar.tab_context_requested.connect(self._show_tab_context_menu)
         self.tabbar.tab_reordered.connect(self._move_tab)
 
@@ -1261,14 +1242,6 @@ class BrowserWindow(QMainWindow):
         # This is a layout host, not a visible card. Let the page meet the browser
         # shell directly so the viewport has one clean rounded edge, not two boxes.
         self.view_layout.setContentsMargins(0, 0, 0, 0)
-
-        self._preview_label = QLabel(self)
-        self._preview_label.setWindowFlags(Qt.ToolTip)
-        self._preview_label.setStyleSheet("border:1px solid #222; background-color: white;")
-        self._preview_label.setScaledContents(True)
-        self._preview_label.hide()
-        self._preview_animation = QPropertyAnimation(self._preview_label, b"windowOpacity")
-        self._preview_animation.setDuration(180)
 
         root = QWidget()
         root.setObjectName("browserWindowRoot")
@@ -3812,86 +3785,6 @@ class BrowserWindow(QMainWindow):
             return
         self.handle_fullscreen(request)
 
-    def _show_tab_preview(self, index: int):
-        if index < 0 or index >= len(self.views) or index == self.current_index:
-            return
-
-        view = self.views[index]
-        # Never call QWidget.grab() on QWebEngineView. Chromium's accelerated
-        # surface is compositor-owned; grabbing it can cause flashes/black frames.
-        # Use a stable, locally painted preview card instead of sampling live pixels.
-        pix = QPixmap(640, 360)
-        dark = bool(getattr(getattr(self, "settings", None), "dark_mode", True))
-        background = QColor("#17212b" if dark else "#eef3fa")
-        accent = QColor("#8db8ff" if dark else "#3979d6")
-        muted = QColor("#9aa9bc" if dark else "#66768d")
-        pix.fill(background)
-        preview_painter = QPainter(pix)
-        preview_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        preview_painter.setPen(accent)
-        preview_painter.drawText(
-            QRect(24, 112, 592, 40), Qt.AlignmentFlag.AlignCenter, "ARMA Browser"
-        )
-        tab_title = self.tabbar.tabs[index]._title if index < len(self.tabbar.tabs) else "Page preview"
-        title_font = preview_painter.font()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        preview_painter.setFont(title_font)
-        preview_painter.setPen(background.lighter(175) if dark else background.darker(170))
-        preview_painter.drawText(
-            QRect(24, 164, 592, 40), Qt.AlignmentFlag.AlignCenter, tab_title[:90]
-        )
-        url_font = preview_painter.font()
-        url_font.setPointSize(9)
-        url_font.setBold(False)
-        preview_painter.setFont(url_font)
-        preview_painter.setPen(muted)
-        preview_painter.drawText(
-            QRect(24, 210, 592, 54), Qt.AlignmentFlag.AlignCenter,
-            view.url().toString()[:150],
-        )
-        preview_painter.end()
-
-        scaled = pix.scaled(320, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        self._preview_label.setPixmap(scaled)
-        self._preview_label.adjustSize()
-
-        try:
-            tab_widget = self.tabbar.tabs[index]
-            global_pos = tab_widget.mapToGlobal(tab_widget.rect().bottomLeft())
-            x = global_pos.x()
-            y = global_pos.y() + 8
-
-            screen_rect = self.screen().availableGeometry()
-            if x + self._preview_label.width() > screen_rect.right():
-                x = screen_rect.right() - self._preview_label.width() - 8
-            if y + self._preview_label.height() > screen_rect.bottom():
-                y = global_pos.y() - self._preview_label.height() - 8
-            if x < screen_rect.left():
-                x = screen_rect.left() + 8
-            if y < screen_rect.top():
-                y = screen_rect.top() + 8
-
-            self._preview_label.move(x, y)
-        except RuntimeError:
-            center = self.mapToGlobal(self.rect().center())
-            self._preview_label.move(center + QPoint(-160, 40))
-
-        self._preview_label.setWindowOpacity(0.0)
-        self._preview_label.show()
-        self._preview_animation.stop()
-        self._preview_animation.setStartValue(0.0)
-        self._preview_animation.setEndValue(1.0)
-        self._preview_animation.start()
-        QTimer.singleShot(1500, lambda: self._fade_out_preview())
-
-    def _fade_out_preview(self):
-        self._preview_animation.stop()
-        self._preview_animation.setStartValue(1.0)
-        self._preview_animation.setEndValue(0.0)
-        self._preview_animation.start()
-        QTimer.singleShot(200, self._preview_label.hide)
-
     def _do_on_current(self, func):
         v = self.current_view()
         if v:
@@ -4445,12 +4338,6 @@ class BrowserWindow(QMainWindow):
                 self.proxy_panel.prepare_shutdown()
         except (AttributeError, OSError, RuntimeError):
             logger.exception("Error while shutting down embedded Tor/Proxy services")
-        try:
-            for tab in self.tabbar.tabs:
-                tab._hover_timer.stop()
-        except (AttributeError, RuntimeError):
-            logger.debug("Tab hover timer cleanup was skipped.", exc_info=True)
-
     def closeEvent(self, event):
         active_downloads = []
         for manager in self._download_managers.values():
