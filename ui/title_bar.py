@@ -5,7 +5,7 @@ import sys
 from ctypes import wintypes
 
 from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QToolButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QStackedWidget, QSizePolicy, QToolButton, QWidget
 
 import qtawesome as qta
 
@@ -42,19 +42,37 @@ class CustomTitleBar(QWidget):
         layout.setContentsMargins(12, 0, 8, 0)
         layout.setSpacing(8)
 
-        self.logo = QLabel("A", self)
+        # The left slot switches between the familiar brand and the tab strip.
+        # Window controls remain siblings at the far right in either layout.
+        self.left_stack = QStackedWidget(self)
+        self.left_stack.setObjectName("titleBarLeftStack")
+        self.left_stack.setFrameShape(QFrame.Shape.NoFrame)
+        self.left_stack.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+
+        self.brand_widget = QWidget(self.left_stack)
+        self.brand_widget.setObjectName("titleBarBrand")
+        brand_layout = QHBoxLayout(self.brand_widget)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(8)
+
+        self.logo = QLabel("A", self.brand_widget)
         self.logo.setObjectName("titleBarLogo")
         self.logo.setAlignment(Qt.AlignCenter)
         self.logo.setFixedSize(24, 24)
         self.logo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.logo.setAccessibleName("ARMA Browser")
-        layout.addWidget(self.logo)
+        brand_layout.addWidget(self.logo)
 
-        self.title = QLabel("ARMA Browser", self)
+        self.title = QLabel("ARMA Browser", self.brand_widget)
         self.title.setObjectName("titleBarTitle")
         self.title.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-        layout.addWidget(self.title)
-        layout.addStretch(1)
+        brand_layout.addWidget(self.title)
+        brand_layout.addStretch(1)
+        self.left_stack.addWidget(self.brand_widget)
+        self.tabs_widget = None
+        layout.addWidget(self.left_stack, 1)
 
         self.minimize_button = self._button("Minimize", "windowMinimizeButton", "fa5s.minus")
         self.maximize_button = self._button("Maximize", "windowMaximizeButton", "fa5s.window-maximize")
@@ -70,6 +88,30 @@ class CustomTitleBar(QWidget):
         self.maximize_button.clicked.connect(self._toggle_maximized)
         self.close_button.clicked.connect(window.close)
         self.sync_maximize_button()
+
+    def set_tabs_widget(self, widget) -> None:
+        """Replace the brand area with the browser tab strip while keeping controls fixed right."""
+        if widget is self.tabs_widget:
+            if widget is not None and self.left_stack.currentWidget() is not widget:
+                self.left_stack.setCurrentWidget(widget)
+            return
+
+        if self.tabs_widget is not None:
+            previous = self.tabs_widget
+            self.left_stack.setCurrentWidget(self.brand_widget)
+            self.left_stack.removeWidget(previous)
+            previous.hide()
+            previous.setParent(None)
+            self.tabs_widget = None
+
+        if widget is None:
+            self.left_stack.setCurrentWidget(self.brand_widget)
+            return
+
+        self.left_stack.addWidget(widget)
+        self.tabs_widget = widget
+        self.left_stack.setCurrentWidget(widget)
+        widget.show()
 
     def _button(self, tooltip, object_name, icon_name):
         button = QToolButton(self)
