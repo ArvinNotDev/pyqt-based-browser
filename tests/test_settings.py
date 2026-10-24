@@ -31,6 +31,8 @@ def test_defaults_are_independent_and_stable():
     assert first.hardware_acceleration is True
     assert first.webgpu_enabled is False
     assert first.tabs_in_title_bar is False
+    assert first.restore_session is True
+    assert first.ad_blocking_enabled is True
     assert first.profile is not second.profile
     assert first.profiles_list is not second.profiles_list
 
@@ -93,12 +95,16 @@ def test_startup_and_new_tab_behavior_round_trip_and_validation(tmp_path):
     settings = Settings(file_path=str(settings_file))
     settings.startup_page = "homepage"
     settings.new_tab_page = "homepage"
+    settings.restore_session = False
+    settings.ad_blocking_enabled = False
     settings.save("Guest")
 
     loaded = Settings(file_path=str(settings_file))
     loaded.load("Guest")
     assert loaded.startup_page == "homepage"
     assert loaded.new_tab_page == "homepage"
+    assert loaded.restore_session is False
+    assert loaded.ad_blocking_enabled is False
 
     settings_file.write_text(
         json.dumps({"Guest": {"startup_page": "javascript", "new_tab_page": "broken"}}),
