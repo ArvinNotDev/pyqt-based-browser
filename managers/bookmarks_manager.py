@@ -40,10 +40,26 @@ class BookmarksManager:
             _port = parts.port
         except ValueError as exc:
             raise ValueError(f"Invalid bookmark URL: {exc}") from exc
-        if parts.scheme.lower() not in {"http", "https"} or not hostname:
-            raise ValueError("Bookmark URL must be an absolute HTTP or HTTPS URL")
+        scheme = parts.scheme.lower()
         if parts.username is not None or parts.password is not None:
             raise ValueError("Bookmark URLs cannot contain embedded credentials")
+        if not hostname:
+            raise ValueError("Bookmark URL must have a valid hostname")
+        if scheme == "arma":
+            allowed_internal_hosts = {
+                "dashboard", "bookmarks", "history", "downloads", "settings"
+            }
+            if (
+                hostname.lower() not in allowed_internal_hosts
+                or _port is not None
+                or parts.path not in {"", "/"}
+                or parts.query
+                or parts.fragment
+            ):
+                raise ValueError("Only supported ARMA internal pages can be bookmarked")
+            return f"arma://{hostname.lower()}/"
+        if scheme not in {"http", "https"}:
+            raise ValueError("Bookmark URL must be an absolute HTTP(S) URL or a supported ARMA internal page")
         try:
             hostname.encode("idna")
         except UnicodeError as exc:
