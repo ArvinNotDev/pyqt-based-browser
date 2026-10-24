@@ -291,7 +291,7 @@ class _BrowserShell(QFrame):
             rounded_shell = QPainterPath()
             rounded_shell.addRoundedRect(QRectF(self.rect()), radius, radius)
             painter.setClipPath(rounded_shell)
-        painter.setClipRect(header_rect, Qt.ClipOperation.IntersectClip)
+        painter.setClipRect(header_rect, QPainter.ClipOperation.IntersectClip)
         painter.drawPixmap(origin, scaled)
 
         # Subtle theme-aware glass lets the image remain visible while keeping
