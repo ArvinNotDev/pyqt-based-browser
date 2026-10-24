@@ -24,12 +24,29 @@ def _browser():
         "https://example.org/": [{"date": "2026-10-24", "time": "10:00"}],
     })
     manager = SimpleNamespace(get_downloads=lambda: [])
-    return SimpleNamespace(settings=settings, history=history, download_manager=manager)
+    bookmarks_manager = SimpleNamespace(list_bookmarks=lambda: [
+        {
+            "id": "example-id",
+            "title": "Example",
+            "url": "https://example.org/",
+            "created_at": "2026-10-24T10:00:00+00:00",
+        },
+        {
+            "id": "home-id",
+            "title": "ARMA Home",
+            "url": "arma://dashboard/",
+            "created_at": "2026-10-24T10:01:00+00:00",
+        },
+    ])
+    return SimpleNamespace(
+        settings=settings, history=history, download_manager=manager,
+        bookmarks_manager=bookmarks_manager,
+    )
 
 
 def test_internal_pages_share_modern_theme_and_navigation():
     browser = _browser()
-    for host in ("settings", "history", "downloads"):
+    for host in ("settings", "history", "downloads", "bookmarks"):
         document = render_internal_page(browser, host)
         assert '<nav class="nav" aria-label="Browser pages">' in document
         assert "Premium, consistent surfaces" in document
@@ -47,6 +64,21 @@ def test_history_and_download_pages_show_clear_summary_metrics():
     assert "Active transfers" in downloads_page
     assert "Completed" in downloads_page
     assert "Failed or cancelled" in downloads_page
+
+
+def test_bookmarks_page_supports_search_and_safe_item_actions():
+    document = render_internal_page(_browser(), "bookmarks")
+
+    assert "Saved pages" in document
+    assert "Saved items" in document
+    assert "Example" in document
+    assert "https://example.org/" in document
+    assert "ARMA page" in document
+    assert 'id="bookmark-filter"' in document
+    assert 'data-action="bookmark_open"' in document
+    assert 'data-action="bookmark_open_new"' in document
+    assert 'data-action="bookmark_remove"' in document
+    assert "Open in new tab" in document
 
 
 def test_embedded_tor_connect_area_uses_transparent_shell_background():
