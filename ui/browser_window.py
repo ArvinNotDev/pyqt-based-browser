@@ -31,6 +31,8 @@ from PySide6.QtWebChannel import QWebChannel
 
 import qtawesome as qta
 
+logger = logging.getLogger(__name__)
+
 from .settings import Settings
 from .navigation_bar import NavigationBar
 from .settings_window import SettingsWindow
