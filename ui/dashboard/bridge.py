@@ -24,7 +24,7 @@ class DashboardBridge(QObject):
         except RuntimeError:
             return
         if page_url.scheme().lower() != "arma" or page_url.host().lower() not in {
-            "dashboard", "settings", "history", "downloads"
+            "dashboard", "bookmarks", "settings", "history", "downloads"
         }:
             return
         if not isinstance(action, str) or len(action) > 40 or len(payload_json) > 80_000:
