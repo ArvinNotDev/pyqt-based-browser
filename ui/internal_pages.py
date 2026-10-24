@@ -1282,7 +1282,7 @@ def _profile_page(browser) -> str:
   document.getElementById('profile-choose-image').addEventListener('click',()=>fileInput.click());
   fileInput.addEventListener('change',()=>{{
     const file=fileInput.files&&fileInput.files[0]; if(!file)return;
-    if(!new RegExp('^image/(png|jpeg|webp|bmp)
+    if(!new RegExp('^image/(png|jpeg|webp|bmp)$').test(file.type)||file.size>12*1024*1024){{
       window.armaToast('Choose a PNG, JPEG, WebP or BMP image under 12 MB.','warning'); fileInput.value=''; return;
     }}
     const reader=new FileReader();
