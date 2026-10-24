@@ -369,6 +369,8 @@ class TabButton(QFrame):
 
     clicked = Signal()
     closed = Signal()
+    requested_preview = Signal()
+    preview_dismiss_requested = Signal()
     context_requested = Signal(QPoint)
     drag_moved = Signal(QPoint)
 
@@ -390,6 +392,10 @@ class TabButton(QFrame):
         self._press_pos = QPoint()
         self._dragging = False
         self._close_button_allowed = True
+        self._hover_timer = QTimer(self)
+        self._hover_timer.setSingleShot(True)
+        self._hover_timer.setInterval(460)
+        self._hover_timer.timeout.connect(self._emit_preview)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(7, 1, 4, 1)
@@ -457,10 +463,15 @@ class TabButton(QFrame):
         self.favicon.setPixmap(icon.pixmap(QSize(16, 16)))
         self.favicon.setToolTip("Loading page…" if self._loading else "Site icon")
 
+    def _emit_preview(self) -> None:
+        if self.underMouse() and not self._dragging:
+            self.requested_preview.emit()
+
     def set_close_button_allowed(self, allowed: bool) -> None:
         """Show a close control only when the tab strip permits closing this tab."""
         self._close_button_allowed = bool(allowed)
         if not self._close_button_allowed:
+            self._hover_timer.stop()
             self.close_btn.hide()
         elif self.underMouse() and not self._dragging:
             self._show_close_button_if_allowed()
@@ -481,9 +492,12 @@ class TabButton(QFrame):
     def enterEvent(self, event) -> None:
         if not self._dragging:
             self._show_close_button_if_allowed()
+            self._hover_timer.start()
         super().enterEvent(event)
 
     def leaveEvent(self, event) -> None:
+        self._hover_timer.stop()
+        self.preview_dismiss_requested.emit()
         # Qt may report Leave as the pointer crosses the child close button.
         # Recheck the cursor after event dispatch before deciding to hide it.
         QTimer.singleShot(0, self._sync_close_button_visibility)
@@ -493,11 +507,15 @@ class TabButton(QFrame):
         if event.type() == QEvent.Type.HoverEnter and not self._dragging:
             self._show_close_button_if_allowed()
         elif event.type() == QEvent.Type.HoverLeave:
+            self._hover_timer.stop()
+            self.preview_dismiss_requested.emit()
             QTimer.singleShot(0, self._sync_close_button_visibility)
         return super().event(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            self._hover_timer.stop()
+            self.preview_dismiss_requested.emit()
             self._press_pos = event.position().toPoint()
             self._dragging = False
             # Switch on press, as desktop browsers do, rather than waiting for
@@ -517,6 +535,8 @@ class TabButton(QFrame):
             current = event.position().toPoint()
             if not self._dragging and (current - self._press_pos).manhattanLength() >= QApplication.startDragDistance():
                 self._dragging = True
+                self._hover_timer.stop()
+                self.preview_dismiss_requested.emit()
                 self.close_btn.hide()
                 self.setCursor(Qt.CursorShape.ClosedHandCursor)
             if self._dragging:
@@ -541,6 +561,9 @@ class TabButton(QFrame):
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.close_btn:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                self._hover_timer.stop()
+                self.preview_dismiss_requested.emit()
             if event.type() in (QEvent.Type.Enter, QEvent.Type.HoverEnter):
                 if not self._dragging:
                     self._show_close_button_if_allowed()
@@ -577,6 +600,88 @@ class TabButton(QFrame):
         )
 
 
+class _TabPreviewPopup(QFrame):
+    """A display-only tab preview that never captures mouse or keyboard input."""
+
+    def __init__(self, parent: QWidget):
+        super().__init__(parent)
+        self.setObjectName("tabPreviewPopup")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setFixedWidth(320)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+
+        self.brand_label = QLabel("ARMA  •  TAB PREVIEW", self)
+        self.brand_label.setObjectName("tabPreviewBrand")
+        layout.addWidget(self.brand_label)
+
+        self.title_label = QLabel("New Tab", self)
+        self.title_label.setObjectName("tabPreviewTitle")
+        self.title_label.setWordWrap(True)
+        layout.addWidget(self.title_label)
+
+        self.url_label = QLabel("", self)
+        self.url_label.setObjectName("tabPreviewUrl")
+        self.url_label.setWordWrap(True)
+        layout.addWidget(self.url_label)
+
+        self.status_label = QLabel("", self)
+        self.status_label.setObjectName("tabPreviewStatus")
+        layout.addWidget(self.status_label)
+
+        self.loading_bar = QProgressBar(self)
+        self.loading_bar.setObjectName("tabPreviewLoadingBar")
+        self.loading_bar.setRange(0, 0)
+        self.loading_bar.setTextVisible(False)
+        self.loading_bar.setFixedHeight(3)
+        layout.addWidget(self.loading_bar)
+        self.hide()
+
+    def set_page_details(self, title: str, url: str, loading: bool, dark: bool) -> None:
+        self.title_label.setText((title or "New Tab").strip() or "New Tab")
+        self.title_label.setToolTip(title or "New Tab")
+        self.url_label.setText(url or "No address")
+        self.url_label.setToolTip(url or "No address")
+        self.status_label.setText("Loading in background…" if loading else "Ready to switch")
+        self.status_label.setVisible(bool(loading))
+        self.loading_bar.setVisible(bool(loading))
+
+        if dark:
+            background, border = "#1b2431", "#3a485c"
+            title_color, muted, accent = "#eef4fd", "#9aabc2", "#82aff4"
+        else:
+            background, border = "#ffffff", "#d6e0ed"
+            title_color, muted, accent = "#1e2b3d", "#687991", "#3979d6"
+        self.setStyleSheet(f"""
+            QFrame#tabPreviewPopup {{
+                background: {background};
+                border: 1px solid {border};
+                border-radius: 12px;
+            }}
+            QLabel#tabPreviewBrand {{
+                color: {accent}; font-size: 9px; font-weight: 800;
+                letter-spacing: 1px;
+            }}
+            QLabel#tabPreviewTitle {{
+                color: {title_color}; font-size: 12px; font-weight: 700;
+            }}
+            QLabel#tabPreviewUrl, QLabel#tabPreviewStatus {{
+                color: {muted}; font-size: 10px;
+            }}
+            QProgressBar#tabPreviewLoadingBar {{
+                background: {border}; border: none; border-radius: 1px;
+                min-height: 3px; max-height: 3px;
+            }}
+            QProgressBar#tabPreviewLoadingBar::chunk {{
+                background: {accent}; border-radius: 1px;
+            }}
+        """)
+
+
 class CustomTabBar(QFrame):
     """Responsive tab strip with favicon updates, scrolling and drag reordering."""
 
@@ -584,6 +689,8 @@ class CustomTabBar(QFrame):
     tab_closed = Signal(int)
     tab_reordered = Signal(int, int)
     new_tab_requested = Signal()
+    tab_preview_requested = Signal(int)
+    tab_preview_dismiss_requested = Signal()
     tab_context_requested = Signal(int, QPoint)
 
     def __init__(self):
@@ -699,6 +806,8 @@ class CustomTabBar(QFrame):
         tab.apply_icon_theme(self._dark_mode)
         tab.clicked.connect(lambda target=tab: self._on_tab_clicked(target))
         tab.closed.connect(lambda target=tab: self._on_tab_closed(target))
+        tab.requested_preview.connect(lambda target=tab: self._on_tab_preview_requested(target))
+        tab.preview_dismiss_requested.connect(self.tab_preview_dismiss_requested.emit)
         tab.drag_moved.connect(lambda pos, target=tab: self._on_tab_drag_moved(target, pos))
         tab.context_requested.connect(
             lambda pos, target=tab: self.tab_context_requested.emit(self.tabs.index(target), pos)
@@ -940,6 +1049,14 @@ class CustomTabBar(QFrame):
     def _on_tab_closed(self, tab: TabButton) -> None:
         if tab in self.tabs:
             self.tab_closed.emit(self.tabs.index(tab))
+
+    def _on_tab_preview_requested(self, tab: TabButton) -> None:
+        try:
+            index = self.tabs.index(tab)
+        except ValueError:
+            return
+        if index != self.active_index:
+            self.tab_preview_requested.emit(index)
 
 class BrowserPage(QWebEnginePage):
     """Page that routes web requests for a new window into a browser tab."""
@@ -1221,6 +1338,8 @@ class BrowserWindow(QMainWindow):
         self.tabbar.tab_changed.connect(self._on_tab_changed)
         # connect to our custom close flow
         self.tabbar.tab_closed.connect(self.request_close_tab)
+        self.tabbar.tab_preview_requested.connect(self._show_tab_preview)
+        self.tabbar.tab_preview_dismiss_requested.connect(self._hide_tab_preview)
         self.tabbar.tab_context_requested.connect(self._show_tab_context_menu)
         self.tabbar.tab_reordered.connect(self._move_tab)
 
@@ -1242,6 +1361,13 @@ class BrowserWindow(QMainWindow):
         # This is a layout host, not a visible card. Let the page meet the browser
         # shell directly so the viewport has one clean rounded edge, not two boxes.
         self.view_layout.setContentsMargins(0, 0, 0, 0)
+
+        # This preview is a regular child overlay, not a top-level Qt.ToolTip.
+        # It is transparent to mouse events so it can never intercept tab clicks.
+        self._tab_preview_popup = _TabPreviewPopup(self)
+        self._tab_preview_opacity = QGraphicsOpacityEffect(self._tab_preview_popup)
+        self._tab_preview_popup.setGraphicsEffect(self._tab_preview_opacity)
+        self._tab_preview_opacity.setOpacity(1.0)
 
         root = QWidget()
         root.setObjectName("browserWindowRoot")
@@ -3344,6 +3470,7 @@ class BrowserWindow(QMainWindow):
         if index < 0 or index >= len(self.views):
             return
 
+        self._hide_tab_preview()
         self.current_index = index
         self._set_tab_visibility()
         view = self.views[index]
@@ -3784,6 +3911,51 @@ class BrowserWindow(QMainWindow):
             request.reject()
             return
         self.handle_fullscreen(request)
+
+    def _show_tab_preview(self, index: int) -> None:
+        """Show tab metadata in a mouse-transparent child card; never switch pages."""
+        if (
+            index < 0
+            or index >= len(self.views)
+            or index >= len(self.tabbar.tabs)
+            or index == self.current_index
+        ):
+            self._hide_tab_preview()
+            return
+
+        tab = self.tabbar.tabs[index]
+        view = self.views[index]
+        self._tab_preview_popup.set_page_details(
+            tab._title,
+            view.url().toString(),
+            tab._loading,
+            bool(getattr(self.settings, "dark_mode", True)),
+        )
+        self._tab_preview_popup.adjustSize()
+
+        # Convert screen coordinates to the browser's client coordinates. The
+        # popup remains a child widget even when the tab strip is hosted in the
+        # native title bar, unlike Qt.ToolTip windows which can steal hit tests.
+        tab_bottom = tab.mapToGlobal(tab.rect().bottomLeft())
+        local = self.mapFromGlobal(tab_bottom)
+        popup = self._tab_preview_popup
+        margin = 8
+        x = local.x()
+        y = local.y() + margin
+        if x + popup.width() > self.width() - margin:
+            x = self.width() - popup.width() - margin
+        if y + popup.height() > self.height() - margin:
+            y = local.y() - popup.height() - margin
+        x = max(margin, min(x, max(margin, self.width() - popup.width() - margin)))
+        y = max(margin, min(y, max(margin, self.height() - popup.height() - margin)))
+        popup.move(x, y)
+        popup.show()
+        popup.raise_()
+
+    def _hide_tab_preview(self) -> None:
+        popup = getattr(self, "_tab_preview_popup", None)
+        if popup is not None:
+            popup.hide()
 
     def _do_on_current(self, func):
         v = self.current_view()
