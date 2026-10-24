@@ -253,6 +253,85 @@ progress { width:100%; height:6px; border:0; border-radius:4px; overflow:hidden;
  .check-grid { grid-template-columns:minmax(0,1fr); }
  .page-head { align-items:flex-start; flex-direction:column; }
 }
+
+/* Premium, consistent surfaces for the built-in pages. */
+html, body {
+  background:
+    radial-gradient(ellipse at 8% -6%, color-mix(in srgb,var(--accent) 8%,transparent), transparent 32rem),
+    var(--bg);
+}
+body { padding:clamp(14px,2vw,26px) clamp(12px,3vw,34px) 34px; }
+.app { max-width:1160px; }
+header {
+  padding:14px 16px; margin-bottom:22px; border:1px solid var(--line);
+  border-radius:20px; background:var(--surface); box-shadow:var(--shadow);
+  backdrop-filter:blur(16px);
+}
+.brand { gap:11px; }
+.brand-mark { border-radius:15px; box-shadow:0 8px 20px rgba(28,101,188,.20); }
+.nav { gap:3px; padding:4px; border-radius:14px; background:var(--surface-2); box-shadow:none; }
+.nav-link { min-height:34px; transition:color .15s,background .15s,transform .15s; }
+.nav-link:active { transform:translateY(1px); }
+.nav-link.active { box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 18%,transparent); }
+.page-head { margin-bottom:15px; }
+.page-head h2 { font-size:22px; letter-spacing:-.4px; }
+.page-tools { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:8px; }
+.page-tools > input { width:min(280px,64vw); flex:0 1 280px; }
+.panel { border-radius:17px; box-shadow:0 10px 28px rgba(25,50,80,.055); }
+html.dark .panel { box-shadow:0 12px 30px rgba(0,0,0,.16); }
+.panel-head { padding:16px 18px; background:linear-gradient(115deg,color-mix(in srgb,var(--accent) 5%,var(--surface)),var(--surface)); }
+.panel-body { padding:18px; }
+.history-item, .download-item {
+  padding:16px; background:var(--surface-2); border-radius:15px;
+  box-shadow:0 4px 14px rgba(25,50,80,.035);
+  transition:border-color .16s,box-shadow .16s,transform .16s;
+}
+.history-item:hover, .download-item:hover {
+  border-color:color-mix(in srgb,var(--accent) 45%,var(--line));
+  box-shadow:var(--shadow); transform:translateY(-1px);
+}
+.item-title { line-height:1.4; }
+.status-pill { white-space:nowrap; border-radius:999px; padding:5px 10px; }
+.actions button { min-height:32px; font-weight:650; }
+.progress-track { height:7px; border-radius:999px; }
+.progress-value { border-radius:999px; }
+.settings-sidebar { backdrop-filter:blur(14px); }
+.settings-panel { border-radius:15px; }
+.settings-panel .panel-head { padding:13px 16px; }
+.settings-panel .panel-body { padding:6px 16px; }
+.setting-row { transition:background .14s; }
+.setting-row:focus-within { background:color-mix(in srgb,var(--accent) 5%,transparent); border-radius:10px; }
+.stat-strip {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
+  gap:10px; margin:0 0 16px;
+}
+.stat-card {
+  display:flex; align-items:center; gap:12px; min-width:0; padding:13px 15px;
+  border:1px solid var(--line); border-radius:15px; background:var(--surface);
+  box-shadow:var(--shadow);
+}
+.stat-icon {
+  display:grid; place-items:center; flex:0 0 36px; width:36px; height:36px;
+  border-radius:11px; color:var(--accent); background:var(--accent-soft);
+  font-size:19px; font-weight:800;
+}
+.stat-copy { display:flex; flex-direction:column; min-width:0; gap:2px; }
+.stat-copy strong { font-size:20px; line-height:1.05; letter-spacing:-.45px; }
+.stat-copy small { color:var(--muted); font-size:11px; overflow-wrap:anywhere; }
+.history-item[hidden], .download-item[hidden] { display:none !important; }
+@media (max-width:800px) {
+  header { padding:13px; border-radius:17px; }
+  .page-tools { width:100%; justify-content:flex-start; }
+  .page-tools > input { width:100%; flex:1 1 200px; }
+  .stat-strip { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); }
+  .stat-card { padding:11px; gap:9px; }
+  .stat-icon { flex-basis:31px; width:31px; height:31px; border-radius:10px; }
+}
+@media (max-width:480px) {
+  .stat-strip { grid-template-columns:minmax(0,1fr); }
+  .stat-card { padding:12px 14px; }
+  .page-head h2 { font-size:20px; }
+}
 """
     base = f"""<!doctype html>
 <html class="{mode_class}" lang="en">
@@ -677,11 +756,15 @@ def _history_page(browser) -> str:
         )
     listing = "".join(links) or '<div class="empty"><div class="glyph">◷</div><strong>No history yet</strong><p>Pages you visit will appear here.</p></div>'
     body = f"""
-<div class="page-head"><div><h2>Recent pages</h2><p class="subtitle">{len(history.history)} URLs · {total_visits} visits</p></div>
-  <div style="display:flex;gap:7px;flex-wrap:wrap">
-    <input id="history-filter" type="search" placeholder="Filter by URL…" aria-label="Filter history" style="width:min(260px,56vw)">
+<div class="page-head"><div><h2>Recent pages</h2><p class="subtitle">Search addresses and manage individual visits.</p></div>
+  <div class="page-tools" role="search">
+    <input id="history-filter" type="search" placeholder="Filter by URL…" aria-label="Filter history">
     {_action("Clear history", "history_clear", {}, "danger")}
   </div>
+</div>
+<div class="stat-strip" aria-label="Browsing history summary">
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">◷</span><span class="stat-copy"><strong>{len(history.history)}</strong><small>Saved addresses</small></span></div>
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">↗</span><span class="stat-copy"><strong>{total_visits}</strong><small>Recorded visits</small></span></div>
 </div>
 <div id="history-list" class="list">{listing}</div>
 <p class="footer-note">Use “Remove visit” to delete a single timestamp, or “Remove URL” to remove every recorded visit for that address.</p>
@@ -762,11 +845,16 @@ def _downloads_page(browser) -> str:
         )
     main_content = "".join(cards) or '<div class="empty"><div class="glyph">⇩</div><strong>No downloads yet</strong><p>Files you download will appear here while the browser is open.</p></div>'
     body = f"""
-<div class="page-head"><div><h2>Download manager</h2><p class="subtitle">{counts['downloading'] + counts['requested']} active · {counts['completed']} completed</p></div>
-  <div style="display:flex;gap:7px;flex-wrap:wrap">
+<div class="page-head"><div><h2>Download manager</h2><p class="subtitle">Manage active transfers and completed files in one place.</p></div>
+  <div class="page-tools">
     <button type="button" data-action="downloads_refresh">Refresh</button>
     {_action("Clear finished", "downloads_clear_finished", {}, "danger")}
   </div>
+</div>
+<div class="stat-strip" aria-label="Download summary">
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">↓</span><span class="stat-copy"><strong>{counts['downloading'] + counts['requested']}</strong><small>Active transfers</small></span></div>
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">✓</span><span class="stat-copy"><strong>{counts['completed']}</strong><small>Completed</small></span></div>
+  <div class="stat-card"><span class="stat-icon" aria-hidden="true">!</span><span class="stat-copy"><strong>{counts['failed'] + counts['cancelled']}</strong><small>Failed or cancelled</small></span></div>
 </div>
 <div class="list">{main_content}</div>
 <p class="footer-note">Download records are kept in memory for the active browser profile. Deleting a completed file is restricted to files within the configured download folder.</p>"""

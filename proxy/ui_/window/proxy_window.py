@@ -94,6 +94,9 @@ class ProxyWindow(QWidget):
         self.home_layout.addWidget(self.btn_status)
 
         connect_host = QWidget(self.home_content)
+        connect_host.setObjectName("connectHost")
+        connect_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        connect_host.setAutoFillBackground(False)
         connect_row = QHBoxLayout(connect_host)
         connect_row.setContentsMargins(0, 2, 0, 2)
         connect_row.addStretch(1)
@@ -181,6 +184,7 @@ class ProxyWindow(QWidget):
         hover = "rgba(101,170,246,0.13)" if dark else "rgba(23,111,193,0.08)"
         self.home_content.setStyleSheet(f"""
             QWidget#homeContent {{ background: transparent; color: {text}; }}
+            QWidget#connectHost {{ background: transparent; border: none; border-radius: 0; }}
             QLabel#homeEyebrow {{ background: transparent; color: {accent}; font-size: 10px; font-weight: 850; letter-spacing: 1.1px; }}
             QLabel#homeSubtitle {{ background: transparent; color: {muted}; font-size: 10px; }}
             QLabel#connectionStatus {{ color: {text}; background: transparent; border: none; padding: 4px; font-size: 12px; font-weight: 750; }}
