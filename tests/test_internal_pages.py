@@ -19,6 +19,7 @@ def _browser():
         webgpu_enabled=False,
         download_folder="C:/Downloads",
         proxy_panel_visible=True,
+        tabs_in_title_bar=False,
     )
     history = SimpleNamespace(history={
         "https://example.org/": [{"date": "2026-10-24", "time": "10:00"}],
@@ -52,6 +53,15 @@ def test_internal_pages_share_modern_theme_and_navigation():
         assert "Premium, consistent surfaces" in document
         assert "border-radius:20px" in document
         assert "class=\"nav-link active\"" in document
+
+
+def test_settings_page_exposes_title_bar_tab_placement():
+    document = render_internal_page(_browser(), "settings")
+
+    assert 'id="tabs_in_title_bar"' in document
+    assert 'name="tabs_in_title_bar"' in document
+    assert "Show tabs in the title bar" in document
+    assert "keep the window controls on the right" in document
 
 
 def test_history_and_download_pages_show_clear_summary_metrics():
