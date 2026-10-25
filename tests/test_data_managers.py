@@ -248,6 +248,23 @@ class DataManagerTests(unittest.TestCase):
             with self.subTest(url=url), self.assertRaises(ValueError):
                 manager.add_bookmark("Bad", url)
 
+    def test_bookmarks_accept_only_supported_internal_arma_pages(self):
+        manager = BookmarksManager("Guest")
+        for host in ("dashboard", "bookmarks", "history", "downloads", "settings"):
+            with self.subTest(host=host):
+                record = manager.add_bookmark(host.title(), f"arma://{host}/")
+                self.assertEqual(record["url"], f"arma://{host}/")
+                self.assertTrue(manager.is_bookmarked(f"arma://{host}"))
+
+        for url in (
+            "arma://unknown/",
+            "arma://dashboard/private?secret=1",
+            "arma://dashboard:443/",
+            "arma://user@dashboard/",
+        ):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                manager.add_bookmark("Unsafe internal", url)
+
     def test_bookmarks_preserve_legacy_valid_records(self):
         profile_dir = Path(self.temp_dir.name) / "profile_data" / "Guest"
         profile_dir.mkdir(parents=True)
@@ -375,10 +392,15 @@ class DataManagerTests(unittest.TestCase):
             set(record),
             {
                 "id", "file_name", "path", "url", "received_bytes",
-                "total_bytes", "state", "paused", "error",
+                "total_bytes", "state", "paused", "error", "requested_at",
+                "started_at", "finished_at", "speed_bytes_per_sec", "speed_samples",
             },
         )
         self.assertFalse(record["paused"])
+        self.assertTrue(record["requested_at"])
+        self.assertTrue(record["started_at"])
+        self.assertEqual(record["finished_at"], "")
+        self.assertIsInstance(record["speed_samples"], list)
         self.assertIn(["requested"], observed_states)
         self.assertIn(["downloading"], observed_states)
 
@@ -391,7 +413,9 @@ class DataManagerTests(unittest.TestCase):
 
         request.finish()
         self.assertIn(["completed"], observed_states)
-        self.assertEqual(manager.get_downloads()[0]["state"], "completed")
+        completed = manager.get_downloads()[0]
+        self.assertEqual(completed["state"], "completed")
+        self.assertTrue(completed["finished_at"])
         self.assertFalse(manager.cancel(original_id))
 
     def test_download_paths_are_reserved_across_profile_managers(self):

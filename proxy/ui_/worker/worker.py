@@ -14,13 +14,25 @@ class Worker(QRunnable):
     
     @Slot()
     def run(self):
-        
+        cancel_event = self.kwargs.get("cancel_event")
+
+        def cancelled():
+            is_set = getattr(cancel_event, "is_set", None)
+            return bool(callable(is_set) and is_set())
+
+        if cancelled():
+            return
         try:
             self.signals.started.emit()
-            result = self.fn(*self.args, **self.kwargs)      
-            result = "" if result == None else result
+            if cancelled():
+                return
+            result = self.fn(*self.args, **self.kwargs)
+            if cancelled():
+                return
+            result = "" if result is None else result
             self.signals.finished.emit(str(result))
-        except Exception as e:
-            self.signals.error.emit(str(e))
+        except Exception as exc:
+            if not cancelled():
+                self.signals.error.emit(str(exc))
             
             

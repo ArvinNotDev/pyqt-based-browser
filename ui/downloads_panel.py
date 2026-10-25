@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
-from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QUrl, Signal, QPointF, QSize
+from PySide6.QtGui import QDesktopServices, QColor, QFontMetrics, QPainter, QPainterPath, QPen
+import qtawesome as qta
+
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QGraphicsBlurEffect,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -29,11 +31,81 @@ _ACTIVE = {"requested", "downloading"}
 _TERMINAL = {"completed", "cancelled", "failed"}
 
 
+class DownloadSpeedChart(QWidget):
+    """Lightweight painter-based speed history; no web view or chart dependency."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._samples = []
+        self.setObjectName("downloadSpeedChart")
+        self.setMinimumHeight(64)
+        self.setMaximumHeight(86)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_samples(self, samples):
+        self._samples = [
+            (max(0.0, float(item.get("elapsed_seconds", 0.0) or 0.0)),
+             max(0.0, float(item.get("bytes_per_second", 0.0) or 0.0)))
+            for item in (samples or [])
+            if isinstance(item, dict)
+        ][-90:]
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(7, 13, -7, -7)
+        if rect.width() <= 1 or rect.height() <= 1:
+            painter.end()
+            return
+
+        grid = QColor(128, 145, 165, 55)
+        painter.setPen(QPen(grid, 1))
+        for fraction in (0.25, 0.5, 0.75):
+            y = int(rect.top() + rect.height() * fraction)
+            painter.drawLine(rect.left(), y, rect.right(), y)
+        painter.setPen(QColor("#8b98aa"))
+        painter.drawText(self.rect().adjusted(7, 0, -7, 0),
+                         Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                         "Download speed")
+
+        if len(self._samples) < 2:
+            painter.setPen(QColor("#8b98aa"))
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "Speed history appears as data arrives")
+            painter.end()
+            return
+
+        maximum = max(1.0, max(value for _, value in self._samples))
+        first_time = self._samples[0][0]
+        last_time = self._samples[-1][0]
+        span = max(0.1, last_time - first_time)
+        points = [
+            QPointF(
+                rect.left() + (elapsed - first_time) / span * rect.width(),
+                rect.bottom() - value / maximum * rect.height(),
+            )
+            for elapsed, value in self._samples
+        ]
+        path = QPainterPath(points[0])
+        for point in points[1:]:
+            path.lineTo(point)
+        area = QPainterPath(path)
+        area.lineTo(QPointF(rect.right(), rect.bottom()))
+        area.lineTo(QPointF(rect.left(), rect.bottom()))
+        area.closeSubpath()
+        painter.fillPath(area, QColor(57, 132, 244, 30))
+        painter.setPen(QPen(QColor("#3984f4"), 2))
+        painter.drawPath(path)
+        painter.end()
+
+
 class DownloadsPanel(QFrame):
     """A left-side download drawer that keeps its actions beside each item."""
 
     close_requested = Signal()
     mode_toggle_requested = Signal()
+    open_manager_requested = Signal()
+    state_changed = Signal(bool)
     PANEL_WIDTH = 368
 
     def __init__(self, manager=None, parent=None):
@@ -44,6 +116,7 @@ class DownloadsPanel(QFrame):
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         self._manager = None
         self._is_open = False
+        self._selected_download_id = None
 
         # Blur only a decorative material layer. All labels, inputs and buttons
         # remain separate, sharp child widgets so the glass never hurts readability.
@@ -51,9 +124,8 @@ class DownloadsPanel(QFrame):
         self.glass_material.setObjectName("downloadsGlassMaterial")
         self.glass_material.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.glass_material.setFocusPolicy(Qt.NoFocus)
-        material_blur = QGraphicsBlurEffect(self.glass_material)
-        material_blur.setBlurRadius(14)
-        self.glass_material.setGraphicsEffect(material_blur)
+        # Keep the glass material lightweight; QGraphicsBlurEffect blurs this layer,
+        # not the webpage behind it, and adds needless repaint cost while moving windows.
         self.glass_material.lower()
 
         root = QVBoxLayout(self)
@@ -70,6 +142,14 @@ class DownloadsPanel(QFrame):
         self.count_label.setObjectName("downloadsSubtitle")
         title_box.addWidget(self.count_label)
         header.addLayout(title_box, 1)
+        self.manager_button = QToolButton(self)
+        self.manager_button.setObjectName("downloadsManagerButton")
+        self.manager_button.setIcon(qta.icon("fa5s.external-link-alt"))
+        self.manager_button.setToolTip("Open the full downloads manager")
+        self.manager_button.setAccessibleName("Open the full downloads manager")
+        self.manager_button.setFixedSize(30, 30)
+        self.manager_button.clicked.connect(self.open_manager_requested.emit)
+        header.addWidget(self.manager_button)
         self.close_button = QToolButton(self)
         self.close_button.setObjectName("downloadsCloseButton")
         self.close_button.setText("×")
@@ -77,9 +157,10 @@ class DownloadsPanel(QFrame):
         self.close_button.setAccessibleName("Close downloads panel")
         self.mode_button = QToolButton(self)
         self.mode_button.setObjectName("downloadsModeButton")
-        self.mode_button.setText("Dock")
-        self.mode_button.setToolTip("Keep downloads pinned beside the page")
-        self.mode_button.setAccessibleName("Change downloads panel layout")
+        self.mode_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
+        self.mode_button.setIconSize(QSize(15, 15))
+        self.mode_button.setFixedSize(30, 30)
+        self.mode_button.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.mode_button.clicked.connect(self.mode_toggle_requested.emit)
         header.addWidget(self.mode_button)
         self.close_button.clicked.connect(self.close_requested.emit)
@@ -124,6 +205,31 @@ class DownloadsPanel(QFrame):
         self.scroll.setWidget(self.list_host)
         root.addWidget(self.scroll, 1)
 
+        self.details_frame = QFrame(self)
+        self.details_frame.setObjectName("downloadDetailsPanel")
+        details_layout = QVBoxLayout(self.details_frame)
+        details_layout.setContentsMargins(12, 10, 12, 10)
+        details_layout.setSpacing(5)
+        self.details_eyebrow = QLabel("DOWNLOAD DETAILS", self.details_frame)
+        self.details_eyebrow.setObjectName("downloadDetailsEyebrow")
+        details_layout.addWidget(self.details_eyebrow)
+        self.details_title = QLabel("Select a download", self.details_frame)
+        self.details_title.setObjectName("downloadDetailsTitle")
+        self.details_title.setWordWrap(True)
+        details_layout.addWidget(self.details_title)
+        self.details_summary = QLabel("Current speed and transfer size appear here.", self.details_frame)
+        self.details_summary.setObjectName("downloadDetailsSummary")
+        self.details_summary.setWordWrap(True)
+        details_layout.addWidget(self.details_summary)
+        self.speed_chart = DownloadSpeedChart(self.details_frame)
+        details_layout.addWidget(self.speed_chart)
+        self.details_times = QLabel("Requested —   Started —\nFinished —", self.details_frame)
+        self.details_times.setObjectName("downloadDetailsTimes")
+        self.details_times.setWordWrap(True)
+        details_layout.addWidget(self.details_times)
+        root.addWidget(self.details_frame)
+
+        self.set_docked(False)
         self.set_manager(manager)
 
     def resizeEvent(self, event) -> None:
@@ -152,19 +258,40 @@ class DownloadsPanel(QFrame):
         self.refresh()
 
     def open(self) -> None:
+        changed = not self._is_open
         self._is_open = True
         self.show()
+        if changed:
+            self.state_changed.emit(True)
 
     def close_panel(self) -> None:
+        changed = self._is_open
         self._is_open = False
+        if changed:
+            self.state_changed.emit(False)
 
     def set_docked(self, docked: bool) -> None:
-        """Label the one-click action that switches between overlay and split layouts."""
-        self.mode_button.setText("Overlay" if docked else "Dock")
-        self.mode_button.setToolTip(
-            "Show downloads over the page without resizing it"
-            if docked else "Keep downloads pinned beside the page and reserve its width"
+        """Show a pin-state icon and label the action available from this layout."""
+        pinned = bool(docked)
+        browser_settings = getattr(self.window(), "settings", None)
+        dark = bool(getattr(browser_settings, "dark_mode", False))
+        icon_color = (
+            ("#82aff4" if dark else "#3979d6")
+            if pinned else ("#c7ced8" if dark else "#64748b")
         )
+        self.mode_button.setProperty("downloadsPinned", pinned)
+        self.mode_button.setIcon(qta.icon("fa5s.thumbtack", color=icon_color))
+        tooltip = (
+            "Unpin downloads panel and return to overlay"
+            if pinned else "Pin downloads panel beside the page"
+        )
+        self.mode_button.setToolTip(tooltip)
+        self.mode_button.setAccessibleName(
+            "Unpin downloads panel" if pinned else "Pin downloads panel beside the page"
+        )
+        self.mode_button.style().unpolish(self.mode_button)
+        self.mode_button.style().polish(self.mode_button)
+        self.mode_button.update()
 
     def refresh(self, *_args) -> None:
         while self.list_layout.count() > 0:
@@ -179,6 +306,10 @@ class DownloadsPanel(QFrame):
                 all_records = self._manager.get_downloads()
             except Exception:
                 all_records = []
+        known_ids = {item.get("id") for item in all_records}
+        if self._selected_download_id not in known_ids:
+            self._selected_download_id = all_records[-1].get("id") if all_records else None
+
         records = all_records
         query = self.search.text().strip().casefold()
         if query:
@@ -204,10 +335,18 @@ class DownloadsPanel(QFrame):
         if records:
             for download in reversed(records):
                 card = self._make_card(download)
+                card.setProperty("selected", download.get("id") == self._selected_download_id)
                 self.list_layout.addWidget(card)
         else:
             self.list_layout.addWidget(self.empty_label, 1)
         self.list_layout.addStretch(1)
+        selected = next((item for item in all_records if item.get("id") == self._selected_download_id), None)
+        if selected is None and all_records:
+            selected = all_records[-1]
+            self._selected_download_id = selected.get("id")
+        elif not all_records:
+            self._selected_download_id = None
+        self._update_details(selected)
         total_count = len(all_records)
         self.count_label.setText(f"{total_count} item" if total_count == 1 else f"{total_count} items")
         self.clear_button.setEnabled(any(item.get("state") in _TERMINAL for item in all_records))
@@ -215,6 +354,8 @@ class DownloadsPanel(QFrame):
     def _make_card(self, download: dict) -> QFrame:
         card = QFrame(self.list_host)
         card.setObjectName("downloadCard")
+        card.setProperty("downloadId", str(download.get("id") or ""))
+        card.setProperty("selected", download.get("id") == self._selected_download_id)
         card.setProperty("downloadState", str(download.get("state", "unknown")))
         layout = QVBoxLayout(card)
         layout.setContentsMargins(11, 10, 11, 10)
@@ -222,10 +363,12 @@ class DownloadsPanel(QFrame):
 
         top = QHBoxLayout()
         top.setSpacing(7)
-        name = QLabel(str(download.get("file_name") or "Download"), card)
+        name = QPushButton(str(download.get("file_name") or "Download"), card)
         name.setObjectName("downloadFileName")
-        name.setWordWrap(True)
+        name.setFlat(True)
+        name.setCursor(Qt.CursorShape.PointingHandCursor)
         name.setToolTip(str(download.get("path", "")))
+        name.clicked.connect(lambda _checked=False, current=download: self.select_download(current))
         top.addWidget(name, 1)
         menu_button = QToolButton(card)
         menu_button.setObjectName("downloadMoreButton")
@@ -237,9 +380,13 @@ class DownloadsPanel(QFrame):
 
         source = QLabel(str(download.get("url", "")), card)
         source.setObjectName("downloadSource")
-        source.setWordWrap(True)
+        source.setWordWrap(False)
         source.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        source.setToolTip(str(download.get("url", "")))
+        full_url = str(download.get("url", ""))
+        source.setText(QFontMetrics(source.font()).elidedText(
+            full_url, Qt.TextElideMode.ElideMiddle, max(100, self.width() - 78)
+        ))
+        source.setToolTip(full_url)
         layout.addWidget(source)
 
         state = str(download.get("state", "unknown"))
@@ -280,6 +427,61 @@ class DownloadsPanel(QFrame):
         layout.addLayout(actions)
         return card
 
+    def select_download(self, download: dict) -> None:
+        """Show lifecycle and speed history for the clicked download."""
+        self._selected_download_id = download.get("id")
+        self._update_details(download)
+        for card in self.list_host.findChildren(QFrame, "downloadCard"):
+            card.setProperty("selected", card.property("downloadId") == self._selected_download_id)
+            card.style().unpolish(card)
+            card.style().polish(card)
+            card.update()
+
+    @staticmethod
+    def _format_speed(bytes_per_second: float) -> str:
+        speed = max(0.0, float(bytes_per_second or 0.0))
+        if speed >= 1024 * 1024:
+            return f"{speed / (1024 * 1024):.2f} MB/s"
+        if speed >= 1024:
+            return f"{speed / 1024:.1f} KB/s"
+        return f"{speed:.0f} B/s"
+
+    @staticmethod
+    def _format_timestamp(value: str) -> str:
+        if not value:
+            return "—"
+        try:
+            parsed = datetime.fromisoformat(str(value))
+            return parsed.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        except (TypeError, ValueError, OverflowError):
+            return str(value)
+
+    def _update_details(self, download: dict | None) -> None:
+        if download is None:
+            self.details_title.setText("Select a download")
+            self.details_summary.setText("Current speed, transferred bytes, and timing appear here.")
+            self.details_times.setText("Requested —   Started —\nFinished —")
+            self.speed_chart.set_samples([])
+            return
+
+        state = str(download.get("state", "unknown")).replace("_", " ").title()
+        if download.get("paused"):
+            state = "Paused"
+        received = max(0, int(download.get("received_bytes", 0) or 0))
+        total = int(download.get("total_bytes", -1) or -1)
+        transferred = f"{received / 1_048_576:.2f} MB"
+        if total > 0:
+            transferred += f" / {total / 1_048_576:.2f} MB"
+        speed = self._format_speed(download.get("speed_bytes_per_sec", 0.0))
+        self.details_title.setText(str(download.get("file_name") or "Download"))
+        self.details_summary.setText(f"{state}  ·  {speed}\nTransferred: {transferred}")
+        self.details_times.setText(
+            f"Requested {self._format_timestamp(download.get('requested_at', ''))}  ·  "
+            f"Started {self._format_timestamp(download.get('started_at', ''))}\n"
+            f"Finished {self._format_timestamp(download.get('finished_at', ''))}"
+        )
+        self.speed_chart.set_samples(download.get("speed_samples", []))
+
     @staticmethod
     def _status_text(download: dict, received: int, total: int) -> str:
         state = str(download.get("state", "unknown"))
@@ -294,10 +496,13 @@ class DownloadsPanel(QFrame):
             state_text = "Paused"
         else:
             state_text = labels.get(state, "Status unavailable")
+        speed_suffix = ""
+        if state == "downloading" and not download.get("paused"):
+            speed_suffix = f" · {DownloadsPanel._format_speed(download.get('speed_bytes_per_sec', 0.0))}"
         if state in _ACTIVE and total > 0:
-            return f"{state_text} · {received / 1_048_576:.1f} / {total / 1_048_576:.1f} MB"
+            return f"{state_text} · {received / 1_048_576:.1f} / {total / 1_048_576:.1f} MB{speed_suffix}"
         if state in _ACTIVE:
-            return f"{state_text} · {received / 1_048_576:.1f} MB"
+            return f"{state_text} · {received / 1_048_576:.1f} MB{speed_suffix}"
         error = str(download.get("error", ""))
         return f"{state_text} · {error}" if error else state_text
 

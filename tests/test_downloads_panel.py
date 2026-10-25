@@ -4,7 +4,6 @@ from unittest.mock import patch
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
-    QGraphicsBlurEffect,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -122,13 +121,55 @@ def test_failed_download_actions_button_opens_the_context_menu():
 
 
 
+def test_selecting_download_shows_speed_and_lifecycle_details():
+    app = QApplication.instance() or QApplication([])
+    panel = DownloadsPanel()
+    panel.resize(420, 600)
+    panel.show()
+    app.processEvents()
+
+    record = {
+        "id": "selected-download",
+        "file_name": "archive.zip",
+        "path": "",
+        "url": "https://downloads.example.test/archive.zip",
+        "received_bytes": 2 * 1024 * 1024,
+        "total_bytes": 4 * 1024 * 1024,
+        "state": "downloading",
+        "paused": False,
+        "requested_at": "2026-10-24T02:00:00+03:30",
+        "started_at": "2026-10-24T02:00:01+03:30",
+        "finished_at": "",
+        "speed_bytes_per_sec": 512 * 1024,
+        "speed_samples": [
+            {"elapsed_seconds": 0.0, "bytes_per_second": 0.0},
+            {"elapsed_seconds": 1.0, "bytes_per_second": 512 * 1024},
+        ],
+    }
+    card = panel._make_card(record)
+    name = card.findChild(QPushButton, "downloadFileName")
+    assert name is not None
+    name.click()
+
+    assert panel.details_title.text() == "archive.zip"
+    assert "512.0 KB/s" in panel.details_summary.text()
+    assert "Started" in panel.details_times.text()
+    assert len(panel.speed_chart._samples) == 2
+
+    panel.close()
+    panel.deleteLater()
+    app.processEvents()
+
+
 def test_downloads_glass_softens_only_its_material_not_the_controls():
     app = QApplication.instance() or QApplication([])
     panel = DownloadsPanel()
     panel.resize(380, 620)
     app.processEvents()
 
-    assert isinstance(panel.glass_material.graphicsEffect(), QGraphicsBlurEffect)
+    assert panel.manager_button is not None
+    assert not panel.manager_button.icon().isNull()
+    assert panel.glass_material.graphicsEffect() is None
     assert panel.glass_material.parentWidget() is panel
     assert panel.glass_material.isAncestorOf(panel.search) is False
     assert panel.search.parentWidget() is panel
@@ -155,7 +196,8 @@ def test_overlay_dock_switch_preserves_the_existing_page_and_view_container():
     assert splitter.widget(0) is panel
     assert splitter.widget(1) is view_container
     assert panel.is_open
-    assert panel.mode_button.text() == "Overlay"
+    assert panel.mode_button.property("downloadsPinned") is True
+    assert panel.mode_button.toolTip() == "Unpin downloads panel and return to overlay"
 
     browser._toggle_downloads_panel_mode()
 
@@ -166,7 +208,8 @@ def test_overlay_dock_switch_preserves_the_existing_page_and_view_container():
     assert splitter.widget(0) is view_container
     assert panel.parentWidget() is browser.content_row
     assert panel.is_open
-    assert panel.mode_button.text() == "Dock"
+    assert panel.mode_button.property("downloadsPinned") is False
+    assert panel.mode_button.toolTip() == "Pin downloads panel beside the page"
 
     browser.content_row.close()
     browser.content_row.deleteLater()

@@ -18,6 +18,7 @@ def _load_startup_settings(profile_name=None):
         profile_name = settings.profiles_list[0]
     settings.load(profile_name)
     Settings.configure_hardware_acceleration(settings.hardware_acceleration)
+    Settings.configure_webgpu(settings.webgpu_enabled)
     return settings
 
 
@@ -27,9 +28,11 @@ def _normalize_application_font(app):
     from PySide6.QtGui import QFont
 
     app_font = QFont(app.font())
-    if app_font.pointSize() <= 0:
-        app_font.setPointSize(10)
-        app.setFont(app_font)
+    point_size = app_font.pointSize()
+    # Convert pixel-sized/default fonts into a resolved point-sized font before
+    # importing Qt widgets and icon engines that may copy the application font.
+    app_font.setPointSize(point_size if point_size > 0 else 10)
+    app.setFont(app_font)
     return app_font
 
 
@@ -128,21 +131,38 @@ if __name__ == "__main__":
     if parent_pid is not None and not _wait_for_parent_exit(parent_pid):
         raise SystemExit("ARMA Browser could not safely reopen its profile after switching network mode.")
     restored_session = _consume_session(resume_path)
+    if restored_session is None:
+        # Read the last normal session before QApplication / Qt WebEngine start,
+        # so settings for the restored profile are applied at process startup.
+        from ui.session_store import load_last_session
+
+        restored_session = load_last_session()
     selected_profile = restored_session.get("profile") if restored_session else None
     _load_startup_settings(selected_profile)
 
+    # Register the internal origin before importing BrowserWindow or creating profiles.
+    from ui.dashboard.internal_page import register_dashboard_scheme
+    register_dashboard_scheme()
+
     # No Tor proxy is configured for an ordinary browser session.
     from PySide6.QtWidgets import QApplication, QMessageBox
-    from ui.browser_window import BrowserWindow
 
     app = QApplication([sys.argv[0], *qt_arguments])
     _normalize_application_font(app)
     app.setApplicationName("ARMA Browser")
     app.setApplicationDisplayName("ARMA Browser")
+
+    # Import QWebEngine widgets and icon engines only after the application font
+    # has a valid point size. The custom scheme was registered before QApplication.
+    from ui.browser_window import BrowserWindow
+    from ui.essential_features import install_essential_features
+
+    install_essential_features(BrowserWindow)
     try:
         window = BrowserWindow(tor_mode=tor_mode, restored_session=restored_session)
     except Exception as exc:
         QMessageBox.critical(None, "ARMA Browser", f"Could not initialize the requested network mode: {exc}")
         sys.exit(1)
+    app.aboutToQuit.connect(window.prepare_shutdown)
     window.showMaximized()
     sys.exit(app.exec())

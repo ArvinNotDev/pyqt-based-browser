@@ -10,18 +10,19 @@ QMainWindow, QDialog, QWidget {
 QLabel { background-color: transparent; }
 
 QWidget#browserWindowRoot { background: transparent; }
-QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid rgba(255,255,255,235); border-radius: 17px; }
+QFrame#browserShell { background-color: rgba(247,249,253,248); border: 1px solid rgba(255,255,255,235); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(231,237,246,220); border: 1px solid rgba(255,255,255,175); border-radius: 12px; }
-QWidget#browserContentCard { background: #e9edf3; border: 1px solid #dce1e8; border-radius: 14px; }
-QDockWidget#proxyDock { border: 1px solid #dce1e8; border-radius: 14px; }
-QDockWidget#proxyDock::title { background: #eef1f5; border-top-left-radius: 13px; border-top-right-radius: 13px; padding: 7px 10px; }
+QStackedWidget#titleBarLeftStack, QWidget#titleBarBrand { background: transparent; border: none; }
+QFrame#browserTabBar[inTitleBar="true"] { background: transparent; border: none; border-radius: 0; padding: 0; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
+QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #dce1e8; }
 
 QWidget#customTitleBar {
     background-color: rgba(242,246,252,235);
     border-bottom: 1px solid rgba(255,255,255,205);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 QLabel#titleBarLogo {
     color: #ffffff;
@@ -70,6 +71,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
 QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #e9edf3; }
 QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #dfe5ed; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #3979d6; }
+QToolButton#utilityToolButton:checked,
+QToolButton#utilityToolButton[proxyPanelOpen="true"],
+QToolButton#utilityToolButton[downloadsPanelOpen="true"] {
+    background: #e3efff; border-color: #9fc4fa; color: #246fd2;
+}
+QToolButton#utilityToolButton:checked:hover,
+QToolButton#utilityToolButton[proxyPanelOpen="true"]:hover,
+QToolButton#utilityToolButton[downloadsPanelOpen="true"]:hover {
+    background: #d3e5ff; border-color: #77aaf1;
+}
 QPushButton#tabPlusButton {
     color: #3f4752;
     background-color: #e9edf3;
@@ -309,8 +320,8 @@ QLineEdit#urlBar:focus {
     background-color: rgba(255,255,255,255);
     border: 1px solid #3979d6;
 }
-QWidget#browserTabBar { border-radius: 14px; }
-QWidget#browserContentCard { border-radius: 14px; }
+QWidget#browserTabBar { border-radius: 9px; }
+QWidget#browserContentCard { border-radius: 0; }
 QWidget#customTitleBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(250,252,255,245), stop:1 rgba(233,240,249,236));
     border-bottom-color: rgba(203,216,234,170);
@@ -409,8 +420,8 @@ QProgressBar {
     border: none;
     border-radius: 4px;
 }
-QProgressBar::chunk { background: #3979d6; border-radius: 4px; }
-QDockWidget#proxyDock { background: rgba(240,246,254,220); border-color: rgba(255,255,255,220); }
+QProgressBar::chunk { background: #3979d6; border-radius: 2px; }
+QFrame#proxyDock { background-color: #f7f9fc; border: none; border-left: 1px solid #d8e0eb; }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(155,176,204,115); border-radius: 4px; }
 
 
@@ -453,6 +464,70 @@ QFrame#downloadsGlassMaterial {
 }
 QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
 QWidget#downloadsListHost { background: transparent; border: none; }
+
+/* Precision tab strip: quiet idle tabs, clear active surface, compact controls. */
+QFrame#browserTabBar {
+    background: rgba(235,241,249,250);
+    border: 1px solid rgba(196,211,232,215);
+    border-radius: 14px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 9px;
+}
+QFrame#browserTab:hover {
+    background: rgba(255,255,255,185);
+    border-color: rgba(201,216,238,220);
+}
+QFrame#browserTab[active="true"] {
+    background: #ffffff;
+    border: 1px solid #d5e1f2;
+    border-bottom: 2px solid #3979d6;
+}
+QLabel#tabFavicon { background: transparent; }
+QLabel#tabTitle { color: #66758a; font-size: 12px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #202c40; font-weight: 650; }
+QPushButton#tabCloseButton {
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    padding: 0; background: transparent; border: none; border-radius: 7px;
+}
+QPushButton#tabCloseButton:hover { background: #dfeafa; border: 1px solid #cadaf2; }
+QFrame#browserTab[active="true"] QPushButton#tabCloseButton:hover { background: #e6edf7; }
+QPushButton#tabScrollButton {
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px;
+}
+QPushButton#tabScrollButton:hover { background: #e1eaf6; border-color: #ccdaed; }
+QPushButton#tabPlusButton {
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 9px;
+}
+QPushButton#tabPlusButton:hover { background: #ffffff; border-color: #cbdcf2; }
+
+
+/* Compact tab strip: one balanced row with a switcher for crowded sessions. */
+QFrame#browserTabBar {
+    background: rgba(235,240,248,238);
+    border: 1px solid rgba(207,218,233,225);
+    border-radius: 9px;
+}
+QScrollArea#tabStripScroll, QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab { min-height: 30px; max-height: 30px; border-radius: 7px; border: 1px solid transparent; border-bottom: 2px solid transparent; }
+QFrame#browserTab:hover { background: rgba(255,255,255,214); border-color: rgba(187,205,230,220); }
+QFrame#browserTab[active="true"] { background: #ffffff; border: 1px solid #cbdcf3; border-bottom: 2px solid #3979d6; }
+QLabel#tabFavicon { background: transparent; border: none; }
+QLabel#tabTitle { color: #536277; background: transparent; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #20324b; font-weight: 650; }
+QPushButton#tabCloseButton { min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; }
+QPushButton#tabCloseButton:hover { background: #d94d58; color: white; }
+QPushButton#tabPlusButton { min-width: 26px; max-width: 26px; min-height: 24px; max-height: 24px; padding: 0; border-radius: 7px; background: transparent; border: 1px solid transparent; }
+QPushButton#tabPlusButton:hover { background: #dce9fa; border-color: #c1d6f2; }
+QPushButton#tabScrollButton, QToolButton#tabListButton { min-width: 22px; max-width: 22px; min-height: 28px; max-height: 28px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; }
+QPushButton#tabScrollButton:hover, QToolButton#tabListButton:hover { background: rgba(215,227,245,210); border-color: rgba(178,199,229,220); }
+QToolButton#tabListButton::menu-indicator { image: none; }
 """
 
 
@@ -465,18 +540,19 @@ QMainWindow, QDialog, QWidget {
 }
 QLabel { background-color: transparent; }
 QWidget#browserWindowRoot { background: transparent; }
-QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rgba(255,255,255,35); border-radius: 17px; }
+QFrame#browserShell { background-color: rgba(25,29,36,250); border: 1px solid rgba(255,255,255,35); border-radius: 12px; }
 QFrame#browserShell[edgeToEdge="true"] { border: 0; border-radius: 0; }
 QFrame#browserTabBar { background: rgba(34,40,49,230); border: 1px solid rgba(255,255,255,24); border-radius: 12px; }
-QWidget#browserContentCard { background: #22272e; border: 1px solid #30353d; border-radius: 14px; }
-QDockWidget#proxyDock { border: 1px solid #30353d; border-radius: 14px; }
-QDockWidget#proxyDock::title { background: #22272e; border-top-left-radius: 13px; border-top-right-radius: 13px; padding: 7px 10px; }
+QStackedWidget#titleBarLeftStack, QWidget#titleBarBrand { background: transparent; border: none; }
+QFrame#browserTabBar[inTitleBar="true"] { background: transparent; border: none; border-radius: 0; padding: 0; }
+QWidget#browserContentCard { background: transparent; border: none; border-radius: 0; padding: 0; }
+QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid #30353d; }
 
 QWidget#customTitleBar {
     background-color: rgba(23,27,34,242);
     border-bottom: 1px solid rgba(255,255,255,30);
-    border-top-left-radius: 16px;
-    border-top-right-radius: 16px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
 }
 QLabel#titleBarLogo {
     color: #ffffff;
@@ -525,6 +601,16 @@ QToolButton#navigationToolButton, QToolButton#utilityToolButton {
 QToolButton#navigationToolButton:hover, QToolButton#utilityToolButton:hover { background-color: #2a3038; }
 QToolButton#navigationToolButton:pressed, QToolButton#utilityToolButton:pressed { background-color: #343c47; }
 QToolButton#navigationToolButton:focus, QToolButton#utilityToolButton:focus { border-color: #82aff4; }
+QToolButton#utilityToolButton:checked,
+QToolButton#utilityToolButton[proxyPanelOpen="true"],
+QToolButton#utilityToolButton[downloadsPanelOpen="true"] {
+    background: rgba(69,139,237,35); border-color: rgba(112,169,249,170); color: #82b6ff;
+}
+QToolButton#utilityToolButton:checked:hover,
+QToolButton#utilityToolButton[proxyPanelOpen="true"]:hover,
+QToolButton#utilityToolButton[downloadsPanelOpen="true"]:hover {
+    background: rgba(82,154,255,50); border-color: rgba(139,188,255,215);
+}
 QPushButton#tabPlusButton {
     color: #c7ced8;
     background-color: #2a3038;
@@ -763,8 +849,8 @@ QLineEdit#urlBar:focus {
     background-color: rgba(22,29,39,255);
     border: 1px solid #82aff4;
 }
-QWidget#browserTabBar { border-radius: 14px; }
-QWidget#browserContentCard { border-radius: 14px; }
+QWidget#browserTabBar { border-radius: 9px; }
+QWidget#browserContentCard { border-radius: 0; }
 QWidget#customTitleBar {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(31,37,47,250), stop:1 rgba(22,27,35,245));
     border-bottom-color: rgba(255,255,255,28);
@@ -863,8 +949,8 @@ QProgressBar {
     border: none;
     border-radius: 4px;
 }
-QProgressBar::chunk { background: #82aff4; border-radius: 4px; }
-QDockWidget#proxyDock { background: rgba(26,32,41,232); border-color: rgba(255,255,255,38); }
+QProgressBar::chunk { background: #82aff4; border-radius: 2px; }
+QFrame#proxyDock { background-color: #1a2029; border: none; border-left: 1px solid rgba(255,255,255,38); }
 QSplitter#downloadsSplitter::handle:horizontal { background: rgba(120,139,165,90); border-radius: 4px; }
 
 
@@ -907,9 +993,189 @@ QFrame#downloadsGlassMaterial {
 }
 QScrollArea#downloadsScroll, QScrollArea#downloadsScroll::viewport,
 QWidget#downloadsListHost { background: transparent; border: none; }
+
+/* Precision tab strip: restrained graphite surfaces with an unmistakable active tab. */
+QFrame#browserTabBar {
+    background: rgba(28,34,43,250);
+    border: 1px solid rgba(98,116,142,125);
+    border-radius: 14px;
+}
+QScrollArea#tabStripScroll, QScrollArea#tabStripScroll::viewport,
+QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-radius: 9px;
+}
+QFrame#browserTab:hover {
+    background: rgba(69,81,99,130);
+    border-color: rgba(124,147,179,95);
+}
+QFrame#browserTab[active="true"] {
+    background: #303a49;
+    border: 1px solid #53647b;
+    border-bottom: 2px solid #82aff4;
+}
+QLabel#tabFavicon { background: transparent; }
+QLabel#tabTitle { color: #aab6c7; font-size: 12px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #f0f5fc; font-weight: 650; }
+QPushButton#tabCloseButton {
+    min-width: 24px; max-width: 24px; min-height: 24px; max-height: 24px;
+    padding: 0; background: transparent; border: none; border-radius: 7px;
+}
+QPushButton#tabCloseButton:hover { background: rgba(127,151,181,35); border: 1px solid rgba(137,164,199,90); }
+QFrame#browserTab[active="true"] QPushButton#tabCloseButton:hover { background: #414e61; }
+QPushButton#tabScrollButton {
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 8px;
+}
+QPushButton#tabScrollButton:hover { background: #303a49; border-color: #465871; }
+QPushButton#tabPlusButton {
+    min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;
+    padding: 0; background: transparent; border: 1px solid transparent; border-radius: 9px;
+}
+QPushButton#tabPlusButton:hover { background: #303a49; border-color: #4c607b; }
+
+
+/* Compact tab strip: one balanced row with a switcher for crowded sessions. */
+QFrame#browserTabBar {
+    background: rgba(31,37,47,245);
+    border: 1px solid rgba(95,109,130,135);
+    border-radius: 9px;
+}
+QScrollArea#tabStripScroll, QWidget#tabStripHolder { background: transparent; border: none; }
+QFrame#browserTab { min-height: 30px; max-height: 30px; border-radius: 7px; border: 1px solid transparent; border-bottom: 2px solid transparent; }
+QFrame#browserTab:hover { background: rgba(64,75,92,230); border-color: rgba(125,148,181,120); }
+QFrame#browserTab[active="true"] { background: rgba(49,61,78,255); border: 1px solid rgba(121,158,210,155); border-bottom: 2px solid #82aff4; }
+QLabel#tabFavicon { background: transparent; border: none; }
+QLabel#tabTitle { color: #aeb9c9; background: transparent; font-size: 11px; }
+QFrame#browserTab[active="true"] QLabel#tabTitle { color: #f0f5fd; font-weight: 650; }
+QPushButton#tabCloseButton { min-width: 20px; max-width: 20px; min-height: 20px; max-height: 20px; padding: 0; border: none; border-radius: 5px; background: transparent; }
+QPushButton#tabCloseButton:hover { background: #c53f49; color: white; }
+QPushButton#tabPlusButton { min-width: 26px; max-width: 26px; min-height: 24px; max-height: 24px; padding: 0; border-radius: 7px; background: transparent; border: 1px solid transparent; }
+QPushButton#tabPlusButton:hover { background: rgba(68,88,116,200); border-color: rgba(117,150,195,135); }
+QPushButton#tabScrollButton, QToolButton#tabListButton { min-width: 22px; max-width: 22px; min-height: 28px; max-height: 28px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent; }
+QPushButton#tabScrollButton:hover, QToolButton#tabListButton:hover { background: rgba(65,79,100,225); border-color: rgba(125,148,181,135); }
+QToolButton#tabListButton::menu-indicator { image: none; }
 """
 from .chrome_styles import DARK_CHROME_POLISH, LIGHT_CHROME_POLISH
 
 # Keep legacy dialog/feature styles intact, then apply one final coherent chrome layer.
-light_theme = f"{light_theme}\n{LIGHT_CHROME_POLISH}"
-dark_theme = f"{dark_theme}\n{DARK_CHROME_POLISH}"
+light_theme = f"{light_theme}\n{LIGHT_CHROME_POLISH}" + """
+QFrame#downloadsPanel {
+    background: rgba(244, 247, 252, 250);
+    border: 1px solid rgba(209, 220, 236, 225);
+    border-radius: 16px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(255,255,255,245), stop:1 rgba(234,241,250,235));
+    border: 1px solid rgba(255,255,255,225); border-radius: 14px;
+}
+QLineEdit#downloadsSearch {
+    color: #243248; background: #ffffff; border: 1px solid #d5dfed;
+    border-radius: 10px; padding: 8px 11px; selection-background-color: #cfe0fb;
+}
+QLineEdit#downloadsSearch:focus { border-color: #80aee9; }
+QFrame#downloadCard {
+    background: rgba(255,255,255,248); border: 1px solid #dce4ef;
+    border-radius: 12px;
+}
+QFrame#downloadCard:hover { border-color: #b7cbe7; background: #ffffff; }
+QFrame#downloadCard[selected="true"] {
+    background: #f0f6ff; border: 1px solid #8fb7f0;
+}
+QPushButton#downloadFileName {
+    color: #223147; font-size: 12px; font-weight: 700; text-align: left;
+}
+QLabel#downloadSource { color: #7a8798; font-size: 10px; }
+QLabel#downloadStatus { color: #506179; font-size: 10px; font-weight: 600; }
+QProgressBar#downloadProgress {
+    background: #e5ecf5; border: none; border-radius: 3px;
+    min-height: 5px; max-height: 5px; margin: 0; padding: 0;
+}
+QProgressBar#downloadProgress::chunk { background: #4485df; border-radius: 3px; }
+QToolButton#downloadMoreButton {
+    color: #66758a; background: transparent; border: 1px solid transparent;
+    border-radius: 7px; min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px; padding: 0;
+}
+QToolButton#downloadMoreButton:hover { background: #eaf1fb; border-color: #d5e2f4; }
+QFrame#downloadDetailsPanel {
+    background: rgba(255,255,255,250); border: 1px solid #d9e3f0;
+    border-radius: 13px;
+}
+QLabel#downloadDetailsEyebrow { color: #718198; font-size: 9px; font-weight: 800; }
+QLabel#downloadDetailsTitle { color: #223147; font-size: 12px; font-weight: 750; }
+QLabel#downloadDetailsSummary { color: #40536c; font-size: 11px; font-weight: 600; }
+QLabel#downloadDetailsTimes { color: #718198; font-size: 9px; }
+QPushButton#downloadsPrimaryButton {
+    color: #ffffff; background: #3979d6; border: none; border-radius: 8px;
+    padding: 6px 11px; min-height: 18px; font-weight: 650;
+}
+QPushButton#downloadsPrimaryButton:hover { background: #2d6dc8; }
+QPushButton#downloadsSecondaryButton {
+    color: #44556b; background: #ffffff; border: 1px solid #d5dfed;
+    border-radius: 8px; padding: 7px 9px;
+}
+QPushButton#downloadsSecondaryButton:hover { color: #285eae; border-color: #91b5e8; background: #f5f9ff; }
+"""
+dark_theme = f"{dark_theme}\n{DARK_CHROME_POLISH}" + """
+QFrame#downloadsPanel {
+    background: rgba(23, 29, 39, 250);
+    border: 1px solid rgba(82, 98, 121, 170);
+    border-radius: 16px;
+}
+QFrame#downloadsGlassMaterial {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+        stop:0 rgba(48,59,75,248), stop:1 rgba(28,35,46,246));
+    border: 1px solid rgba(255,255,255,28); border-radius: 14px;
+}
+QLineEdit#downloadsSearch {
+    color: #e5edf8; background: #151b24; border: 1px solid #3b485b;
+    border-radius: 10px; padding: 8px 11px; selection-background-color: #3e6eac;
+}
+QLineEdit#downloadsSearch:focus { border-color: #739fda; }
+QFrame#downloadCard {
+    background: rgba(35,43,56,248); border: 1px solid #3b4658;
+    border-radius: 12px;
+}
+QFrame#downloadCard:hover { border-color: #536681; background: #293447; }
+QFrame#downloadCard[selected="true"] {
+    background: #26364c; border: 1px solid #6a96d1;
+}
+QPushButton#downloadFileName {
+    color: #e7eef8; font-size: 12px; font-weight: 700; text-align: left;
+}
+QLabel#downloadSource { color: #8998ad; font-size: 10px; }
+QLabel#downloadStatus { color: #bdc9da; font-size: 10px; font-weight: 600; }
+QProgressBar#downloadProgress {
+    background: #354153; border: none; border-radius: 3px;
+    min-height: 5px; max-height: 5px; margin: 0; padding: 0;
+}
+QProgressBar#downloadProgress::chunk { background: #82aff4; border-radius: 3px; }
+QToolButton#downloadMoreButton {
+    color: #a5b4c9; background: transparent; border: 1px solid transparent;
+    border-radius: 7px; min-width: 24px; max-width: 24px;
+    min-height: 24px; max-height: 24px; padding: 0;
+}
+QToolButton#downloadMoreButton:hover { background: #303e52; border-color: #465973; }
+QFrame#downloadDetailsPanel {
+    background: rgba(30, 38, 50, 252); border: 1px solid #3b4b62;
+    border-radius: 13px;
+}
+QLabel#downloadDetailsEyebrow { color: #8d9eb5; font-size: 9px; font-weight: 800; }
+QLabel#downloadDetailsTitle { color: #ecf3fc; font-size: 12px; font-weight: 750; }
+QLabel#downloadDetailsSummary { color: #c2d0e2; font-size: 11px; font-weight: 600; }
+QLabel#downloadDetailsTimes { color: #8d9eb5; font-size: 9px; }
+QPushButton#downloadsPrimaryButton {
+    color: #101a28; background: #8bbaff; border: none; border-radius: 8px;
+    padding: 6px 11px; min-height: 18px; font-weight: 700;
+}
+QPushButton#downloadsPrimaryButton:hover { background: #a2c8ff; }
+QPushButton#downloadsSecondaryButton {
+    color: #d0dced; background: #252f3e; border: 1px solid #425168;
+    border-radius: 8px; padding: 7px 9px;
+}
+QPushButton#downloadsSecondaryButton:hover { color: #eef5ff; border-color: #6a8dbb; background: #2e3a4d; }
+"""

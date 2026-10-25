@@ -1,5 +1,5 @@
 
-from doctest import Example
+import json
 import requests
 
 def check_connectivity(timeout=5):
@@ -14,19 +14,35 @@ def check_connectivity(timeout=5):
         print(e)
 
 
-def what_is_my_ip(proxy=None, timeout=10):
+def what_is_my_ip(proxy=None, timeout=10, cancel_event=None):
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("Exit-IP check was cancelled.")
+
     url = "https://api.ipify.org?format=json"
-    proxies = None
-
-    if proxy:
-        proxies = {
-            "http": proxy,
-            "https": proxy,
-        }
-
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    response = None
     try:
-        r = requests.get(url, proxies=proxies, timeout=timeout)
-        r.raise_for_status()
-        return r.json().get("ip")
-    except requests.RequestException as e:
-        raise Exception(f"Error: {e}")
+        # Stream the small response so the shared shutdown token can close its
+        # socket while the request is waiting for an unavailable Tor route.
+        response = requests.get(url, proxies=proxies, timeout=timeout, stream=True)
+        register = getattr(cancel_event, "register_response", None)
+        if callable(register):
+            register(response)
+        elif cancel_event is not None and cancel_event.is_set():
+            response.close()
+            raise InterruptedError("Exit-IP check was cancelled.")
+        response.raise_for_status()
+        chunks = []
+        for chunk in response.iter_content(chunk_size=4096):
+            if cancel_event is not None and cancel_event.is_set():
+                raise InterruptedError("Exit-IP check was cancelled.")
+            if chunk:
+                chunks.append(chunk)
+        if cancel_event is not None and cancel_event.is_set():
+            raise InterruptedError("Exit-IP check was cancelled.")
+        return json.loads(b"".join(chunks).decode("utf-8")).get("ip")
+    except requests.RequestException as exc:
+        raise Exception(f"Error: {exc}") from exc
+    finally:
+        if response is not None:
+            response.close()

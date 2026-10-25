@@ -20,11 +20,17 @@ class BlcokHostsWindow(QWidget):
         self._parent = parent    
         main_layout = QVBoxLayout(self)
         self.setLayout(main_layout)
-        main_layout.addWidget(QLabel("Block host:"))
+        heading = QLabel("Blocked hosts")
+        heading.setObjectName("proxyRulesTitle")
+        description = QLabel("Sites listed here are blocked from loading in this browser.")
+        description.setWordWrap(True)
+        main_layout.addWidget(heading)
+        main_layout.addWidget(description)
         
         load_blocked()
 
         self.hosts_list = QListWidget()
+        self.hosts_list.setObjectName("proxyHostRulesList")
         main_layout.addWidget(self.hosts_list)
         self.hosts_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.hosts_list.customContextMenuRequested.connect(self.show_context_menu)
@@ -32,10 +38,12 @@ class BlcokHostsWindow(QWidget):
         self._update_hosts_list()
         
         self.inp_host = QLineEdit()
+        self.inp_host.setObjectName("proxyHostInput")
         self.inp_host.setPlaceholderText("Enter a host like 'example.com'")
         main_layout.addWidget(self.inp_host)
 
-        self.btn_add = QPushButton("Add")
+        self.btn_add = QPushButton("Block host")
+        self.btn_add.setObjectName("proxyHostAddButton")
         main_layout.addWidget(self.btn_add)
         self.btn_add.clicked.connect(self.add_to_list)
         

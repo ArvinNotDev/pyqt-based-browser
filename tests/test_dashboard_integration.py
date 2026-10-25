@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from PySide6.QtCore import QEventLoop, QObject, QTimer, QUrl, QUrlQuery
+from PySide6.QtGui import QImage
 from PySide6.QtNetwork import QNetworkProxy, QNetworkProxyFactory
 from PySide6.QtWidgets import QApplication
 from PySide6.QtWebEngineCore import QWebEngineLoadingInfo, QWebEngineProfile, QWebEngineUrlScheme
@@ -16,6 +17,8 @@ from ui.browser_window import (
     DASHBOARD_URL,
     DASHBOARD_SCHEME,
 )
+from ui.internal_pages import render_internal_page
+from ui.settings import Settings
 from ui.dashboard.internal_page import DASHBOARD_DEFAULT_PORT, register_dashboard_scheme
 from ui.dashboard.internal_page import DashboardSchemeHandler
 from ui.dashboard.bridge import DashboardBridge
@@ -44,25 +47,129 @@ def test_dashboard_homepage_is_internal_and_not_sent_to_search():
     assert not BrowserWindow._is_dashboard_address("arma://other/")
 
 
-def test_closing_the_last_tab_opens_a_fresh_dashboard_tab():
+def test_closing_the_sole_non_dashboard_tab_loads_dashboard_in_the_same_tab():
     view = Mock()
-    view.url.return_value = QUrl("about:blank")
-    placeholder = Mock()
+    view.url.return_value = QUrl("https://www.youtube.com/")
+    closed_urls = []
     browser = SimpleNamespace(
         views=[view],
         current_index=0,
         tabbar=SimpleNamespace(remove_tab=Mock()),
-        _placeholders={view: placeholder},
+        _placeholders={view: Mock()},
         view_layout=SimpleNamespace(removeWidget=Mock()),
         _snapshots={},
         _recorded_history_urls={},
+        _closed_tabs_for_current_session=lambda: closed_urls,
+        navigate=Mock(),
         new_tab=Mock(),
     )
 
     BrowserWindow.request_close_tab(browser, 0)
 
-    assert browser.views == []
-    browser.new_tab.assert_called_once_with(DASHBOARD_URL)
+    assert browser.views == [view]
+    browser.navigate.assert_called_once_with(DASHBOARD_URL)
+    browser.new_tab.assert_not_called()
+    browser.tabbar.remove_tab.assert_not_called()
+    assert closed_urls == ["https://www.youtube.com/"]
+
+
+def test_profile_page_is_an_internal_page_with_switch_create_delete_and_avatar_controls(tmp_path):
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(dark_mode=False, profiles_list=["Guest", "Work"]),
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest", "Work"]),
+    )
+
+    html = render_internal_page(browser, "profile")
+
+    assert "Manage profiles" in html
+    assert "profile_create" in html
+    assert "profile_switch" in html
+    assert "profile_delete" in html
+    assert "profile_avatar_save" in html
+    assert "profile_avatar_remove" in html
+    assert "profile-avatar-canvas" in html
+    assert 'id="profile-modal" hidden' in html
+    assert 'data-edit-avatar="Work"' in html
+    assert 'id="profile-create-open"' in html
+    assert 'href="arma://profile/"' in html
+
+
+def test_profile_page_loads_large_existing_profile_picture_as_thumbnail(tmp_path, monkeypatch):
+    import ui.internal_pages as internal_pages
+
+    data_root = tmp_path / "profile_data"
+    image_path = data_root / "Guest" / "profile" / "image.png"
+    image_path.parent.mkdir(parents=True)
+    image = QImage(512, 512, QImage.Format.Format_RGB32)
+    state = 0x12345678
+    for y in range(image.height()):
+        for x in range(image.width()):
+            state = (1664525 * state + 1013904223) & 0xFFFFFFFF
+            image.setPixel(x, y, 0xFF000000 | (state & 0x00FFFFFF))
+    assert image.save(str(image_path), "PNG")
+    assert image_path.stat().st_size > 420_000
+
+    monkeypatch.setattr(
+        internal_pages,
+        "user_data_path",
+        lambda *parts: str(tmp_path.joinpath(*parts)),
+    )
+    browser = SimpleNamespace(
+        settings=SimpleNamespace(dark_mode=False, profiles_list=["Guest", "Work"]),
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest", "Work"]),
+    )
+
+    document = render_internal_page(browser, "profile")
+
+    assert 'src="data:image/png;base64,' in document
+    assert 'data-avatar-src="data:image/png;base64,' in document
+    assert "avatar-initials" in document  # Work has no picture and uses its fallback.
+
+
+def test_settings_page_links_to_in_browser_profile_manager(tmp_path):
+    settings = Settings(file_path=str(tmp_path / "settings.json"))
+    settings.load_profile_settings()
+    settings.load("Guest")
+    browser = SimpleNamespace(
+        settings=settings,
+        selected_profile="Guest",
+        navbar=SimpleNamespace(profiles=["Guest"]),
+    )
+
+    html = render_internal_page(browser, "settings")
+
+    assert 'href="arma://profile/"' in html
+    assert "Manage profiles" in html
+
+
+def test_remove_profile_atomically_updates_metadata_without_touching_other_profiles(tmp_path):
+    settings_path = str(tmp_path / "settings.json")
+    settings = Settings(file_path=settings_path, profiles_list=["Guest", "Work", "Study"])
+    settings.save("Guest")
+    settings.save("Work")
+    settings.save("Study")
+    Settings.save_profiles(["Guest", "Work", "Study"], settings_path)
+
+    Settings.remove_profile("Work", ["Guest", "Study"], settings_path)
+
+    restored = Settings(file_path=settings_path)
+    restored.load_profile_settings()
+    document, corrupt = Settings._read_document(settings_path)
+    assert not corrupt
+    assert restored.profiles_list == ["Guest", "Study"]
+    assert "Work" not in document
+    assert "Guest" in document
+    assert "Study" in document
+
+
+def test_internal_profile_route_is_whitelisted():
+    from ui.dashboard.internal_page import INTERNAL_PAGE_HOSTS
+
+    assert "profile" in INTERNAL_PAGE_HOSTS
+    assert BrowserWindow._internal_host("arma://profile/") == "profile"
+    assert BrowserWindow._internal_host("arma://untrusted/") is None
 
 
 def test_recently_closed_tabs_are_scoped_to_profile_and_private_session():
@@ -150,8 +257,15 @@ def test_dashboard_actions_are_rejected_from_external_pages():
 
 
 def test_dashboard_state_sync_checks_origin_again_at_execution_time():
-    browser = SimpleNamespace(_dashboard_state=lambda: {"notes": "private text"})
-    page = SimpleNamespace(_dashboard_active=True, runJavaScript=Mock())
+    browser = SimpleNamespace(
+        _dashboard_state=lambda: {"notes": "private text"},
+        _internal_host=lambda url: "dashboard" if url.toString().startswith("arma://dashboard/") else None,
+    )
+    page = SimpleNamespace(
+        _dashboard_active=True,
+        url=lambda: QUrl("arma://dashboard/"),
+        runJavaScript=Mock(),
+    )
 
     BrowserWindow._sync_dashboard_page(browser, page)
 
@@ -166,7 +280,11 @@ def test_dashboard_search_uses_existing_url_resolver():
     query.addQueryItem("payload", json.dumps({"query": "privacy browser", "engine": "default"}))
     action_url = QUrl("arma-action://dispatch/")
     action_url.setQuery(query)
-    page = SimpleNamespace(_dashboard_active=True, runJavaScript=Mock())
+    page = SimpleNamespace(
+        _dashboard_active=True,
+        url=lambda: QUrl("arma://dashboard/"),
+        runJavaScript=Mock(),
+    )
     view = SimpleNamespace(setUrl=Mock(), page=lambda: page)
     browser = SimpleNamespace(
         dashboard_manager=object(),
@@ -339,6 +457,9 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         views=[view],
         current_view=lambda: view,
         _placeholders={view: placeholder},
+        _load_progress_by_view={view: 61},
+        navbar=SimpleNamespace(set_load_progress=Mock()),
+        tabbar=SimpleNamespace(set_loading=Mock()),
         statusBar=lambda: SimpleNamespace(showMessage=Mock()),
     )
 
@@ -348,6 +469,10 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
         url=lambda: QUrl("https://offline.example/"),
         errorString=lambda: "Operation canceled",
     )
+    browser._set_address_load_progress = lambda target, progress: BrowserWindow._set_address_load_progress(
+        browser, target, progress
+    )
+
     BrowserWindow._on_loading_changed(browser, aborted, view, object())
     assert placeholder._load_error is False
     placeholder.loading_title_label.setText.assert_not_called()
@@ -364,6 +489,85 @@ def test_loading_failure_shows_retryable_error_but_ignores_aborted_navigation():
     placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
     placeholder.loading_progress.hide.assert_called_once_with()
     placeholder.retry_button.show.assert_called_once_with()
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert view not in browser._load_progress_by_view
+    browser.tabbar.set_loading.assert_called_once_with(0, False)
+
+def test_background_tab_load_failure_keeps_a_retryable_placeholder():
+    failed_view = Mock()
+    failed_view.url.return_value = QUrl("https://background-offline.example/")
+    active_view = Mock()
+    placeholder = Mock()
+    placeholder._load_error = False
+    placeholder.loading_title_label.setText = Mock()
+    placeholder.loading_detail_label.setText = Mock()
+    placeholder.loading_progress.hide = Mock()
+    placeholder.retry_button.show = Mock()
+    browser = SimpleNamespace(
+        views=[failed_view, active_view],
+        current_index=1,
+        current_view=lambda: active_view,
+        _placeholders={failed_view: placeholder},
+        _load_progress_by_view={failed_view: 72},
+        _renderer_recovery_pending=set(),
+        tabbar=SimpleNamespace(set_loading=Mock()),
+        navbar=SimpleNamespace(set_load_progress=Mock()),
+        statusBar=lambda: SimpleNamespace(showMessage=Mock()),
+    )
+    info = SimpleNamespace(
+        status=lambda: QWebEngineLoadingInfo.LoadStatus.LoadFailedStatus,
+        errorCode=lambda: -105,
+        url=lambda: QUrl("https://background-offline.example/"),
+        errorString=lambda: "Name not resolved",
+    )
+
+    BrowserWindow._on_loading_changed(browser, info, failed_view, object())
+
+    assert placeholder._load_error is True
+    placeholder.loading_title_label.setText.assert_called_once_with("This page didn’t load")
+    placeholder.loading_detail_label.setText.assert_called_once_with("Name not resolved")
+    placeholder.setVisible.assert_called_once_with(False)
+    failed_view.hide.assert_called_once_with()
+    browser.tabbar.set_loading.assert_called_once_with(0, False)
+    assert failed_view not in browser._load_progress_by_view
+
+
+def test_dashboard_template_uses_a_windows_qtwebengine_flicker_fallback(monkeypatch):
+    from ui import browser_window as browser_window_module
+
+    monkeypatch.setattr(browser_window_module.sys, "platform", "win32")
+    html = BrowserWindow._dashboard_template()
+
+    assert '<html lang="en" class="qt-windows-webengine">' in html
+    assert "html.qt-windows-webengine *::before" in html
+    assert "backdrop-filter: none !important" in html
+    assert "-webkit-backdrop-filter: none !important" in html
+
+
+def test_renderer_retry_clears_recovery_gate_before_reloading():
+    page = object()
+    view = Mock()
+    view.page.return_value = page
+    browser = SimpleNamespace(
+        views=[view],
+        _renderer_recovery_pending={view},
+    )
+
+    BrowserWindow._retry_after_renderer_exit(browser, view, page)
+
+    view.reload.assert_called_once_with()
+    assert view not in browser._renderer_recovery_pending
+
+
+def test_browser_does_not_capture_live_webengine_surfaces_for_tab_previews():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "ui" / "browser_window.py").read_text(
+        encoding="utf-8"
+    )
+    assert "view.grab()" not in source
+    assert "def _capture_snapshot(" not in source
+
 
 def test_proxy_panel_is_created_only_when_requested():
     placeholder = Mock()
@@ -390,6 +594,7 @@ def test_dashboard_scheme_has_a_valid_default_port_and_registers_idempotently():
     register_dashboard_scheme()
     scheme = QWebEngineUrlScheme.schemeByName(DASHBOARD_SCHEME)
     assert scheme.defaultPort() == DASHBOARD_DEFAULT_PORT == 443
+    assert scheme.flags() & QWebEngineUrlScheme.Flag.LocalAccessAllowed
 
 def test_external_browser_fallback_opens_only_http_and_https_pages():
     web_view = SimpleNamespace(url=lambda: QUrl("https://game.example/"))
@@ -445,19 +650,20 @@ def test_download_toast_keeps_its_own_opacity_animation():
     harness.deleteLater()
     app.processEvents()
 
-def test_bookmarks_bar_visibility_is_scoped_to_dashboard_tabs():
+def test_show_bookmarks_opens_the_integrated_internal_page():
+    browser = SimpleNamespace(navigate=Mock())
+    BrowserWindow.show_bookmarks(browser)
+    browser.navigate.assert_called_once_with("arma://bookmarks/")
+
+
+def test_bookmarks_menu_stays_available_on_every_page():
     bar = Mock()
-    browser = SimpleNamespace(
-        bookmarks_bar=bar,
-        _is_dashboard_address=BrowserWindow._is_dashboard_address,
-        current_view=Mock(return_value=None),
-    )
+    browser = SimpleNamespace(bookmarks_bar=bar)
 
     BrowserWindow._update_bookmarks_bar_visibility(browser, DASHBOARD_URL)
-    bar.setVisible.assert_called_once_with(True)
-
     BrowserWindow._update_bookmarks_bar_visibility(browser, "https://example.test/")
-    assert bar.setVisible.call_args.args == (False,)
+    assert bar.setVisible.call_count == 2
+    assert all(call.args == (True,) for call in bar.setVisible.call_args_list)
 
 
 def test_cache_bypass_reload_is_limited_to_web_pages():
@@ -487,3 +693,262 @@ def test_cache_bypass_reload_is_limited_to_web_pages():
     BrowserWindow.reload_current_page_bypassing_cache(browser)
     page.triggerAction.assert_not_called()
 
+
+
+
+def test_address_bar_progress_clears_immediately_when_a_load_finishes():
+    view = Mock()
+    browser = SimpleNamespace(
+        views=[view],
+        current_view=lambda: view,
+        _load_progress_by_view={view: 100},
+        navbar=SimpleNamespace(set_load_progress=Mock()),
+    )
+
+    BrowserWindow._set_address_load_progress(browser, view, None)
+
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert view not in browser._load_progress_by_view
+
+
+def test_snap_aligned_geometry_is_detected_for_half_and_quarter_windows():
+    from PySide6.QtCore import QRect
+    from ui.browser_window import _is_snap_aligned_geometry
+
+    available = QRect(0, 0, 1920, 1080)
+    assert _is_snap_aligned_geometry(QRect(960, 0, 960, 1080), available)
+    assert _is_snap_aligned_geometry(QRect(0, 0, 960, 540), available)
+    assert not _is_snap_aligned_geometry(QRect(137, 91, 1200, 770), available)
+
+
+
+def test_tab_strip_has_favicons_loading_feedback_and_drag_reordering():
+    from PySide6.QtWidgets import QApplication
+    from ui.browser_window import CustomTabBar, TAB_HEIGHT
+
+    app = QApplication.instance() or QApplication([])
+    tabs = CustomTabBar()
+    tabs.resize(640, 40)
+    first = tabs.add_tab("First website", make_active=True)
+    tabs.add_tab("Second website", make_active=False)
+    tabs.add_tab("Third website", make_active=False)
+
+    first_tab = tabs.tabs[first]
+    assert first_tab.close_btn.isHidden()
+    tabs.show()
+    app.processEvents()
+
+    assert not first_tab.favicon.pixmap().isNull()
+    assert first_tab.height() == TAB_HEIGHT - 4
+    assert tabs.height() == TAB_HEIGHT + 4
+    assert tabs.scroll.height() == TAB_HEIGHT - 4
+
+    tabs.set_loading(first, True)
+    assert first_tab._loading is True
+    tabs.set_loading(first, False)
+    assert first_tab._loading is False
+
+    reordered = []
+    tabs.tab_reordered.connect(lambda old, new: reordered.append((old, new)))
+    tabs._move_tab_to(tabs.tabs[first], 2)
+    assert [tab._title for tab in tabs.tabs] == [
+        "Second website", "Third website", "First website"
+    ]
+    assert reordered == [(0, 2)]
+    tabs.close()
+    tabs.deleteLater()
+    app.processEvents()
+
+
+
+def test_activating_a_loading_tab_restores_its_progress_in_the_address_bar():
+    loading_view = Mock()
+    loading_view.page.return_value.isLoading.return_value = True
+    browser = SimpleNamespace(
+        current_index=0,
+        views=[loading_view],
+        _load_progress_by_view={loading_view: 62},
+        _placeholders={loading_view: None},
+        _set_tab_visibility=Mock(),
+        _update_bookmarks_bar_visibility=Mock(),
+        navbar=SimpleNamespace(
+            url_bar=SimpleNamespace(setText=Mock()),
+            set_load_progress=Mock(),
+            set_site_connection_state=Mock(),
+            set_bookmark_state=Mock(),
+            back_btn=SimpleNamespace(setEnabled=Mock()),
+            forward_btn=SimpleNamespace(setEnabled=Mock()),
+        ),
+        current_view=lambda: loading_view,
+        _sync_site_connection_action=Mock(),
+        bookmarks_manager=None,
+        _update_navigation_actions=Mock(),
+        tabbar=SimpleNamespace(set_active=Mock()),
+    )
+    browser._set_address_load_progress = lambda target, progress: BrowserWindow._set_address_load_progress(
+        browser, target, progress
+    )
+
+    BrowserWindow._activate(browser, 0)
+    browser.navbar.set_load_progress.assert_called_once_with(62)
+
+
+
+def test_activating_a_loaded_tab_clears_stale_address_progress():
+    loaded_view = Mock()
+    loaded_view.page.return_value.isLoading.return_value = False
+    browser = SimpleNamespace(
+        current_index=0,
+        views=[loaded_view],
+        _load_progress_by_view={loaded_view: 100},
+        _placeholders={loaded_view: None},
+        _set_tab_visibility=Mock(),
+        _update_bookmarks_bar_visibility=Mock(),
+        navbar=SimpleNamespace(
+            url_bar=SimpleNamespace(setText=Mock()),
+            set_load_progress=Mock(),
+            set_site_connection_state=Mock(),
+            set_bookmark_state=Mock(),
+            back_btn=SimpleNamespace(setEnabled=Mock()),
+            forward_btn=SimpleNamespace(setEnabled=Mock()),
+        ),
+        current_view=lambda: loaded_view,
+        _sync_site_connection_action=Mock(),
+        bookmarks_manager=None,
+        _update_navigation_actions=Mock(),
+        tabbar=SimpleNamespace(set_active=Mock()),
+    )
+
+    BrowserWindow._activate(browser, 0)
+
+    browser.navbar.set_load_progress.assert_called_once_with(None)
+    assert loaded_view not in browser._load_progress_by_view
+
+
+
+def test_many_tabs_use_compact_scrolling_and_an_all_tabs_menu():
+    from PySide6.QtWidgets import QApplication
+    from ui.browser_window import CustomTabBar, MIN_TAB_WIDTH, TAB_HEIGHT
+
+    app = QApplication.instance() or QApplication([])
+    tabs = CustomTabBar()
+    tabs.resize(420, TAB_HEIGHT + 4)
+    for index in range(16):
+        tabs.add_tab(f"Long example website title {index + 1}", make_active=index == 0)
+    tabs.show()
+    app.processEvents()
+
+    assert tabs.height() == TAB_HEIGHT + 4
+    assert tabs.btn_left.isVisible()
+    assert tabs.btn_right.isVisible()
+    assert tabs.tab_list_button.isVisible()
+    assert tabs.plus_inside is False
+    assert all(tab.width() == MIN_TAB_WIDTH for tab in tabs.tabs)
+
+    tabs._populate_tab_list_menu()
+    tab_actions = [
+        action for action in tabs.tab_list_menu.actions()
+        if action.text() != "New tab" and not action.isSeparator()
+    ]
+    assert len(tab_actions) == 16
+    assert tab_actions[0].isChecked()
+
+    tabs.close()
+    tabs.deleteLater()
+    app.processEvents()
+
+
+
+def test_custom_tab_bar_constructs_its_all_tabs_button():
+    from PySide6.QtWidgets import QApplication, QToolButton
+    from ui.browser_window import CustomTabBar
+
+    app = QApplication.instance() or QApplication([])
+    tabs = CustomTabBar()
+    assert isinstance(tabs.tab_list_button, QToolButton)
+    assert tabs.tab_list_button.objectName() == "tabListButton"
+    assert not tabs.tab_list_button.icon().isNull()
+    tabs.close()
+    tabs.deleteLater()
+    app.processEvents()
+
+
+def test_native_frameless_style_preserves_resize_and_snap_capabilities():
+    from ui.browser_window import (
+        _WIN_WS_CAPTION,
+        _WIN_WS_MAXIMIZEBOX,
+        _WIN_WS_MINIMIZEBOX,
+        _WIN_WS_SYSMENU,
+        _WIN_WS_THICKFRAME,
+        _with_resizable_frameless_windows_style,
+    )
+
+    original = 0x80000000 | _WIN_WS_CAPTION
+    updated = _with_resizable_frameless_windows_style(original)
+
+    assert updated & _WIN_WS_THICKFRAME
+    assert updated & _WIN_WS_MAXIMIZEBOX
+    assert updated & _WIN_WS_MINIMIZEBOX
+    assert updated & _WIN_WS_SYSMENU
+    assert updated & 0x80000000
+    assert not updated & _WIN_WS_CAPTION
+
+
+def test_resize_handles_cover_and_raise_all_four_window_corners():
+    from PySide6.QtCore import QRect
+    from ui.browser_window import BrowserWindow
+
+    names = (
+        "top", "bottom", "left", "right",
+        "top_left", "top_right", "bottom_left", "bottom_right",
+    )
+    handles = {
+        name: SimpleNamespace(setGeometry=Mock(), setVisible=Mock(), raise_=Mock())
+        for name in names
+    }
+    browser = SimpleNamespace(
+        _resize_handles=handles,
+        width=lambda: 900,
+        height=lambda: 700,
+        isMaximized=lambda: False,
+        isFullScreen=lambda: False,
+    )
+
+    BrowserWindow._update_resize_handles(browser)
+
+    assert handles["bottom_left"].setGeometry.call_args.args[0] == QRect(0, 686, 14, 14)
+    assert handles["bottom_right"].setGeometry.call_args.args[0] == QRect(886, 686, 14, 14)
+    for handle in handles.values():
+        handle.setVisible.assert_called_once_with(True)
+        handle.raise_.assert_called_once_with()
+
+
+
+def test_dashboard_search_engine_uses_custom_glass_dropdown_and_main_settings_cover_preferences():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    dashboard = root / "ui" / "dashboard"
+    html = (dashboard / "index.html").read_text(encoding="utf-8")
+    css = (dashboard / "dashboard.css").read_text(encoding="utf-8")
+    script = (dashboard / "dashboard.js").read_text(encoding="utf-8")
+    settings_source = (root / "ui" / "settings_window.py").read_text(encoding="utf-8")
+
+    assert 'id="search-engine-button"' in html
+    assert 'id="search-engine-menu"' in html
+    assert '<select id="search-engine"' not in html
+    assert ".engine-menu" in css and "backdrop-filter: blur(26px)" in css
+    assert "setEngineMenuOpen" in script and "selectedEngine" in script
+    for control in (
+        "dashboard_wallpaper_combo",
+        "dashboard_overlay_slider",
+        "dashboard_glass_slider",
+        "dashboard_blur_slider",
+        "dashboard_accent_input",
+        "dashboard_animations_checkbox",
+        "dashboard_density_combo",
+        "dashboard_focus_slider",
+        "dashboard_break_slider",
+        "dashboard_widget_size_combos",
+    ):
+        assert control in settings_source

@@ -1,4 +1,5 @@
 import importlib
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -75,6 +76,12 @@ def test_tor_runner_rejects_missing_local_bundle_without_starting_process(monkey
 def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_path):
     tor_module = importlib.import_module("proxy.tor")
     runner = tor_module.TorRunner(9050, 9051, 9053)
+    bundle_root = tmp_path / "tor"
+    bundle_root.mkdir()
+    tor_binary = bundle_root / ("tor.exe" if os.name == "nt" else "tor")
+    tor_binary.touch()
+    runner.tor_path = str(tor_binary)
+    runner.path_set = True
     runner.geoip_path = str(tmp_path / "data" / "geoip")
     runner.geoip6_path = str(tmp_path / "data" / "geoip6")
     runner.Log = "notice stdout"
@@ -86,8 +93,8 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     runner.ClientUseIPv4 = 1
     runner.ClientUseIPv6 = 0
     runner.bridge = True
-    runner.bridges = "obfs4 192.0.2.10:443 fingerprint cert=example"
-    lyrebird_path = tmp_path / "tor" / "pluggable_transports" / "lyrebird"
+    runner.bridges = "obfs4 192.0.2.10:443 0123456789ABCDEF0123456789ABCDEF01234567 cert=example"
+    lyrebird_path = bundle_root / "pluggable_transports" / ("lyrebird.exe" if os.name == "nt" else "lyrebird")
     lyrebird_path.parent.mkdir(parents=True)
     lyrebird_path.touch()
     runner.lyrebird_path = str(lyrebird_path)
@@ -98,10 +105,60 @@ def test_tor_configuration_includes_configured_ports_and_bridge_settings(tmp_pat
     assert "ControlPort 127.0.0.1:9051" in config
     assert "DNSPort 127.0.0.1:9053" in config
     assert "UseBridges 1" in config
-    plugin_command = runner._torrc_quote(runner.lyrebird_path)
-    assert f"ClientTransportPlugin obfs4 exec {plugin_command}" in config
+    plugin_lines = [
+        line for line in config.splitlines()
+        if line.startswith("ClientTransportPlugin meek_lite,obfs4,snowflake,webtunnel exec ")
+    ]
+    assert len(plugin_lines) == 1
+    # TorManager quotes the transport path only when needed; asserting the
+    # real selected path covers both space-free POSIX paths and quoted Windows paths.
+    assert runner.lyrebird_path in plugin_lines[0]
 
 
 def test_invalid_port_is_not_reported_as_available():
     proxy_module = importlib.import_module("proxy.proxy")
     assert proxy_module.is_port_free("127.0.0.1", 65536) is False
+
+
+
+def test_tor_bundle_cancellation_closes_registered_response():
+    from unittest.mock import Mock
+
+    from proxy.updater import CancellationToken, DownloadCancelledError
+
+    token = CancellationToken()
+    response = Mock()
+    token.register_response(response)
+
+    token.set()
+
+    response.close.assert_called_once_with()
+    with pytest.raises(DownloadCancelledError):
+        token.check()
+
+
+def test_cancelled_tor_version_lookup_does_not_start_network_request(monkeypatch):
+    import importlib
+
+    updater = importlib.import_module("proxy.updater")
+    token = updater.CancellationToken()
+    token.set()
+    from unittest.mock import Mock
+    get = Mock(side_effect=AssertionError("network must not start after cancellation"))
+    monkeypatch.setattr(updater.requests, "get", get)
+
+    with pytest.raises(updater.DownloadCancelledError):
+        updater.get_tor_versions(cancel_event=token)
+    get.assert_not_called()
+
+
+def test_cancelled_bundle_extraction_exits_before_touching_archive(tmp_path):
+    import threading
+
+    from proxy.utils import extract_tar_gz_file
+
+    cancelled = threading.Event()
+    cancelled.set()
+    with pytest.raises(InterruptedError, match="cancelled"):
+        extract_tar_gz_file(tmp_path / "not-created.tar.gz", tmp_path / "bundle", cancel_event=cancelled)
+    assert not (tmp_path / "bundle").exists()

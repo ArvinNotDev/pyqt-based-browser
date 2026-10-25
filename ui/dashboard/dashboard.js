@@ -12,6 +12,7 @@
   let focusRunning = false;
   let toastTimer = 0;
   let dashboardBridge = null;
+  let selectedEngine = 'default';
   const queuedActions = [];
   const byId = id => document.getElementById(id);
   const engines = [
@@ -49,12 +50,26 @@
     document.body.classList.toggle('compact', state.density === 'compact');
     document.body.classList.toggle('no-motion', state.animations === false);
     document.body.classList.toggle('light', state.dark_mode === false);
+    document.documentElement.classList.toggle('light', state.dark_mode === false);
+    applyViewportMode();
     for (const name of ['bookmarks', 'recent', 'closed', 'notes', 'focus']) {
       const element = byId(`${name}-widget`);
-      if (element) element.hidden = Boolean(state.widgets && state.widgets[name] === false);
+      if (!element) continue;
+      element.hidden = Boolean(state.widgets && state.widgets[name] === false);
+      const size = (state.widget_sizes || {})[name] || 'standard';
+      element.classList.remove('size-compact', 'size-standard', 'size-wide');
+      element.classList.add(`size-${['compact', 'standard', 'wide'].includes(size) ? size : 'standard'}`);
     }
     applyWidgetOrder();
   }
+
+  function applyViewportMode() {
+    const height = window.innerHeight || document.documentElement.clientHeight || 720;
+    document.body.classList.toggle('viewport-compact', height < 760);
+    document.body.classList.toggle('viewport-tight', height < 600);
+  }
+
+  window.addEventListener('resize', applyViewportMode, { passive: true });
 
   function applyWidgetOrder() {
     const host = byId('lower-grid');
@@ -81,6 +96,7 @@
       handle.classList.add('widget-drag-handle');
       handle.draggable = true;
       handle.title = 'Drag to rearrange this card';
+      handle.setAttribute('aria-label', 'Drag to rearrange this widget');
       handle.addEventListener('dragstart', event => {
         if (event.target.closest('button, a, input, textarea, select')) {
           event.preventDefault();
@@ -240,7 +256,7 @@
     if (!Array.isArray(items) || items.length === 0) {
       const empty = document.createElement('div'); empty.className = 'link-empty'; empty.textContent = emptyText; host.appendChild(empty); return;
     }
-    items.slice(0, 6).forEach(item => {
+    items.slice(0, 4).forEach(item => {
       const button = document.createElement('a');
       button.href = '#'; button.className = 'link-item';
       button.appendChild(favicon(item.url, (item.title || '↗').charAt(0).toUpperCase()));
@@ -296,14 +312,51 @@
     });
   }
 
+  function setEngineMenuOpen(open, focusSelection = false) {
+    const button = byId('search-engine-button');
+    const menu = byId('search-engine-menu');
+    menu.hidden = !open;
+    button.setAttribute('aria-expanded', String(open));
+    if (open && focusSelection) {
+      const selected = menu.querySelector('[aria-selected="true"]');
+      (selected || menu.querySelector('[role="option"]'))?.focus();
+    }
+  }
+
   function renderEngines() {
-    const select = byId('search-engine');
-    select.replaceChildren();
-    engines.forEach(([url, label]) => {
-      const option = document.createElement('option'); option.value = url; option.textContent = label;
-      if (url === 'default') option.selected = true;
-      select.appendChild(option);
+    const button = byId('search-engine-button');
+    const label = byId('search-engine-label');
+    const menu = byId('search-engine-menu');
+    menu.replaceChildren();
+    if (!engines.some(([url]) => url === selectedEngine)) selectedEngine = 'default';
+    label.textContent = engines.find(([url]) => url === selectedEngine)?.[1] || 'Browser default';
+
+    engines.forEach(([url, title]) => {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'engine-option';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', String(url === selectedEngine));
+      option.dataset.engine = url;
+
+      const check = document.createElement('span');
+      check.className = 'engine-option-check';
+      check.setAttribute('aria-hidden', 'true');
+      check.textContent = url === selectedEngine ? '✓' : '';
+
+      const text = document.createElement('span');
+      text.className = 'engine-option-label';
+      text.textContent = title;
+      option.append(check, text);
+      option.addEventListener('click', () => {
+        selectedEngine = url;
+        renderEngines();
+        setEngineMenuOpen(false);
+        button.focus();
+      });
+      menu.appendChild(option);
     });
+    setEngineMenuOpen(false);
   }
 
   function renderWallpaperChoices() {
@@ -358,7 +411,44 @@
     event.preventDefault();
     const query = byId('search-input').value.trim();
     if (!query) return;
-    send('search', { query, engine: byId('search-engine').value });
+    send('search', { query, engine: selectedEngine });
+  });
+  byId('search-engine-button').addEventListener('click', () => {
+    setEngineMenuOpen(byId('search-engine-menu').hidden, true);
+  });
+  byId('search-engine-button').addEventListener('keydown', event => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setEngineMenuOpen(true, true);
+    }
+  });
+  byId('search-engine-menu').addEventListener('keydown', event => {
+    const options = [...byId('search-engine-menu').querySelectorAll('[role="option"]')];
+    if (!options.length) return;
+    const current = options.indexOf(document.activeElement);
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setEngineMenuOpen(false);
+      byId('search-engine-button').focus();
+    } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      options[(current + delta + options.length) % options.length].focus();
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      options[event.key === 'Home' ? 0 : options.length - 1].focus();
+    }
+  });
+  document.addEventListener('pointerdown', event => {
+    if (event.target instanceof Element && !event.target.closest('#engine-picker')) {
+      setEngineMenuOpen(false);
+    }
+  });
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && !byId('search-engine-menu').hidden) {
+      setEngineMenuOpen(false);
+      byId('search-engine-button').focus();
+    }
   });
   byId('clear-search').addEventListener('click', () => { byId('search-input').value = ''; byId('search-input').focus(); });
   byId('add-shortcut').addEventListener('click', () => openShortcutDialog(-1));
