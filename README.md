@@ -1,8 +1,49 @@
 # ARMA Browser
 
-ARMA Browser is a tabbed desktop browser built with Python, PySide6, and Qt WebEngine. It brings everyday browsing controls, profile-based settings, bookmarks, history, a download center, and an optional local proxy/Tor interface into one desktop app.
+<p align="center">
+  <strong>A modern, profile-aware desktop browser built with Python, PySide6, and Qt WebEngine.</strong>
+</p>
 
-This README documents the features available in the source and the current release limits. ARMA Browser is an actively developed beta. A Windows x64 one-file executable is provided through GitHub Releases; it is unsigned and should be treated as pre-release software.
+<p align="center">
+  <a href="https://github.com/ArvinNotDev/pyqt-based-browser/actions/workflows/ci.yml"><img src="https://github.com/ArvinNotDev/pyqt-based-browser/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI status"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%E2%80%933.13-3776AB?logo=python&logoColor=white" alt="Python 3.10–3.13">
+  <img src="https://img.shields.io/badge/UI-PySide6%20%2B%20Qt%20WebEngine-41CD52" alt="PySide6 and Qt WebEngine">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License"></a>
+</p>
+
+ARMA Browser brings everyday web navigation, a customizable start page, profile-based settings and data, downloads, and optional proxy/Tor tools into one desktop application. The redesigned browser chrome includes light and dark themes, a compact navigation workspace, and integrated pages for common browser tasks.
+
+> **Beta software:** ARMA Browser is under active development. The Windows x64 one-file executable is unsigned, has no automatic updater, and should be treated as pre-release software. Read the limitations and privacy notes below before relying on it.
+
+## Highlights
+
+- **Modern browser chrome:** custom title bar, responsive tabs, unified address/search field, and coordinated light/dark themes.
+- **Personal start page:** configurable shortcuts, bookmarks, recent and recently closed pages, notes, focus timer, wallpaper, and reorderable widgets.
+- **Profiles and sessions:** separate profile preferences and browser data, profile management, and optional restoration of normal browsing sessions.
+- **Built-in browser tools:** downloads, history, site permissions, find-in-page, zoom, developer tools, PDF export, printing, and page screenshots.
+- **Privacy controls:** private browsing, profile-scoped data, and a lightweight host-based ad/tracker blocker.
+- **Optional proxy/Tor integration:** proxy configuration, host rules, route exclusions, and bridge-related tools. Actual Tor connectivity depends on local configuration and network access.
+
+## Quick links
+
+- [Download the latest Windows beta](https://github.com/ArvinNotDev/pyqt-based-browser/releases)
+- [Install from source](#install-from-source)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Packaging and release process](docs/PACKAGING.md)
+- [Release checklist](docs/RELEASE_CHECKLIST.md)
+- [Report a bug or regression](https://github.com/ArvinNotDev/pyqt-based-browser/issues)
+
+## Contents
+
+- [Features](#what-arma-browser-includes)
+- [Keyboard shortcuts](#keyboard-shortcuts)
+- [Support and prerequisites](#support-and-prerequisites)
+- [Install from source](#install-from-source)
+- [Dependencies and development checks](#dependencies-and-development-checks)
+- [Windows beta executable](#windows-beta-executable)
+- [Source releases](#source-releases)
+- [Scope and troubleshooting](#current-scope-and-troubleshooting)
+- [License](#license)
 
 ## What ARMA Browser includes
 
